@@ -1,0 +1,401 @@
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&family=Montserrat:wght@600;700;800&display=swap');
+
+/* ═══════════════════════════════════════════════════════════════
+   SICABER — SISTEMA DE TEMAS GLOBAL
+   Todas las pantallas usan estas variables. El selector
+   [data-theme] se aplica en <html> via ThemeContext.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── MODO OSCURO (default) ─────────────────────────────────────*/
+:root,
+[data-theme="dark"] {
+  --color-green:        #5DBB63;
+  --color-green-dark:   #3d9142;
+  --color-green-glow:   rgba(93,187,99,0.18);
+  --color-green-btn:    linear-gradient(135deg, #5DBB63, #3d9142);
+  --color-red:          #E53935;
+  --color-red-dark:     #B71C1C;
+  --color-red-light:    #FFCDD2;
+  --sidebar-width:      210px;
+
+  /* Fondos */
+  --bg-body:       #0f0f0f;
+  --bg-surface:    #1a1a1a;
+  --bg-surface-2:  #242424;
+  --bg-surface-3:  #2a2a2a;
+  --bg-hover:      rgba(255,255,255,0.04);
+  --bg-topbar:     rgba(20,20,20,0.96);
+  --bg-input:      #242424;
+
+  /* Bordes */
+  --border:        rgba(255,255,255,0.08);
+  --border-2:      rgba(255,255,255,0.05);
+  --border-input:  rgba(255,255,255,0.12);
+
+  /* Texto */
+  --text-primary:  #f0ece4;
+  --text-secondary:#a09880;
+  --text-muted:    #6b6355;
+  --text-on-green: #ffffff;
+
+  /* Modal */
+  --modal-bg:      #1a1a1a;
+  --modal-overlay: rgba(0,0,0,0.65);
+
+  /* Sombras */
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.35);
+  --shadow-md:  0 4px 20px rgba(0,0,0,0.45);
+  --shadow-lg:  0 8px 40px rgba(0,0,0,0.55);
+
+  /* Tablas */
+  --tbl-head-bg:  #1e1e1e;
+  --tbl-head-clr: #a09880;
+  --tbl-row-clr:  #f0ece4;
+  --tbl-border:   rgba(255,255,255,0.05);
+  --tbl-hover:    rgba(93,187,99,0.06);
+
+  /* Stat cards */
+  --stat-card-bg:     #252525;
+  --stat-card-shadow: 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.07);
+
+  /* Toggle */
+  --toggle-bg:    #2a2a2a;
+  --toggle-thumb: #1e1e1e;
+}
+
+/* ── MODO CLARO ────────────────────────────────────────────────*/
+[data-theme="light"] {
+  --color-green:       #3a9e42;
+  --color-green-dark:  #2d7a34;
+  --color-green-glow:  rgba(58,158,66,0.12);
+  --color-green-btn:   linear-gradient(135deg, #4CAF50, #2E7D32);
+  --color-red:          #E53935;
+  --color-red-dark:     #B71C1C;
+  --color-red-light:    #FFCDD2;
+
+  /* Fondos */
+  --bg-body:       #f0f2f5;
+  --bg-surface:    #ffffff;
+  --bg-surface-2:  #f8f9fb;
+  --bg-surface-3:  #eef0f4;
+  --bg-hover:      rgba(0,0,0,0.04);
+  --bg-topbar:     rgba(255,255,255,0.97);
+  --bg-input:      #ffffff;
+
+  /* Bordes */
+  --border:        rgba(0,0,0,0.10);
+  --border-2:      rgba(0,0,0,0.06);
+  --border-input:  rgba(0,0,0,0.15);
+
+  /* Texto */
+  --text-primary:  #1a1a1a;
+  --text-secondary:#4a4a4a;
+  --text-muted:    #777777;
+  --text-on-green: #ffffff;
+
+  /* Modal */
+  --modal-bg:      #ffffff;
+  --modal-overlay: rgba(0,0,0,0.45);
+
+  /* Sombras */
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.08);
+  --shadow-md:  0 4px 20px rgba(0,0,0,0.10);
+  --shadow-lg:  0 8px 40px rgba(0,0,0,0.13);
+
+  /* Tablas */
+  --tbl-head-bg:  #eef0f4;
+  --tbl-head-clr: #4a4a4a;
+  --tbl-row-clr:  #1a1a1a;
+  --tbl-border:   rgba(0,0,0,0.07);
+  --tbl-hover:    rgba(58,158,66,0.06);
+
+  /* Stat cards */
+  --stat-card-bg:     #ffffff;
+  --stat-card-shadow: 0 2px 12px rgba(0,0,0,0.08);
+
+  /* Toggle */
+  --toggle-bg:    #e0e0e0;
+  --toggle-thumb: #ffffff;
+}
+
+/* ── BASE RESET ────────────────────────────────────────────────*/
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { transition: background 0.5s ease; }
+body {
+  font-family: 'Open Sans', sans-serif;
+  background: var(--bg-body);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.5s ease, color 0.4s ease;
+}
+h1,h2,h3,h4,h5,h6 { font-family: 'Montserrat', sans-serif; }
+button  { cursor: pointer; font-family: 'Open Sans', sans-serif; }
+input, select, textarea { font-family: 'Open Sans', sans-serif; }
+a { text-decoration: none; color: inherit; }
+
+/* ── THEME TOGGLE BUTTON ──────────────────────────────────────*/
+.theme-toggle-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer; flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.theme-toggle-btn:hover {
+  background: var(--color-green-glow);
+  border-color: var(--color-green);
+  color: var(--color-green);
+  transform: scale(1.08);
+}
+.theme-toggle-btn svg { transition: transform 0.4s ease; }
+.theme-toggle-btn:hover svg { transform: rotate(22deg); }
+
+/* ── BTN-ADD global (verde siempre vibrante) ──────────────────*/
+.btn-add, .btn-search {
+  background: var(--color-green-btn) !important;
+  border: none; border-radius: 10px;
+  color: #ffffff !important;
+  font-weight: 700;
+  transition: all 0.2s ease;
+  box-shadow: 0 3px 12px rgba(76,175,80,0.32);
+}
+.btn-add:hover, .btn-search:hover {
+  filter: brightness(1.08);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76,175,80,0.45);
+}
+
+/* ── SHARED PAGE HEADER ──────────────────────────────────────*/
+.page-title    { color: var(--text-primary) !important; }
+.page-subtitle { color: var(--text-secondary) !important; }
+
+/* ── SHARED TABLE ───────────────────────────────────────────*/
+.insumos-card, .mod-form-card, .proveedor-card,
+.compras-card, .pedidos-card, .ventas-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: background 0.5s ease, border-color 0.5s ease;
+}
+.insumos-table th, .table-head th, thead th {
+  background: var(--tbl-head-bg) !important;
+  color: var(--tbl-head-clr) !important;
+  border-bottom: 1px solid var(--tbl-border) !important;
+}
+.insumos-table td, tbody td {
+  color: var(--tbl-row-clr) !important;
+  border-bottom: 1px solid var(--tbl-border) !important;
+}
+tbody tr:hover td { background: var(--tbl-hover) !important; }
+
+/* ── SHARED INPUTS ──────────────────────────────────────────*/
+.search-input {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+}
+.search-input::placeholder { color: var(--text-muted) !important; }
+.search-input:focus {
+  border-color: var(--color-green) !important;
+  box-shadow: 0 0 0 3px var(--color-green-glow) !important;
+}
+
+/* ── SHARED MODAL ───────────────────────────────────────────*/
+.modal-overlay { background: var(--modal-overlay) !important; }
+.modal-box {
+  background: var(--modal-bg) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+.modal-box h3 { color: var(--text-primary) !important; }
+.modal-box p  { color: var(--text-secondary) !important; }
+.modal-detail {
+  background: var(--bg-surface-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-primary) !important;
+}
+.modal-estado-select label { color: var(--text-secondary) !important; }
+.modal-estado-select select {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ── BTN-CANCEL ────────────────────────────────────────────*/
+.btn-cancel {
+  background: var(--bg-surface-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
+.btn-cancel:hover {
+  background: var(--bg-surface-3) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ── FORM GROUP LABELS & INPUTS (admin forms) ──────────────*/
+.mod-form-group label,
+.form-group label {
+  color: var(--text-secondary) !important;
+}
+.mod-form-group input,
+.mod-form-group select,
+.mod-form-group textarea,
+.form-group input,
+.form-group select,
+.form-group textarea {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+}
+.mod-form-group input::placeholder,
+.form-group input::placeholder { color: var(--text-muted) !important; }
+.mod-form-group input:focus,
+.mod-form-group select:focus,
+.mod-form-group textarea:focus {
+  border-color: var(--color-green) !important;
+  box-shadow: 0 0 0 3px var(--color-green-glow) !important;
+}
+.mod-form-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.mod-form-footer {
+  border-top-color: var(--border) !important;
+}
+
+/* ── EMPTY STATE ─────────────────────────────────────────── */
+.empty-state h3 { color: var(--text-primary) !important; }
+.empty-state p  { color: var(--text-secondary) !important; }
+
+/* ── BREADCRUMB ──────────────────────────────────────────── */
+.breadcrumb      { color: var(--text-secondary) !important; }
+.breadcrumb-link { color: var(--color-green) !important; }
+.breadcrumb-nav  { color: var(--text-secondary) !important; }
+.breadcrumb-nav em { color: var(--text-muted) !important; }
+
+/* ── VER (detail) PAGES ─────────────────────────────────── */
+.ver-header-left h1 { color: var(--text-primary) !important; }
+.ver-section {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+}
+.ver-section__title { color: var(--text-secondary) !important; }
+.field-row .label   { color: var(--text-muted) !important; }
+.field-row .value   { color: var(--text-primary) !important; }
+
+/* ── PROD-CARD ───────────────────────────────────────────── */
+.prod-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+}
+.prod-card__name  { color: var(--text-primary) !important; }
+.prod-card__cat   { color: var(--text-secondary) !important; }
+.prod-card__price { color: var(--text-primary) !important; }
+.prod-card__foot  { border-top-color: var(--border) !important; }
+
+/* ── USER CELL ───────────────────────────────────────────── */
+.user-cell__name { color: var(--text-primary) !important; }
+.user-cell__sub  { color: var(--text-secondary) !important; }
+
+/* ── ESTADO INACTIVO badge ───────────────────────────────── */
+.estado-inactivo {
+  background: var(--bg-surface-3) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border) !important;
+}
+
+/* ── TOGGLE SWITCH ───────────────────────────────────────── */
+.toggle-track {
+  background: var(--toggle-bg) !important;
+}
+.toggle-thumb {
+  background: var(--toggle-thumb) !important;
+}
+
+/* ── GLOBAL TRANSITIONS — suaves al cambiar tema ──────────── */
+/* 0.5s para un cambio agradable y no brusco */
+*, *::before, *::after {
+  transition:
+    background-color 0.5s ease,
+    border-color     0.5s ease,
+    color            0.4s ease,
+    box-shadow       0.5s ease !important;
+}
+/* Botones e interacciones: transición rápida para hover/click */
+button, a, [role="button"] {
+  transition:
+    background-color 0.5s ease,
+    border-color     0.5s ease,
+    color            0.4s ease,
+    box-shadow       0.5s ease,
+    transform        0.15s ease,
+    opacity          0.15s ease !important;
+}
+
+/* ── LIGHT MODE CRITICAL — tabla tbody siempre blanco ─────────── */
+/* Cubre todos los módulos admin en modo claro sin afectar modo oscuro */
+[data-theme="light"] .insumos-table tbody tr,
+[data-theme="light"] .data-table tbody tr,
+[data-theme="light"] table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .insumos-table tbody tr:hover,
+[data-theme="light"] .data-table tbody tr:hover,
+[data-theme="light"] table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}
+[data-theme="light"] .insumos-card,
+[data-theme="light"] .table-wrap,
+[data-theme="light"] .mod-form-card {
+  background: #ffffff !important;
+}
+[data-theme="light"] .insumos-table thead tr,
+[data-theme="light"] .data-table thead tr,
+[data-theme="light"] table thead tr {
+  background: #f0f2f5 !important;
+}
+
+/* ── SELECT OPTIONS — texto visible en ambos modos ───────── */
+/* Los <option> heredan estilos del OS en algunos navegadores */
+select option {
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+}
+[data-theme="light"] select option {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+[data-theme="dark"] select option {
+  background: #242424;
+  color: #f0ece4;
+}
+
+/* Inputs, selects y textareas sin background explícito */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([style*="background"]),
+select:not([style*="background"]),
+textarea:not([style*="background"]) {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border-color: var(--border-input);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── STAT CARDS — más iluminación en modo oscuro ─────────── */
+/* Aplica en todos los módulos: Ventas, Devoluciones,
+   Historial Compras, Fichas Técnicas                         */
+[data-theme="dark"] .stat-card-bright,
+[data-theme="dark"] [style*="borderTop"][style*="borderRadius:12"] {
+  background: #252525 !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+}
+[data-theme="light"] [style*="borderTop"][style*="borderRadius:12"] {
+  background: #ffffff !important;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07) !important;
+}

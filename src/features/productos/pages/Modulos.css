@@ -1,0 +1,229 @@
+/* Reutiliza los estilos de InsumosPage.css — este archivo agrega solo lo específico */
+
+.prod-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
+  margin-top: 4px;
+}
+
+.prod-card {
+  background: var(--bg-surface);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.07);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  transition: all 0.22s;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+.prod-card:hover { transform: translateY(-4px); box-shadow: 0 10px 28px rgba(0,0,0,0.11); }
+
+.prod-card__img {
+  width: 100%; height: 150px; object-fit: cover;
+}
+.prod-card__placeholder {
+  width: 100%; height: 150px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg,#f5f5f5,#eee);
+  font-size: 44px;
+}
+.prod-card__body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.prod-card__name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.prod-card__cat  { font-size: 12px; color: var(--text-secondary); }
+.prod-card__price { font-size: 16px; font-weight: 800; color: var(--text-primary); margin-top: auto; }
+.prod-card__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; border-top: 1px solid var(--border);
+}
+
+/* Form pages */
+.mod-form-card {
+  background: var(--bg-surface);
+  border-radius: 14px;
+  padding: 28px 32px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+}
+.mod-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.mod-form-grid .full { grid-column: 1 / -1; }
+.mod-form-group { display: flex; flex-direction: column; gap: 6px; }
+.mod-form-group label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.mod-form-group input,
+.mod-form-group select,
+.mod-form-group textarea {
+  padding: 10px 14px;
+  border: 1.5px solid var(--border-input);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  background: #ffffff;
+}
+.mod-form-group input:focus,
+.mod-form-group select:focus,
+.mod-form-group textarea:focus { border-color: #4CAF50; background: #ffffff; }
+.mod-form-group textarea { resize: vertical; min-height: 90px; }
+.mod-form-footer {
+  display: flex; justify-content: flex-end; gap: 12px;
+  border-top: 1px solid var(--border); padding-top: 20px;
+}
+
+.img-preview {
+  margin-top: 8px; border-radius: 10px; overflow: hidden;
+  width: 100px; height: 100px; border: 2px solid #4CAF50;
+}
+.img-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+.required { color: #E53935; }
+
+.toggle-wrap { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.toggle-label-text { font-size: 13px; font-weight: 600; }
+.toggle-label-text.on  { color: #2E7D32; }
+.toggle-label-text.off { color: var(--text-secondary); }
+
+/* inline switch (reuse toggle-btn from InsumosPage) */
+.switch-wrap { display: flex; align-items: center; gap: 10px; padding-top: 4px; }
+
+.breadcrumb-nav { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; display: flex; align-items: center; gap: 6px; }
+.breadcrumb-nav span { cursor: pointer; color: #4CAF50; font-weight: 600; }
+.breadcrumb-nav span:hover { text-decoration: underline; }
+.breadcrumb-nav em { color: var(--text-muted); }
+
+.btn-confirm-primary {
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #4CAF50, #388E3C);
+  border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+  color: white; transition: all 0.2s; box-shadow: 0 4px 12px rgba(76,175,80,0.3);
+}
+.btn-confirm-primary:hover { transform: translateY(-1px); }
+
+.estado-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 20px;
+  font-size: 12px; font-weight: 600;
+}
+.estado-badge.activo  { background: #E8F5E9; color: #2E7D32; }
+.estado-badge.inactivo{ background: var(--bg-surface-3); color: var(--text-secondary); }
+
+/* ════════════════════════════════════════════════════════════
+   THEME PATCH — reemplaza colores hardcoded con variables CSS
+   Aplica tanto en dark como en light gracias a global.css vars
+   ════════════════════════════════════════════════════════════ */
+
+/* Page header */
+.page-title    { color: var(--text-primary) !important; }
+.page-subtitle { color: var(--text-secondary) !important; }
+
+/* Search input */
+.search-input {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.search-input::placeholder { color: var(--text-muted) !important; }
+.search-input:focus {
+  border-color: var(--color-green) !important;
+  box-shadow: 0 0 0 3px var(--color-green-glow) !important;
+}
+.search-icon { color: var(--text-muted) !important; }
+
+/* Table card container */
+.insumos-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+/* Table head */
+.insumos-table thead tr {
+  background: var(--tbl-head-bg) !important;
+  border-bottom-color: var(--tbl-border) !important;
+}
+.insumos-table th { color: var(--tbl-head-clr) !important; }
+.insumos-table tbody tr { border-bottom-color: var(--tbl-border) !important; }
+.insumos-table tbody tr:hover { background: var(--tbl-hover) !important; }
+.insumos-table td { color: var(--tbl-row-clr) !important; }
+.td-nombre { color: var(--text-primary) !important; }
+.td-id     { color: var(--text-muted) !important; }
+.td-muted  { color: var(--text-muted) !important; }
+
+/* Empty state */
+.empty-icon { background: var(--bg-surface-3) !important; color: var(--text-secondary) !important; }
+.empty-state h3 { color: var(--text-primary) !important; }
+.empty-state p  { color: var(--text-secondary) !important; }
+
+/* Modal */
+.modal-overlay { background: var(--modal-overlay) !important; }
+.modal-box {
+  background: var(--modal-bg) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+.modal-box h3   { color: var(--text-primary) !important; }
+.modal-box p    { color: var(--text-secondary) !important; }
+.modal-detail   { background: var(--bg-surface-2) !important; border-color: var(--border) !important; color: var(--text-primary) !important; }
+
+/* Buttons */
+.btn-add, .btn-add-first, .btn-search {
+  background: var(--color-green-btn) !important;
+  color: #fff !important;
+  box-shadow: 0 3px 12px rgba(76,175,80,0.35) !important;
+}
+.btn-cancel {
+  background: var(--bg-surface-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
+.btn-cancel:hover { background: var(--bg-surface-3) !important; color: var(--text-primary) !important; }
+.btn-confirm-primary { background: var(--color-green-btn) !important; }
+.btn-outline-green {
+  border-color: var(--color-green) !important;
+  color: var(--color-green) !important;
+}
+
+/* User cell */
+.user-cell__name { color: var(--text-primary) !important; }
+.user-cell__user { color: var(--text-muted) !important; }
+
+/* Toggle thumb adapts */
+.toggle-thumb { background: var(--toggle-thumb) !important; }
+
+/* Estado inactivo badge */
+.estado-inactivo {
+  background: var(--bg-surface-3) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border) !important;
+}
+
+/* Breadcrumbs */
+.breadcrumb      { color: var(--text-secondary) !important; }
+.breadcrumb-link { color: var(--color-green) !important; }
+
+/* search-results-info */
+.search-results-info { background: var(--bg-surface-2) !important; border-color: var(--border) !important; color: var(--text-secondary) !important; }
+
+/* ── LIGHT MODE — tbody rows explicit white (fixes dark table rows) ── */
+[data-theme="light"] .insumos-table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .insumos-table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}
+[data-theme="light"] .insumos-card {
+  background: #ffffff !important;
+}
+[data-theme="light"] .table-wrap {
+  background: #ffffff !important;
+}
+[data-theme="light"] .data-table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .data-table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}
