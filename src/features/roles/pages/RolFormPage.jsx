@@ -8,7 +8,7 @@ import './Roles.css';
 const RolFormPage = ({ mode }) => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { create, update } = useRoles();
+ const { roles, create, update } = useRoles();
   const modulos = rolesService.getModulosPermisos();
   const colores = rolesService.COLORES;
 
@@ -53,23 +53,55 @@ const RolFormPage = ({ mode }) => {
     }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      if (mode === 'edit') {
-        await update(id, { nombre: form.nombre, descripcion: form.descripcion, permisos: form.permisos });
-      } else {
-        await create({ nombre: form.nombre, descripcion: form.descripcion, permisos: form.permisos });
-      }
-      navigate('/admin/roles');
-    } catch (err) {
-      setError(err.message || 'Error al guardar');
-      setLoading(false);
-    }
-  };
+ const handleSubmit = async (e) => {
+  e.preventDefault();
+  setError('');
 
+  const nombreLimpio = form.nombre.trim();
+
+  // Regla: siempre debe tener nombre
+  if (!nombreLimpio) {
+    setError('El nombre del rol es obligatorio.');
+    return;
+  }
+
+  // Regla: el nombre solo puede tener letras y números
+  const soloLetrasYNumeros = /^[a-zA-Z0-9À-ÿñÑ\s]+$/;
+  if (!soloLetrasYNumeros.test(nombreLimpio)) {
+    setError('El nombre del rol solo puede contener letras y números.');
+    return;
+  }
+
+  // Regla: no se puede repetir el nombre de un rol existente
+  const nombreDuplicado = roles.some(r =>
+    r.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase() &&
+    String(r.id) !== String(id) // se excluye a sí mismo cuando estás editando
+  );
+  if (nombreDuplicado) {
+    setError('Ya existe un rol con ese nombre.');
+    return;
+  }
+
+  // Regla: no se puede crear/dejar un rol sin permisos
+  if (form.permisos.length === 0) {
+    setError('Debes seleccionar al menos un permiso para el rol.');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    if (mode === 'edit') {
+      await update(id, { nombre: nombreLimpio, descripcion: form.descripcion, permisos: form.permisos });
+      navigate('/admin/roles', { state: { success: `Rol "${nombreLimpio}" actualizado correctamente.` } });
+    } else {
+      await create({ nombre: nombreLimpio, descripcion: form.descripcion, permisos: form.permisos });
+      navigate('/admin/roles', { state: { success: `Rol "${nombreLimpio}" creado correctamente.` } });
+    }
+  } catch (err) {
+    setError(err.message || 'Error al guardar');
+    setLoading(false);
+  }
+};
   const isEdit = mode === 'edit';
 
   return (

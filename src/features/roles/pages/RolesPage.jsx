@@ -1,7 +1,8 @@
-﻿import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+﻿import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../../../shared/components/Layout';
 import useRoles from '../hooks/useRoles';
+import useUsuarios from '../../usuarios/hooks/useUsuarios';
 import rolesService from '../services/rolesService';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
@@ -15,6 +16,15 @@ const RolesPage = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [success, setSuccess] = useState('');
+  const location = useLocation();
+
+useEffect(() => {
+  if (location.state?.success) {
+    setSuccess(location.state.success);
+    window.history.replaceState({}, document.title); // limpia el state para que no reaparezca al recargar
+    setTimeout(() => setSuccess(''), 3000);
+  }
+}, [location.state]);
 
   const total = rolesService.getTodosLosPermisos().length;
 
@@ -34,15 +44,20 @@ const RolesPage = () => {
   const shown = [...shownFiltered].sort((a, b) => Number(a.id) - Number(b.id));
 
   const handleDelete = async () => {
-    try {
-      await remove(deleteTarget.id);
-      setDeleteTarget(null); setDeleteError('');
-      setSuccess(`Rol "${deleteTarget.nombre}" eliminado.`);
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (e) {
-      setDeleteError(e.message || 'No se pudo eliminar');
-    }
-  };
+  const usuariosConEsteRol = usuarios.filter(u => u.rol === deleteTarget.nombre);
+  if (usuariosConEsteRol.length > 0) {
+    setDeleteError(`No se puede eliminar: hay ${usuariosConEsteRol.length} usuario(s) con este rol asignado.`);
+    return;
+  }
+  try {
+    await remove(deleteTarget.id);
+    setDeleteTarget(null); setDeleteError('');
+    setSuccess(`Rol "${deleteTarget.nombre}" eliminado.`);
+    setTimeout(() => setSuccess(''), 3000);
+  } catch (e) {
+    setDeleteError(e.message || 'No se pudo eliminar');
+  }
+};
 
   return (
     <Layout>

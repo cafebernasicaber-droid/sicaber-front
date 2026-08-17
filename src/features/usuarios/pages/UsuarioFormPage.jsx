@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Layout from '../../../shared/components/Layout';
 import useUsuarios from '../hooks/useUsuarios';
 import usuariosService from '../services/usuariosService';
-import rolesService from '../../roles/services/rolesService';
+import useRoles from '../../roles/hooks/useRoles';
 import '../pages/Usuarios.css';
 import '../../roles/pages/Roles.css';
 
@@ -11,7 +11,7 @@ const UsuarioFormPage = ({ mode }) => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { create, update } = useUsuarios();
-  const roles = rolesService.getAll();
+  const { roles } = useRoles();
   const isEdit = mode === 'edit';
 
   const [form, setForm] = useState({ nombre: '', username: '', correo: '', telefono: '', direccion: '', password: '', rolId: '' });
