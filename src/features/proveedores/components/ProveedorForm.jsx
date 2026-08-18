@@ -115,7 +115,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
 
         <div className={`fg ${errors.correo ? 'fg-error' : ''}`}>
           <label>Correo electrónico <span className="req">*</span></label>
-          <input type="email" name="correo" value={form.correo}
+          <input type="text" name="correo" value={form.correo}
             onChange={handleChange} placeholder="proveedor@correo.com" />
           {errors.correo && <span className="err-msg">{errors.correo}</span>}
         </div>

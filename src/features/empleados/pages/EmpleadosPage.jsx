@@ -19,15 +19,49 @@ const CARGO_COLORS = {
 
 export function EmpleadoModal({ initial, onClose, onSave }) {
   const cargos = ['Bartender', 'Cajero', 'Administrador'];
-  const [form, setForm] = useState(initial || { nombre: '', cargo: '', telefono: '', correo: '', estado: 'Activo', tipoDoc: 'Cédula de Ciudadanía', numeroDoc: '', direccion: '', username: '', password: '', sede: 'Local 1' });
+  // El backend devuelve tipo_doc/numero_doc (snake_case) — usar `initial`
+  // directo como estado inicial dejaba esos dos campos (y cualquier otro
+  // que el backend nombre distinto) en blanco al editar, aunque el dato sí
+  // existiera guardado.
+  const [form, setForm] = useState(initial ? {
+    nombre:    initial.nombre    || '',
+    cargo:     initial.cargo     || '',
+    telefono:  initial.telefono  || '',
+    correo:    initial.correo    || '',
+    estado:    initial.estado    || 'Activo',
+    tipoDoc:   initial.tipoDoc   || initial.tipo_doc   || 'Cédula de Ciudadanía',
+    numeroDoc: initial.numeroDoc || initial.numero_doc || '',
+    direccion: initial.direccion || '',
+    username:  initial.username  || '',
+    password:  '',
+    sede:      initial.sede      || '',
+  } : { nombre: '', cargo: '', telefono: '', correo: '', estado: 'Activo', tipoDoc: 'Cédula de Ciudadanía', numeroDoc: '', direccion: '', username: '', password: '', sede: '' });
   const esLoginCargo = ['cajero', 'bartender'].some(c => (form.cargo || '').toLowerCase().includes(c));
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
 
+  // Antes: <option value="Local 1">/<option value="Local 2"> fijos en el
+  // código — no reflejaban los locales reales (GET /locales), así que
+  // seguían apareciendo aunque esos locales ya no existieran en el backend.
+  const [locales, setLocales] = useState([]);
+  useEffect(() => {
+    localesService.getActivos()
+      .then(d => setLocales(Array.isArray(d) ? d : []))
+      .catch(() => setLocales([]));
+  }, []);
+
   const [saving, setSaving] = useState(false);
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
+    if (!form.nombre.trim())    { setError('El nombre completo es obligatorio.'); return; }
+    if (!form.cargo)            { setError('Selecciona un cargo.'); return; }
+    if (!form.numeroDoc.trim()) { setError('El número de documento es obligatorio.'); return; }
+    if (form.correo && !/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    if (esLoginCargo && !initial && !form.username.trim()) { setError('El usuario del sistema es obligatorio para este cargo.'); return; }
     if (esLoginCargo && !form.sede) { setError('Selecciona a qué local pertenece este empleado.'); return; }
+    if (!initial && !form.password) { setError('La contraseña es obligatoria.'); return; }
+    if (!initial && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    if (!initial && !confirm) { setError('Debes confirmar la contraseña.'); return; }
     if (form.password && form.password !== confirm) { setError('Las contraseñas no coinciden.'); return; }
     setSaving(true);
     try {
@@ -54,11 +88,11 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
           <div className="emp-form-row">
             <div className="emp-form-group">
               <label>Nombre completo *</label>
-              <input type="text" required value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Nombre del empleado" />
+              <input type="text" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Nombre del empleado" />
             </div>
             <div className="emp-form-group">
               <label>Cargo *</label>
-              <select required value={form.cargo} onChange={e => setForm({...form, cargo: e.target.value})}>
+              <select value={form.cargo} onChange={e => setForm({...form, cargo: e.target.value})}>
                 <option value="">Seleccionar cargo...</option>
                 {cargos.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -71,7 +105,7 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
             </div>
             <div className="emp-form-group">
               <label>Correo</label>
-              <input type="email" value={form.correo||''} onChange={e => setForm({...form, correo: e.target.value})} placeholder="correo@ejemplo.com" />
+              <input type="text" value={form.correo||''} onChange={e => setForm({...form, correo: e.target.value})} placeholder="correo@ejemplo.com" />
             </div>
           </div>
           <div className="emp-form-row">
@@ -86,7 +120,7 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
             </div>
             <div className="emp-form-group">
               <label>Número de documento *</label>
-              <input type="text" required value={form.numeroDoc||''} onChange={e => setForm({...form, numeroDoc: e.target.value})} placeholder="Ej: 1234567890" />
+              <input type="text" value={form.numeroDoc||''} onChange={e => setForm({...form, numeroDoc: e.target.value})} placeholder="Ej: 1234567890" />
             </div>
           </div>
           <div className="emp-form-row">
@@ -103,7 +137,6 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
               </label>
               <input
                 type="text"
-                required={esLoginCargo && !initial}
                 value={form.username||''}
                 onChange={e => setForm({...form, username: e.target.value})}
                 placeholder="Usuario con el que iniciará sesión"
@@ -117,9 +150,15 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
                   Local *
                   <span style={{fontSize:11,color:'#1976D2',marginLeft:6}}>a qué local pertenece este {form.cargo.toLowerCase()}</span>
                 </label>
-                <select required value={form.sede || 'Local 1'} onChange={e => setForm({...form, sede: e.target.value})}>
-                  <option value="Local 1">Local 1</option>
-                  <option value="Local 2">Local 2</option>
+                <select value={form.sede || ''} onChange={e => setForm({...form, sede: e.target.value})}>
+                  <option value="">— Seleccionar —</option>
+                  {locales.map(l => <option key={l.id} value={l.nombre}>{l.nombre}</option>)}
+                  {/* Si este empleado quedó con un local de una versión anterior
+                      (ej. "Local 1") que ya no existe en `locales`, se conserva
+                      la opción para no perder el dato hasta que se reasigne. */}
+                  {form.sede && !locales.some(l => l.nombre === form.sede) && (
+                    <option value={form.sede}>{form.sede} (local antiguo, reasignar)</option>
+                  )}
                 </select>
                 <div style={{fontSize:11,color:'var(--text-muted)',marginTop:4}}>
                   Este {form.cargo.toLowerCase()} solo verá y atenderá los pedidos de ese local.
@@ -130,11 +169,11 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
           <div className="emp-form-row">
             <div className="emp-form-group">
               <label>{initial ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}</label>
-              <input type="password" required={!initial} value={form.password||''} onChange={e => setForm({...form, password: e.target.value})} placeholder="Mín. 6 caracteres" />
+              <input type="password" value={form.password||''} onChange={e => setForm({...form, password: e.target.value})} placeholder="Mín. 6 caracteres" />
             </div>
             <div className="emp-form-group">
               <label>{initial ? 'Confirmar nueva contraseña' : 'Confirmar contraseña *'}</label>
-              <input type="password" required={!initial} value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Repite la contraseña"
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Repite la contraseña"
                 style={{borderColor: confirm && form.password && confirm !== form.password ? '#E53935' : confirm && form.password && confirm === form.password ? '#4CAF50' : ''}}/>
               {confirm && form.password && confirm !== form.password && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>Las contraseñas no coinciden</div>}
               {confirm && form.password && confirm === form.password && <div style={{fontSize:11,color:'#4CAF50',marginTop:3}}>✓ Coinciden</div>}
@@ -156,6 +195,47 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal "Ver detalle" — toda la información de registro del empleado ──
+function EmpleadoDetalleModal({ empleado: e, onClose, onEditar }) {
+  const campos = [
+    ['Cargo', e.cargo || '—'],
+    ['Local asignado', e.sede || 'Sin local asignado'],
+    ['Tipo de documento', e.tipoDoc || e.tipo_doc || '—'],
+    ['Número de documento', e.numeroDoc || e.numero_doc || '—'],
+    ['Teléfono', e.telefono || '—'],
+    ['Correo', e.correo || '—'],
+    ['Dirección de residencia', e.direccion || '—'],
+    ['Usuario del sistema', e.username || '—'],
+    ['Estado', e.estado === 'Activo' ? '✅ Activo' : '❌ Inactivo'],
+    ['Fecha de registro', fmt(e.created_at || e.fechaIngreso)],
+  ];
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 480, textAlign: 'left', padding: '32px 36px' }} onClick={ev => ev.stopPropagation()}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
+          <div className="emp-avatar" style={{ width:44, height:44, fontSize:16 }}>{e.nombre.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}</div>
+          <div>
+            <h3 style={{ margin:0 }}>{e.nombre}</h3>
+            <p style={{ fontSize:12, color:'var(--text-muted)', margin:0 }}>ID #{e.id}</p>
+          </div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:20 }}>
+          {campos.map(([label, val]) => (
+            <div key={label} style={{ background:'var(--bg-surface)', borderRadius:10, padding:'10px 14px' }}>
+              <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:3 }}>{label}</div>
+              <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{val}</div>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions" style={{ justifyContent:'flex-end' }}>
+          <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+          <button className="btn-confirm-primary" onClick={onEditar}>Editar</button>
+        </div>
       </div>
     </div>
   );
@@ -238,14 +318,22 @@ function LocalesTab({ showOk }) {
 export default function EmpleadosPage() {
   const { empleados, refresh, toggleActivo, remove } = useEmpleados();
   const [modal, setModal]         = useState(null); // null | 'new' | empleado
+  const [verTarget, setVerTarget] = useState(null);
   const [deleteTarget, setDel]    = useState(null);
   const [query, setQuery]         = useState('');
   const [success, setSuccess]     = useState('');
   // 4 — pestaña "Locales" dentro de este mismo módulo.
   const [tab, setTab]             = useState('empleados'); // 'empleados' | 'locales'
 
+  // Nombre, cargo y local: las 3 columnas de texto/etiqueta ya visibles en
+  // la tabla (Teléfono/Correo/Ingreso/Estado no forman parte del buscador
+  // porque no se pidió explícitamente y son datos más para consultar que
+  // para buscar por texto libre).
   const shownFiltered = query.trim()
-    ? empleados.filter(e => e.nombre.toLowerCase().includes(query.toLowerCase()) || e.cargo.toLowerCase().includes(query.toLowerCase()))
+    ? empleados.filter(e =>
+        e.nombre.toLowerCase().includes(query.toLowerCase()) ||
+        e.cargo.toLowerCase().includes(query.toLowerCase()) ||
+        (e.sede || '').toLowerCase().includes(query.toLowerCase()))
     : empleados;
   const shown = [...shownFiltered].sort((a, b) => Number(b.id) - Number(a.id));
 
@@ -267,6 +355,14 @@ export default function EmpleadosPage() {
             initial={modal === 'new' ? null : modal}
             onClose={() => setModal(null)}
             onSave={() => { refresh(); setModal(null); showOk(modal === 'new' ? 'Empleado creado correctamente' : 'Empleado actualizado'); }}
+          />
+        )}
+
+        {verTarget && (
+          <EmpleadoDetalleModal
+            empleado={verTarget}
+            onClose={() => setVerTarget(null)}
+            onEditar={() => { setModal(verTarget); setVerTarget(null); }}
           />
         )}
 
@@ -306,7 +402,7 @@ export default function EmpleadosPage() {
               <span className="search-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </span>
-              <input className="search-input" placeholder="Buscar por nombre o cargo..." value={query} onChange={e => setQuery(e.target.value)} />
+              <input className="search-input" placeholder="Buscar por nombre, cargo o local..." value={query} onChange={e => setQuery(e.target.value)} />
               {query && <button className="search-clear" onClick={() => setQuery('')}>✕</button>}
             </div>
           </div>
@@ -344,12 +440,17 @@ export default function EmpleadosPage() {
                         <td><span className="badge-cat" style={{ background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.color}33` }}>{e.cargo}</span></td>
                         <td>
                           {['Cajero','Bartender'].includes(e.cargo)
-                            ? <span className="badge-cat" style={{background:'rgba(25,118,210,0.12)',color:'#1976D2'}}>{e.sede || 'Local 1'}</span>
+                            ? <span className="badge-cat" style={{background:'rgba(25,118,210,0.12)',color:'#1976D2'}}>{e.sede || 'Sin local asignado'}</span>
                             : <span style={{color:'var(--text-muted)'}}>—</span>}
                         </td>
                         <td style={{ fontSize:13, color:'var(--text-secondary)' }}>{e.telefono || '—'}</td>
                         <td style={{ fontSize:13, color:'var(--text-secondary)' }}>{e.correo || '—'}</td>
-                        <td style={{ fontSize:12, color:'var(--text-muted)' }}>{fmt(e.fechaIngreso)}</td>
+                        {/* El backend devuelve la fecha de registro como
+                            created_at (columna real de la tabla); antes se
+                            leía e.fechaIngreso, un campo que nunca existió
+                            en la respuesta, así que esta columna siempre
+                            salía vacía aunque la fecha sí quedara guardada. */}
+                        <td style={{ fontSize:12, color:'var(--text-muted)' }}>{fmt(e.created_at || e.fechaIngreso)}</td>
                         <td>
                           <button className={`toggle-btn ${e.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`} onClick={() => toggleActivo(e.id)}>
                             <span className="toggle-thumb"/>
@@ -357,8 +458,13 @@ export default function EmpleadosPage() {
                         </td>
                         <td>
                           <div className="actions-group">
+                            <Tooltip label="Ver detalle">
+                              <button className="btn-ver" onClick={() => setVerTarget(e)}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                              </button>
+                            </Tooltip>
                             <Tooltip label="Editar">
-                              <button className="btn-ver" onClick={() => setModal(e)}>
+                              <button className="btn-editar" onClick={() => setModal(e)}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                               </button>
                             </Tooltip>

@@ -882,7 +882,7 @@ function NuevoPedido({ onCreated, showToast }) {
       hora, tipo: 'mostrador',
       // El pedido queda marcado con el local del cajero que lo crea, para
       // que solo el bartender (y el cajero) de ese mismo local lo vean.
-      sede: user?.sede || 'Local 1',
+      sede: user?.sede || '',
     };
     setTimeout(async () => {
       try {

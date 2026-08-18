@@ -52,7 +52,10 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
     e.preventDefault(); setError('');
     if (!form.nombre.trim())  { setError('El nombre es obligatorio.'); return; }
     if (!form.correo.trim())  { setError('El correo es obligatorio.'); return; }
+    if (!/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    if (!form.password)      { setError('La contraseña es obligatoria.'); return; }
     if (form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    if (!form.confirm)       { setError('Debes confirmar la contraseña.'); return; }
     if (form.password !== form.confirm) { setError('Las contraseñas no coinciden.'); return; }
     if (form.tipoDoc === 'Otros' && !form.tipoDocOtro.trim()) { setError('Escribe el nombre del tipo de documento.'); return; }
 
@@ -98,7 +101,7 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Nombre completo *</label>
-                  <input style={inputStyle} type="text" placeholder="Nombre completo" required
+                  <input style={inputStyle} type="text" placeholder="Nombre completo"
                     value={form.nombre} onChange={e => set('nombre', e.target.value)} />
                 </div>
                 <div>
@@ -110,7 +113,7 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
 
               <div>
                 <label style={labelStyle}>Correo electrónico *</label>
-                <input style={inputStyle} type="email" placeholder="correo@ejemplo.com" required
+                <input style={inputStyle} type="text" placeholder="correo@ejemplo.com"
                   value={form.correo} onChange={e => set('correo', e.target.value)} />
               </div>
 
@@ -134,7 +137,7 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
               {form.tipoDoc === 'Otros' && (
                 <div>
                   <label style={labelStyle}>¿Cuál documento? *</label>
-                  <input style={inputStyle} type="text" placeholder="Ej: Pasaporte, Permiso Especial..." required
+                  <input style={inputStyle} type="text" placeholder="Ej: Pasaporte, Permiso Especial..."
                     value={form.tipoDocOtro} onChange={e => set('tipoDocOtro', e.target.value)} />
                 </div>
               )}
@@ -176,12 +179,12 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Contraseña *</label>
-                  <input style={inputStyle} type="password" placeholder="Mín. 6 caracteres" required
+                  <input style={inputStyle} type="password" placeholder="Mín. 6 caracteres"
                     value={form.password} onChange={e => set('password', e.target.value)} />
                 </div>
                 <div>
                   <label style={labelStyle}>Confirmar contraseña *</label>
-                  <input style={inputStyle} type="password" placeholder="Repite la contraseña" required
+                  <input style={inputStyle} type="password" placeholder="Repite la contraseña"
                     value={form.confirm} onChange={e => set('confirm', e.target.value)} />
                 </div>
               </div>

@@ -1,12 +1,25 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import localesService from '../services/localesService';
 
 // Selector de local para las vistas de Administración (Pedidos, Ventas,
 // Devoluciones, Dashboard). Mismo criterio de acceso que ya usan CajeroPage
 // y BartenderPage: sede='Ambos' (Administrador/Superadministrador) puede ver
 // "Todos los locales" o acotar a uno; cualquier otra sede queda bloqueada a
 // su propio local, sin poder ver los demás.
+//
+// Antes: <option value="Local 1">/<option value="Local 2"> fijos en el
+// código — no reflejaban los locales reales (GET /locales), así que
+// seguían apareciendo aunque esos locales ya no existieran en el backend.
 export default function LocalFiltro({ value, onChange, sedeUsuario, style }) {
   const puedeVerTodos = sedeUsuario === 'Ambos';
+
+  const [locales, setLocales] = useState([]);
+  useEffect(() => {
+    if (!puedeVerTodos) return; // el resto de sedes no necesita el listado, solo muestra la propia
+    localesService.getActivos()
+      .then(d => setLocales(Array.isArray(d) ? d : []))
+      .catch(() => setLocales([]));
+  }, [puedeVerTodos]);
 
   if (!puedeVerTodos) {
     return (
@@ -35,8 +48,7 @@ export default function LocalFiltro({ value, onChange, sedeUsuario, style }) {
       }}
     >
       <option value="todos">Todos los locales</option>
-      <option value="Local 1">Local 1</option>
-      <option value="Local 2">Local 2</option>
+      {locales.map(l => <option key={l.id} value={l.nombre}>{l.nombre}</option>)}
     </select>
   );
 }

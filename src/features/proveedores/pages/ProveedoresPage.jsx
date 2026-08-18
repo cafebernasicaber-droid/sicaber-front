@@ -488,7 +488,7 @@ const ProveedoresPage = () => {
               <table className="insumos-table">
                 <thead>
                   <tr>
-                    <th>Nombre</th><th>NIT</th>
+                    <th>Nombre</th><th>NIT</th><th>Correo</th>
                     <th>Teléfono</th><th>Ciudad</th>
                     <th>Estado</th><th>Acciones</th>
                   </tr>
@@ -498,6 +498,7 @@ const ProveedoresPage = () => {
                     <tr key={p.id}>
                       <td className="td-nombre">{p.nombre}</td>
                       <td>{p.nit}</td>
+                      <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{p.correo || '—'}</td>
                       <td>{p.telefono}</td>
                       <td>{p.ciudad}</td>
                       <td>

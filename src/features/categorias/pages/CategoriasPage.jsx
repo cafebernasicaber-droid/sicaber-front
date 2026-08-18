@@ -36,6 +36,7 @@ function CategoriaFormModal({ inicial, onClose, onSave }) {
 
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
+    if (!form.nombre.trim()) { setError('El nombre de la categoría es obligatorio.'); return; }
     try {
       const r = inicial
         ? await categoriasService.update(inicial.id, form)
@@ -56,7 +57,7 @@ function CategoriaFormModal({ inicial, onClose, onSave }) {
         <form onSubmit={handleSubmit} style={{display:'flex',flexDirection:'column',gap:14}}>
           <div className="mod-form-group">
             <label>Nombre <span className="required">*</span></label>
-            <input value={form.nombre} onChange={set('nombre')} placeholder="Ej: Bebidas Calientes" required />
+            <input value={form.nombre} onChange={set('nombre')} placeholder="Ej: Bebidas Calientes" />
           </div>
           <div className="mod-form-group">
             <label>Descripción</label>
@@ -126,6 +127,42 @@ function CategoriaFormModal({ inicial, onClose, onSave }) {
   );
 }
 
+// ── Modal "Ver detalle" — antes no existía para Categorías ──────────────
+function CategoriaDetalleModal({ categoria: c, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 480, textAlign: 'left', padding: '32px 36px' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:20 }}>
+          {c.imagen
+            ? <img src={c.imagen} alt={c.nombre} style={{ width:56, height:56, borderRadius:10, objectFit:'cover' }} onError={e=>{e.target.style.display='none';}}/>
+            : <div style={{ width:56, height:56, borderRadius:10, background:'var(--bg-surface-2)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:26 }}>📂</div>}
+          <div>
+            <h3 style={{ margin:0 }}>{c.nombre}</h3>
+            <p style={{ fontSize:12, color:'var(--text-muted)', margin:0 }}>ID #{c.id}</p>
+          </div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:20 }}>
+          <div style={{ background:'var(--bg-surface)', borderRadius:10, padding:'10px 14px' }}>
+            <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:3 }}>Estado</div>
+            <div style={{ fontSize:13, fontWeight:600, color: c.estado === 'Activo' ? '#2E7D32' : '#888' }}>{c.estado === 'Activo' ? '✅ Activo' : '❌ Inactivo'}</div>
+          </div>
+          <div style={{ background:'var(--bg-surface)', borderRadius:10, padding:'10px 14px' }}>
+            <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:3 }}>Fecha de creación</div>
+            <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{fmt(c.created_at || c.fechaCreacion)}</div>
+          </div>
+        </div>
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:4 }}>Descripción</div>
+          <p style={{ fontSize:13, margin:0, whiteSpace:'pre-wrap' }}>{c.descripcion || <em style={{ color:'#bbb' }}>Sin descripción</em>}</p>
+        </div>
+        <div className="modal-actions" style={{ justifyContent:'flex-end' }}>
+          <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CategoriasPage() {
   const [cats, setCats] = useState([]);
   useEffect(() => {
@@ -142,6 +179,11 @@ export default function CategoriasPage() {
   const [page, setPage] = useState(1);
   const PER_PAGE = 5;
   const [vista, setVista] = useState('tabla');
+  const [verTarget, setVerTarget] = useState(null);
+  // Filtro por fecha de creación (columna "Creación" ya visible en la
+  // tabla) — rango desde/hasta, además de la búsqueda por nombre/descripción.
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
 
   const refresh = () => {
     categoriasService.getAll()
@@ -150,9 +192,11 @@ export default function CategoriasPage() {
   };
   const showOk = msg => { setSuccess(msg); setTimeout(()=>setSuccess(''),3000); };
 
-  const shown = query.trim()
+  let shown = query.trim()
     ? cats.filter(c => c.nombre.toLowerCase().includes(query.toLowerCase()) || (c.descripcion||'').toLowerCase().includes(query.toLowerCase()))
     : cats;
+  if (fechaDesde) shown = shown.filter(c => c.created_at && String(c.created_at).slice(0,10) >= fechaDesde);
+  if (fechaHasta) shown = shown.filter(c => c.created_at && String(c.created_at).slice(0,10) <= fechaHasta);
   const totalPages = Math.ceil(shown.length / PER_PAGE);
   const paginated = shown.slice((page-1)*PER_PAGE, page*PER_PAGE);
   const handleSearch = val => { setQuery(val); setPage(1); };
@@ -193,6 +237,10 @@ export default function CategoriasPage() {
           />
         )}
 
+        {verTarget && (
+          <CategoriaDetalleModal categoria={verTarget} onClose={() => setVerTarget(null)}/>
+        )}
+
         <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
           <div>
             <h1 className="page-title">Categorías</h1>
@@ -214,6 +262,17 @@ export default function CategoriasPage() {
                 onChange={e=>handleSearch(e.target.value)} />
               {query && <button className="search-clear" onClick={()=>handleSearch('')}>✕</button>}
             </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <label style={{fontSize:12,color:'var(--text-muted)'}}>Creada entre</label>
+            <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPage(1); }}
+              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
+            <span style={{color:'var(--text-muted)',fontSize:13}}>–</span>
+            <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPage(1); }}
+              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
+            {(fechaDesde || fechaHasta) && (
+              <button className="search-clear" onClick={() => { setFechaDesde(''); setFechaHasta(''); setPage(1); }}>✕</button>
+            )}
           </div>
           <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{shown.length} categoría{shown.length!==1?'s':''}</span>
           <div style={{display:'flex',gap:4,marginLeft:12}}>
@@ -264,9 +323,14 @@ export default function CategoriasPage() {
                           <span className="toggle-thumb"/>
                         </button>
                       </td>
-                      <td style={{fontSize:13,color:'var(--text-muted)'}}>{fmt(c.fechaCreacion)}</td>
+                      <td style={{fontSize:13,color:'var(--text-muted)'}}>{fmt(c.created_at || c.fechaCreacion)}</td>
                       <td>
                         <div className="actions-group">
+                          <Tooltip label="Ver detalle">
+                            <button className="btn-ver" onClick={()=>setVerTarget(c)}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                          </Tooltip>
                           <Tooltip label="Editar">
                             <button className="btn-editar" onClick={()=>setModal(c)}>
                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -292,11 +356,14 @@ export default function CategoriasPage() {
                     <div className="prod-card__body">
                       <div className="prod-card__name">{c.nombre}</div>
                       <div className="prod-card__cat" style={{fontSize:12,color:'var(--text-muted)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.descripcion||'Sin descripción'}</div>
-                      <div className="prod-card__price" style={{fontSize:12,color:'var(--text-muted)'}}>{fmt(c.fechaCreacion)}</div>
+                      <div className="prod-card__price" style={{fontSize:12,color:'var(--text-muted)'}}>{fmt(c.created_at || c.fechaCreacion)}</div>
                     </div>
                     <div className="prod-card__foot">
                       <button className={`toggle-btn ${c.estado==='Activo'?'toggle-on':'toggle-off'}`} style={{transform:'scale(0.85)'}} onClick={async ()=>{await categoriasService.toggleEstado(c.id);refresh();}}><span className="toggle-thumb"/></button>
                       <div className="actions-group">
+                        <Tooltip label="Ver detalle">
+                          <button className="btn-ver" onClick={()=>setVerTarget(c)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                        </Tooltip>
                         <Tooltip label="Editar">
                           <button className="btn-editar" onClick={()=>setModal(c)}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
                         </Tooltip>

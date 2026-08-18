@@ -26,7 +26,7 @@ const RolFormPage = ({ mode }) => {
         setForm({
           nombre:      rol.nombre,
           descripcion: rol.descripcion || '',
-          color:       rolesService.getColor(rol.nombre),
+          color:       rol.color || rolesService.getColor(rol.nombre),
           permisos,
         });
       }).catch(() => navigate('/admin/roles'));
@@ -91,10 +91,10 @@ const RolFormPage = ({ mode }) => {
   setLoading(true);
   try {
     if (mode === 'edit') {
-      await update(id, { nombre: nombreLimpio, descripcion: form.descripcion, permisos: form.permisos });
+      await update(id, { nombre: nombreLimpio, descripcion: form.descripcion, color: form.color, permisos: form.permisos });
       navigate('/admin/roles', { state: { success: `Rol "${nombreLimpio}" actualizado correctamente.` } });
     } else {
-      await create({ nombre: nombreLimpio, descripcion: form.descripcion, permisos: form.permisos });
+      await create({ nombre: nombreLimpio, descripcion: form.descripcion, color: form.color, permisos: form.permisos });
       navigate('/admin/roles', { state: { success: `Rol "${nombreLimpio}" creado correctamente.` } });
     }
   } catch (err) {
@@ -128,7 +128,7 @@ const RolFormPage = ({ mode }) => {
                 <div className="form-row">
                   <div className="form-group">
                     <label>Nombre del rol *</label>
-                    <input type="text" placeholder="Ej: Vendedor" required
+                    <input type="text" placeholder="Ej: Vendedor"
                       value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} />
                   </div>
                   <div className="form-group">

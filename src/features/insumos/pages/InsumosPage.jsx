@@ -484,12 +484,15 @@ const InsumosPage = () => {
   // llamaba a "insumosService.search(...)", un método que nunca existió en
   // el servicio — cada vez que alguien escribía en el buscador, la página
   // tiraba un error ("insumosService.search is not a function").
+  // Solo nombre y categoría: son las únicas columnas visibles en la tabla
+  // (el proveedor solo aparece dentro del modal "Ver detalle", no en la
+  // tabla, así que buscar por él no coincidía con nada que el usuario
+  // pudiera ver en pantalla).
   const buscarInsumos = (texto) => {
     const term = texto.toLowerCase();
     return insumos.filter(i =>
       (i.nombre || '').toLowerCase().includes(term) ||
-      (i.categoria || '').toLowerCase().includes(term) ||
-      (i.proveedor || '').toLowerCase().includes(term)
+      (i.categoria || '').toLowerCase().includes(term)
     );
   };
 

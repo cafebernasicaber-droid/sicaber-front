@@ -19,11 +19,26 @@ import '../../productos/pages/Modulos.css';
 const fmt = n =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n || 0);
 
+// La columna fecha_inicio/fecha_fin es tipo timestamp en Postgres — pg la
+// devuelve como fecha+hora completa ("2026-08-19T05:00:00.000Z"), no como
+// "YYYY-MM-DD" plano. Cortar a los primeros 10 caracteres antes de separar
+// evita que la hora ("T05:00:00.000Z") se cuele como si fuera el día.
+const soloFecha = (iso) => iso ? String(iso).slice(0, 10) : '';
 const formatFecha = (iso) => {
-  if (!iso) return null;
-  const [y, m, d] = iso.split('-');
+  const f = soloFecha(iso);
+  if (!f) return null;
+  const [y, m, d] = f.split('-');
+  if (!y || !m || !d) return null;
   return `${d}/${m}/${y}`;
 };
+
+// combosService.hoy() no existe (nunca se agregó a ese servicio) — se
+// llamaba igual más abajo en este archivo, un TypeError en espera de pasar
+// que quedó oculto hasta ahora: solo se ejecutaba si un combo tenía
+// fecha_fin, y eso nunca ocurría por el bug de guardado del backend
+// (arreglado aparte). Con las fechas ya guardándose de verdad, este helper
+// evita que la tarjeta se rompa apenas un combo tenga fecha de fin.
+const hoyStr = () => new Date().toISOString().slice(0, 10);
 
 // ── ImageUploader ────────────────────────────────────────────
 function ImageUploader({ value, onChange }) {
@@ -87,12 +102,21 @@ function ComboModal({ inicial, onClose, onSave }) {
   // guardar y "Editar" siempre abría el combo vacío. Ahora cada producto
   // es un objeto independiente con su propia cantidad/toppings/adiciones,
   // así ningún producto puede pisar la configuración de otro.
+  const hoy = hoyStr();
+  // El backend guarda las fechas de vigencia como fecha_inicio/fecha_fin
+  // (snake_case, columnas reales de la tabla) — leerlas como
+  // inicial.fechaInicio/inicial.fechaFin siempre daba undefined, así que al
+  // abrir "Editar" las fechas aparecían vacías aunque sí estuvieran
+  // guardadas.
   const [form, setForm] = useState(
     inicial
-      ? { ...inicial, productos: (inicial.items || []).map(p => ({
-          id: p.id, nombre: p.nombre, precioOriginal: p.precioOriginal,
-          cantidad: p.cantidad || 1, toppings: p.toppings || [], adiciones: p.adiciones || [],
-        })) }
+      ? { ...inicial,
+          fechaInicio: soloFecha(inicial.fechaInicio || inicial.fecha_inicio),
+          fechaFin:    soloFecha(inicial.fechaFin    || inicial.fecha_fin),
+          productos: (inicial.items || []).map(p => ({
+            id: p.id, nombre: p.nombre, precioOriginal: p.precioOriginal,
+            cantidad: p.cantidad || 1, toppings: p.toppings || [], adiciones: p.adiciones || [],
+          })) }
       : { nombre: '', descripcion: '', precio: '', imagen: '', estado: 'Activo', productos: [], fechaInicio: '', fechaFin: '' }
   );
   const [error, setError] = useState('');
@@ -135,6 +159,15 @@ function ComboModal({ inicial, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
+    if (!form.nombre.trim()) { setError('El nombre del combo es obligatorio.'); return; }
+    const precioNum = Number(form.precio);
+    if (form.precio === '' || isNaN(precioNum) || precioNum < 0) { setError('Ingresa un precio válido (mayor o igual a 0).'); return; }
+    if (form.fechaInicio && form.fechaInicio < hoy) {
+      setError('La fecha de inicio no puede ser anterior a hoy.'); return;
+    }
+    if (form.fechaInicio && form.fechaFin && form.fechaFin < form.fechaInicio) {
+      setError('La fecha de fin no puede ser anterior a la de inicio.'); return;
+    }
     if ((form.productos || []).length === 0) {
       setError('Agrega al menos un producto al combo.'); return;
     }
@@ -173,11 +206,11 @@ function ComboModal({ inicial, onClose, onSave }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div className="mod-form-group">
               <label>Nombre del combo <span className="required">*</span></label>
-              <input value={form.nombre} onChange={set('nombre')} placeholder="Ej: Combo Mañanero" required />
+              <input value={form.nombre} onChange={set('nombre')} placeholder="Ej: Combo Mañanero" />
             </div>
             <div className="mod-form-group">
               <label>Precio especial COP <span className="required">*</span></label>
-              <input type="number" value={form.precio} onChange={set('precio')} placeholder="Ej: 3500" required min="0" />
+              <input type="number" value={form.precio} onChange={set('precio')} placeholder="Ej: 3500" />
             </div>
           </div>
 
@@ -203,16 +236,14 @@ function ComboModal({ inicial, onClose, onSave }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div className="mod-form-group">
               <label>Fecha de inicio <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>(opcional)</span></label>
-              <input type="date" value={form.fechaInicio || ''} onChange={set('fechaInicio')}
-                max={form.fechaFin || undefined} />
+              <input type="date" value={form.fechaInicio || ''} onChange={set('fechaInicio')} />
               <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
                 Desde cuándo aparece el combo en el menú
               </span>
             </div>
             <div className="mod-form-group">
               <label>Fecha de fin <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>(opcional)</span></label>
-              <input type="date" value={form.fechaFin || ''} onChange={set('fechaFin')}
-                min={form.fechaInicio || undefined} />
+              <input type="date" value={form.fechaFin || ''} onChange={set('fechaFin')} />
               <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
                 Al vencer se desactiva automáticamente
               </span>
@@ -482,12 +513,30 @@ export default function CombosPage() {
                     return s + ((p.precioOriginal || 0) + adicionesTotal) * (p.cantidad || 1);
                   }, 0);
                   const ahorro = totalOrig > combo.precio ? totalOrig - combo.precio : 0;
+                  // El backend devuelve fecha_inicio/fecha_fin (snake_case,
+                  // columnas reales) — leer combo.fechaInicio/fechaFin daba
+                  // siempre undefined, así que la fecha de inicio nunca
+                  // aparecía en la tarjeta.
+                  // "Desde" siempre se muestra: si no se definió una fecha de
+                  // inicio de vigencia explícita, el combo está vigente desde
+                  // que se creó — se usa created_at como respaldo. "Hasta"
+                  // solo se muestra si de verdad tiene una fecha de fin.
+                  const fechaInicio = soloFecha(combo.fecha_inicio || combo.fechaInicio) || soloFecha(combo.created_at);
+                  const fechaFin    = soloFecha(combo.fecha_fin    || combo.fechaFin);
                   return (
                     <div key={combo.id} style={{
                       background: 'var(--bg-surface)', borderRadius: 14,
                       border: `1.5px solid ${combo.estado === 'Activo' ? 'var(--color-green)' : 'var(--border)'}`,
                       overflow: 'hidden',
                       boxShadow: combo.estado === 'Activo' ? '0 4px 16px rgba(76,175,80,0.1)' : '0 2px 8px rgba(0,0,0,0.05)',
+                      // Antes: cada tarjeta era un bloque normal, así que los
+                      // botones de acción quedaban a distinta altura entre
+                      // tarjetas según cuánto contenido tuviera arriba
+                      // (descripción, fechas, productos incluidos). Con la
+                      // tarjeta como columna flex y los botones con
+                      // marginTop:auto más abajo, siempre quedan anclados
+                      // abajo del todo, sin importar el contenido de arriba.
+                      display: 'flex', flexDirection: 'column',
                     }}>
                       {/* Imagen o placeholder */}
                       <div style={{ height: 110, background: 'var(--bg-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
@@ -504,32 +553,32 @@ export default function CombosPage() {
                           {combo.estado === 'Activo' ? '● Activo' : 'Inactivo'}
                         </span>
                         {/* Badge de vencimiento próximo */}
-                        {combo.estado === 'Activo' && combo.fechaFin && (() => {
-                          const today = combosService.hoy();
-                          const diff = Math.ceil((new Date(combo.fechaFin) - new Date(today)) / 86400000);
+                        {combo.estado === 'Activo' && fechaFin && (() => {
+                          const today = hoyStr();
+                          const diff = Math.ceil((new Date(fechaFin) - new Date(today)) / 86400000);
                           if (diff < 0) return <span style={{ position:'absolute', bottom:8, left:8, background:'#B71C1C', color:'white', fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:20 }}>Vencido</span>;
                           if (diff <= 3) return <span style={{ position:'absolute', bottom:8, left:8, background:'#E65100', color:'white', fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:20 }}>Vence en {diff}d</span>;
                           return null;
                         })()}
                       </div>
 
-                      <div style={{ padding: '12px 14px' }}>
+                      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', flex: 1 }}>
                         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>{combo.nombre}</div>
                         {combo.descripcion && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>{combo.descripcion}</div>}
 
-                        {/* Fechas de vigencia */}
-                        {(combo.fechaInicio || combo.fechaFin) && (
+                        {/* Fechas de vigencia — "Desde" siempre (con
+                            respaldo en created_at), "Hasta" solo si el
+                            combo tiene una fecha de fin definida. */}
+                        {fechaInicio && (
                           <div style={{ display:'flex', gap:10, marginBottom:8, flexWrap:'wrap' }}>
-                            {combo.fechaInicio && (
+                            <span style={{ fontSize:11, color:'var(--text-secondary)', background:'var(--bg-surface-2)', borderRadius:6, padding:'2px 8px', display:'flex', alignItems:'center', gap:4 }}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                              Desde {formatFecha(fechaInicio)}
+                            </span>
+                            {fechaFin && (
                               <span style={{ fontSize:11, color:'var(--text-secondary)', background:'var(--bg-surface-2)', borderRadius:6, padding:'2px 8px', display:'flex', alignItems:'center', gap:4 }}>
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                Desde {formatFecha(combo.fechaInicio)}
-                              </span>
-                            )}
-                            {combo.fechaFin && (
-                              <span style={{ fontSize:11, color:'var(--text-secondary)', background:'var(--bg-surface-2)', borderRadius:6, padding:'2px 8px', display:'flex', alignItems:'center', gap:4 }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                Hasta {formatFecha(combo.fechaFin)}
+                                Hasta {formatFecha(fechaFin)}
                               </span>
                             )}
                           </div>
@@ -561,7 +610,7 @@ export default function CombosPage() {
                           )}
                         </div>
 
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 8 }}>
                           <button onClick={async () => { await combosService.toggleEstado(combo.id); refresh(); }}
                             style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: `1.5px solid ${combo.estado === 'Activo' ? '#E53935' : 'var(--color-green)'}`, background: 'var(--bg-surface)', color: combo.estado === 'Activo' ? '#E53935' : 'var(--color-green)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                             {combo.estado === 'Activo' ? 'Desactivar' : 'Activar'}

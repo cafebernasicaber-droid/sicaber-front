@@ -17,7 +17,7 @@ const fmt = n =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n || 0);
 
 // ── Modal de creación / edición ─────────────────────────────
-function ProductoModal({ inicial, onClose, onSave }) {
+function ProductoModal({ inicial, productos, onClose, onSave }) {
   const [categorias, setCategorias] = useState([]);
   useEffect(() => {
     categoriasService.getAll()
@@ -26,13 +26,18 @@ function ProductoModal({ inicial, onClose, onSave }) {
   }, []);
   const hoy = new Date().toISOString().split('T')[0];
 
+  // El backend guarda las fechas de descuento como fecha_inicio_desc /
+  // fecha_fin_desc (snake_case) — leerlas como fechaInicioDesc/fechaFinDesc
+  // (como se hacía antes) siempre daba undefined, así que al abrir "Editar"
+  // el formulario mostraba las fechas vacías aunque el producto sí tuviera
+  // un descuento programado.
   const [form, setForm] = React.useState(
     inicial
       ? {
           ...inicial,
-          descuento:      inicial.descuento      || '',
-          fechaInicioDesc: inicial.fechaInicioDesc || '',
-          fechaFinDesc:    inicial.fechaFinDesc    || '',
+          descuento:      inicial.descuento || '',
+          fechaInicioDesc: inicial.fecha_inicio_desc || '',
+          fechaFinDesc:    inicial.fecha_fin_desc    || '',
         }
       : {
           nombre: '', categoria: '', precio: '', descuento: '',
@@ -61,6 +66,30 @@ function ProductoModal({ inicial, onClose, onSave }) {
   const handleSubmit = async e => {
     e.preventDefault();
     setError('');
+
+    // Toda la validación vive acá en JS (sin required/min/max nativos del
+    // navegador) para poder mostrar los errores con el mismo estilo que ya
+    // usa Roles, en vez del globo de validación por defecto del navegador.
+    const nombreLimpio = (form.nombre || '').trim();
+    if (!nombreLimpio) { setError('El nombre del producto es obligatorio.'); return; }
+
+    if (!form.categoria) { setError('Selecciona una categoría.'); return; }
+
+    const precioNum = Number(form.precio);
+    if (form.precio === '' || isNaN(precioNum) || precioNum < 0) {
+      setError('Ingresa un precio válido (mayor o igual a 0).');
+      return;
+    }
+
+    // Nombre único: se valida contra los productos ya cargados (excluyendo
+    // el propio al editar) para avisar de inmediato, sin esperar el 400 que
+    // ahora también devuelve el backend si el nombre está repetido.
+    const nombreDuplicado = (productos || []).some(p =>
+      p.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase() &&
+      String(p.id) !== String(inicial?.id)
+    );
+    if (nombreDuplicado) { setError('Ya existe un producto con ese nombre.'); return; }
+
     if (form.descuento && (Number(form.descuento) < 0 || Number(form.descuento) > 99)) {
       setError('El descuento debe estar entre 0 y 99%.');
       return;
@@ -68,14 +97,25 @@ function ProductoModal({ inicial, onClose, onSave }) {
     if (form.descuento && Number(form.descuento) > 0) {
       if (!form.fechaInicioDesc) { setError('Ingresa la fecha de inicio del descuento.'); return; }
       if (!form.fechaFinDesc)    { setError('Ingresa la fecha de fin del descuento.');    return; }
+      if (form.fechaInicioDesc < hoy) { setError('La fecha de inicio no puede ser anterior a hoy.'); return; }
       if (form.fechaFinDesc < form.fechaInicioDesc) { setError('La fecha de fin no puede ser anterior a la de inicio.'); return; }
     }
+
+    // El backend espera fecha_inicio_desc / fecha_fin_desc (snake_case);
+    // antes se mandaban como fechaInicioDesc/fechaFinDesc y el backend
+    // simplemente las ignoraba, por lo que el descuento nunca quedaba
+    // guardado al editar un producto.
     const payload = {
       ...form,
-      descuento:       form.descuento ? Number(form.descuento) : 0,
-      fechaInicioDesc: form.descuento && Number(form.descuento) > 0 ? form.fechaInicioDesc : '',
-      fechaFinDesc:    form.descuento && Number(form.descuento) > 0 ? form.fechaFinDesc    : '',
+      nombre:           nombreLimpio,
+      precio:           precioNum,
+      descripcion:      (form.descripcion || '').trim(),
+      descuento:        form.descuento ? Number(form.descuento) : 0,
+      fecha_inicio_desc: form.descuento && Number(form.descuento) > 0 ? form.fechaInicioDesc : '',
+      fecha_fin_desc:    form.descuento && Number(form.descuento) > 0 ? form.fechaFinDesc    : '',
     };
+    delete payload.fechaInicioDesc;
+    delete payload.fechaFinDesc;
     try {
       const r = inicial
         ? await productosService.update(inicial.id, payload)
@@ -109,21 +149,21 @@ function ProductoModal({ inicial, onClose, onSave }) {
           {/* Nombre */}
           <div className="mod-form-group">
             <label>Nombre <span className="required">*</span></label>
-            <input value={form.nombre} onChange={set('nombre')} placeholder="Ej: Capuchino" required />
+            <input value={form.nombre} onChange={set('nombre')} placeholder="Ej: Capuchino" />
           </div>
 
           {/* Categoría + Precio */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div className="mod-form-group">
               <label>Categoría <span className="required">*</span></label>
-              <select value={form.categoria} onChange={set('categoria')} required>
+              <select value={form.categoria} onChange={set('categoria')}>
                 <option value="">Seleccionar...</option>
                 {categorias.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="mod-form-group">
               <label>Precio COP <span className="required">*</span></label>
-              <input type="number" value={form.precio} onChange={set('precio')} placeholder="Ej: 4500" required min="0" />
+              <input type="number" value={form.precio} onChange={set('precio')} placeholder="Ej: 4500" />
             </div>
           </div>
 
@@ -142,7 +182,7 @@ function ProductoModal({ inicial, onClose, onSave }) {
                 <label>Porcentaje %</label>
                 <input
                   type="number" value={form.descuento} onChange={set('descuento')}
-                  placeholder="Ej: 20" min="0" max="99"
+                  placeholder="Ej: 20"
                 />
               </div>
               {/* Preview precio con descuento */}
@@ -179,7 +219,6 @@ function ProductoModal({ inicial, onClose, onSave }) {
                   <input
                     type="date" value={form.fechaInicioDesc}
                     onChange={set('fechaInicioDesc')}
-                    min={hoy}
                   />
                 </div>
                 <div className="mod-form-group" style={{ margin: 0 }}>
@@ -187,7 +226,6 @@ function ProductoModal({ inicial, onClose, onSave }) {
                   <input
                     type="date" value={form.fechaFinDesc}
                     onChange={set('fechaFinDesc')}
-                    min={form.fechaInicioDesc || hoy}
                   />
                 </div>
               </div>
@@ -236,6 +274,66 @@ function ProductoModal({ inicial, onClose, onSave }) {
   );
 }
 
+// ── Modal "Ver detalles" ─────────────────────────────────────
+// Muestra todos los campos del producto que no caben en la tabla/tarjeta
+// principal: descripción completa, fechas de descuento, categoría, estado.
+function ProductoDetalleModal({ producto: p, onClose }) {
+  const vigente = descuentoVigente(p);
+  const pd      = vigente ? calcPrecioFinal(p) : null;
+  const fmtFecha = iso => iso ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'long' }).format(new Date(iso + 'T00:00:00')) : '—';
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 520, textAlign: 'left', padding: '28px 32px' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+          {p.imagen
+            ? <img src={p.imagen} alt={p.nombre} style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover' }} onError={e => e.target.style.display='none'}/>
+            : <div style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--bg-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>☕</div>
+          }
+          <div>
+            <h3 style={{ margin: 0 }}>{p.nombre}</h3>
+            <span className="badge-cat">{p.categoria || '—'}</span>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Precio</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>
+              {pd ? <>{fmt(pd)} <span style={{ fontSize: 12, color: '#bbb', textDecoration: 'line-through', fontWeight: 400 }}>{fmt(p.precio)}</span></> : fmt(p.precio)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Estado</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: p.estado === 'Activo' ? '#2E7D32' : '#888' }}>{p.estado}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Descuento</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{p.descuento > 0 ? `${p.descuento}%` : 'Sin descuento'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Vigencia</div>
+            <div style={{ fontSize: 13 }}>
+              {p.descuento > 0
+                ? <>{fmtFecha(p.fecha_inicio_desc)} — {fmtFecha(p.fecha_fin_desc)}</>
+                : '—'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>Descripción</div>
+          <p style={{ fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }}>{p.descripcion || <em style={{ color: '#bbb' }}>Sin descripción</em>}</p>
+        </div>
+
+        <div className="modal-actions" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Página principal ─────────────────────────────────────────
 export default function ProductosPage() {
   const [productos, setProductos] = useState([]);
@@ -246,8 +344,17 @@ export default function ProductosPage() {
   }, []);
   const [query,     setQuery]     = useState('');
   const [catFilter, setCatFilter] = useState('Todas');
+  // Filtro por precio (columna "Precio" ya visible en la tabla/tarjeta) —
+  // rango mín/máx además de la búsqueda por nombre.
+  const [precioMin, setPrecioMin] = useState('');
+  const [precioMax, setPrecioMax] = useState('');
+  // Filtro "solo con descuento activo" — reusa descuentoVigente (misma
+  // columna "Descuento" ya visible en la tabla/tarjeta), así que un
+  // descuento programado a futuro o ya vencido no cuenta como activo.
+  const [soloDescuento, setSoloDescuento] = useState(false);
   const [vista,     setVista]     = useState('tabla');
   const [modal,     setModal]     = useState(null);
+  const [verTarget, setVerTarget] = useState(null);
   const [deleteTarget, setDel]    = useState(null);
   const [success,   setSuccess]   = useState('');
   const [page,      setPage]      = useState(1);
@@ -265,6 +372,9 @@ export default function ProductosPage() {
     ? productos.filter(p => p.nombre.toLowerCase().includes(query.toLowerCase()) || (p.categoria||'').toLowerCase().includes(query.toLowerCase()))
     : productos;
   if (catFilter !== 'Todas') shown = shown.filter(p => p.categoria === catFilter);
+  if (precioMin !== '') shown = shown.filter(p => Number(p.precio) >= Number(precioMin));
+  if (precioMax !== '') shown = shown.filter(p => Number(p.precio) <= Number(precioMax));
+  if (soloDescuento) shown = shown.filter(p => descuentoVigente(p) !== null);
   const sorted     = [...shown].sort((a, b) => Number(b.id) - Number(a.id));
   const totalPages = Math.ceil(sorted.length / PER_PAGE);
   const paginated  = sorted.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -304,7 +414,7 @@ export default function ProductosPage() {
     const hoy = new Date().toISOString().split('T')[0];
     let label = '', bg = '', color = '';
     if (vigente) { label = `✅ -${p.descuento}% vigente`; bg = '#E8F5E9'; color = '#2E7D32'; }
-    else if (p.fechaInicioDesc && hoy < p.fechaInicioDesc) { label = `⏳ -${p.descuento}% programado`; bg = '#FFF8E1'; color = '#FF8F00'; }
+    else if (p.fecha_inicio_desc && hoy < p.fecha_inicio_desc) { label = `⏳ -${p.descuento}% programado`; bg = '#FFF8E1'; color = '#FF8F00'; }
     else { label = `⛔ -${p.descuento}% vencido`; bg = '#FFEBEE'; color = '#E53935'; }
     return (
       <span style={{ background: bg, color, padding: '3px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -321,9 +431,14 @@ export default function ProductosPage() {
         {modal && (
           <ProductoModal
             inicial={modal === 'new' ? null : modal}
+            productos={productos}
             onClose={() => setModal(null)}
             onSave={() => { refresh(); setModal(null); showOk(modal === 'new' ? 'Producto creado' : 'Producto actualizado'); }}
           />
+        )}
+
+        {verTarget && (
+          <ProductoDetalleModal producto={verTarget} onClose={() => setVerTarget(null)} />
         )}
 
         <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -356,6 +471,22 @@ export default function ProductosPage() {
             style={{ padding: '10px 14px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}>
             {cats.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="number" placeholder="Precio mín." value={precioMin}
+              onChange={e => { setPrecioMin(e.target.value); setPage(1); }}
+              style={{ width: 110, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>–</span>
+            <input type="number" placeholder="Precio máx." value={precioMax}
+              onChange={e => { setPrecioMax(e.target.value); setPage(1); }}
+              style={{ width: 110, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+            {(precioMin !== '' || precioMax !== '') && (
+              <button className="search-clear" onClick={() => { setPrecioMin(''); setPrecioMax(''); setPage(1); }}>✕</button>
+            )}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={soloDescuento} onChange={e => { setSoloDescuento(e.target.checked); setPage(1); }}/>
+            Solo con descuento activo
+          </label>
          <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
   {['tabla','grid'].map(v => (
     <button key={v} onClick={() => setVista(v)} style={{
@@ -378,8 +509,8 @@ export default function ProductosPage() {
                 </svg>
               </div>
               <h3>Sin productos</h3>
-              <p>{query ? `Sin resultados para "${query}"` : catFilter !== 'Todas' ? `Sin productos en "${catFilter}"` : 'Crea el primer producto'}</p>
-              {!query && catFilter === 'Todas' && <button className="btn-add-first" onClick={() => setModal('new')}>Nuevo producto</button>}
+              <p>{query ? `Sin resultados para "${query}"` : catFilter !== 'Todas' ? `Sin productos en "${catFilter}"` : soloDescuento ? 'Ningún producto tiene un descuento activo ahora mismo' : 'Crea el primer producto'}</p>
+              {!query && catFilter === 'Todas' && !soloDescuento && <button className="btn-add-first" onClick={() => setModal('new')}>Nuevo producto</button>}
             </div>
           ) : vista === 'tabla' ? (
             <div className="table-wrap">
@@ -402,12 +533,20 @@ export default function ProductosPage() {
                       <td>{renderDescuentoBadge(p)}</td>
                       <td>
                         <button className={`toggle-btn ${p.estado==='Activo'?'toggle-on':'toggle-off'}`}
-                          onClick={async () => { await productosService.toggleEstado(p.id); refresh(); }}>
+                          onClick={async () => {
+                            try { await productosService.toggleEstado(p); refresh(); }
+                            catch (err) { showOk(err.message || 'No se pudo cambiar el estado del producto.'); }
+                          }}>
                           <span className="toggle-thumb"/>
                         </button>
                       </td>
                       <td>
                         <div className="actions-group">
+                          <Tooltip label="Ver detalles">
+                            <button className="btn-ver" onClick={() => setVerTarget(p)}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                          </Tooltip>
                           <Tooltip label="Editar">
                             <button className="btn-editar" onClick={() => setModal(p)}>
                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -451,10 +590,18 @@ export default function ProductosPage() {
                       <div className="prod-card__foot">
                         <button className={`toggle-btn ${p.estado==='Activo'?'toggle-on':'toggle-off'}`}
                           style={{ transform:'scale(0.85)' }}
-                          onClick={async () => { await productosService.toggleEstado(p.id); refresh(); }}>
+                          onClick={async () => {
+                            try { await productosService.toggleEstado(p); refresh(); }
+                            catch (err) { showOk(err.message || 'No se pudo cambiar el estado del producto.'); }
+                          }}>
                           <span className="toggle-thumb"/>
                         </button>
                         <div className="actions-group">
+                          <Tooltip label="Ver detalles">
+                            <button className="btn-ver" onClick={() => setVerTarget(p)}>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                          </Tooltip>
                           <Tooltip label="Editar">
                             <button className="btn-editar" onClick={() => setModal(p)}>
                               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

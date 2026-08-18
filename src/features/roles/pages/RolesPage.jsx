@@ -12,7 +12,13 @@ import './Roles.css';
 const RolesPage = () => {
   const navigate = useNavigate();
   const { roles, remove } = useRoles();
+  const { usuarios } = useUsuarios();
   const [query, setQuery] = useState('');
+  // Un rol no está atado a un local específico (la tabla `roles` no tiene
+  // columna de local), así que en vez de un filtro por local se filtra por
+  // rango de fecha de creación del rol (`created_at`).
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [success, setSuccess] = useState('');
@@ -35,12 +41,18 @@ useEffect(() => {
     try { return JSON.parse(rol.permisos); } catch { return []; }
   };
 
-  const getColor = (rol) => rolesService.getColor(rol.nombre);
+  // El color elegido en el formulario de creación/edición se guarda en
+  // rol.color; si el backend no lo trae (roles antiguos o los 3 fijos del
+  // sistema) se usa el mapeo estático por nombre como respaldo.
+  const getColor = (rol) => rol.color || rolesService.getColor(rol.nombre);
   const getIcon  = (rol) => rolesService.getIcon(rol.nombre);
 
-  const shownFiltered = query.trim()
+  let shownFiltered = query.trim()
     ? roles.filter(r => r.nombre.toLowerCase().includes(query.toLowerCase()) || (r.descripcion||'').toLowerCase().includes(query.toLowerCase()))
     : roles;
+  if (fechaDesde) shownFiltered = shownFiltered.filter(r => r.created_at && r.created_at.slice(0, 10) >= fechaDesde);
+  if (fechaHasta) shownFiltered = shownFiltered.filter(r => r.created_at && r.created_at.slice(0, 10) <= fechaHasta);
+  const hayFiltroFecha = !!(fechaDesde || fechaHasta);
   const shown = [...shownFiltered].sort((a, b) => Number(a.id) - Number(b.id));
 
   const handleDelete = async () => {
@@ -77,8 +89,8 @@ useEffect(() => {
           </button>
         </div>
 
-        <div className="insumos-toolbar">
-          <div className="search-group">
+        <div className="insumos-toolbar" style={{display:'flex',alignItems:'center',gap:10,flexWrap:'nowrap'}}>
+          <div className="search-group" style={{flex:'1 1 auto',minWidth:160}}>
             <div className="search-wrap">
               <span className="search-icon">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -87,14 +99,25 @@ useEffect(() => {
               {query && <button className="search-clear" onClick={() => setQuery('')}>✕</button>}
             </div>
           </div>
-          <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{shown.length} rol{shown.length !== 1 ? 'es' : ''}</span>
+          <div style={{flex:'0 0 auto',display:'flex',alignItems:'center',gap:6,width:280}}
+            title="Filtrar roles por fecha de creación">
+            <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
+              style={{flex:'1 1 0',minWidth:0,padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}} />
+            <span style={{fontSize:12,color:'var(--text-muted)',flex:'0 0 auto'}}>–</span>
+            <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
+              style={{flex:'1 1 0',minWidth:0,padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}} />
+            {hayFiltroFecha && (
+              <button className="search-clear" title="Limpiar filtro de fecha" onClick={() => { setFechaDesde(''); setFechaHasta(''); }}>✕</button>
+            )}
+          </div>
+          <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto',flex:'0 0 auto',whiteSpace:'nowrap'}}>{shown.length} rol{shown.length !== 1 ? 'es' : ''}</span>
         </div>
 
         {shown.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">🛡️</div>
-            <h3>{query ? 'Sin coincidencias' : 'No hay roles'}</h3>
-            <p>{query ? `Sin roles para "${query}"` : 'No se encontraron roles'}</p>
+            <h3>{query || hayFiltroFecha ? 'Sin coincidencias' : 'No hay roles'}</h3>
+            <p>{query ? `Sin roles para "${query}"` : hayFiltroFecha ? 'Ningún rol creado en ese rango de fechas' : 'No se encontraron roles'}</p>
           </div>
         ) : (
           <div className="roles-grid">

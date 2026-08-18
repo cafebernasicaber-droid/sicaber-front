@@ -27,6 +27,20 @@ import './Landing.css';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 
+// La columna fecha_inicio/fecha_fin es tipo timestamp en Postgres — pg la
+// devuelve como fecha+hora completa ("2026-08-19T05:00:00.000Z"), no como
+// "YYYY-MM-DD" plano. Cortar a los primeros 10 caracteres antes de separar
+// evita que la hora se cuele como si fuera el día (mismo helper que ya usa
+// el panel admin de Combos).
+const soloFecha = (iso) => iso ? String(iso).slice(0, 10) : '';
+const formatFecha = (iso) => {
+  const f = soloFecha(iso);
+  if (!f) return null;
+  const [y, m, d] = f.split('-');
+  if (!y || !m || !d) return null;
+  return `${d}/${m}/${y}`;
+};
+
 function CartThumb({ src, alt }) {
   const [err, setErr] = React.useState(false);
   const noImg = !src || err;
@@ -1401,7 +1415,10 @@ export default function Landing() {
   };
 
 const handleLogin = async e => {
-  e.preventDefault(); setAuthError(""); setAuthLoading(true);
+  e.preventDefault(); setAuthError("");
+  if (!loginData.correo.trim()) { setAuthError("Ingresa tu correo o usuario."); return; }
+  if (!loginData.password) { setAuthError("Ingresa tu contraseña."); return; }
+  setAuthLoading(true);
   const adminResult = await adminLogin(loginData.correo, loginData.password);
   if (adminResult.success) {
     setAuthSuccess("¡Bienvenido al panel de administración!"); setAuthLoading(false);
@@ -1421,18 +1438,31 @@ const handleLogin = async e => {
   const handleRegister = async e => {
     e.preventDefault(); setAuthError("");
     const soloLetras = /^[A-Za-zÁÉÍÓÚÑÜáéíóúñü ]+$/;
+    if (!regData.numeroDoc.trim()) { setAuthError("El número de documento es obligatorio."); return; }
+    if (!/^[0-9]+$/.test(regData.numeroDoc)) { setAuthError("El número de documento solo puede contener números."); return; }
+    if (regData.numeroDoc.length < 6) { setAuthError("El número de documento debe tener mínimo 6 dígitos."); return; }
+    if (regData.tipoDoc === 'Otros' && !regData.tipoDocOtro.trim()) {
+      setAuthError('Escribe el nombre del tipo de documento.');
+      return;
+    }
+    if (regData.tipoDoc === 'Otros' && regData.tipoDocOtro.trim().length < 3) {
+      setAuthError('El tipo de documento debe tener mínimo 3 caracteres.');
+      return;
+    }
+    if (!regData.nombre.trim()) { setAuthError("El nombre es obligatorio."); return; }
+    if (regData.nombre.trim().length < 3) { setAuthError("El nombre debe tener mínimo 3 caracteres."); return; }
     if (!soloLetras.test(regData.nombre.trim())) { setAuthError("El nombre solo puede contener letras y espacios."); return; }
     if (regData.telefono && !/^[0-9]+$/.test(regData.telefono)) { setAuthError("El teléfono solo puede contener números."); return; }
-    if (!/^[0-9]+$/.test(regData.numeroDoc)) { setAuthError("El número de documento solo puede contener números."); return; }
+    if (regData.telefono && (regData.telefono.length < 7 || regData.telefono.length > 10)) { setAuthError("El teléfono debe tener entre 7 y 10 dígitos."); return; }
+    if (!regData.correo.trim()) { setAuthError("El correo es obligatorio."); return; }
+    if (!/\S+@\S+\.\S+/.test(regData.correo)) { setAuthError("Ingresa un correo electrónico válido."); return; }
+    if (!regData.password) { setAuthError("La contraseña es obligatoria."); return; }
     if (regData.password.length < 8) { setAuthError("La contraseña debe tener mínimo 8 caracteres."); return; }
     if (!/[A-Z]/.test(regData.password)) { setAuthError("La contraseña debe tener al menos una letra mayúscula."); return; }
+    if (!regData.confirm) { setAuthError("Debes confirmar la contraseña."); return; }
     if (regData.password !== regData.confirm) { setAuthError("Las contraseñas no coinciden."); return; }
     if (regData.municipio === 'Medellín' && regData.comuna && regData.comuna !== 'Comuna 8 - Villa Hermosa' && regData.comuna !== 'Comuna 9 - Buenos Aires') {
       setAuthError('Lo sentimos, el servicio de domicilios solo está disponible para las comunas 8 y 9 de Medellín. Si tu dirección es de otra zona, puedes visitarnos en nuestro punto físico.');
-      return;
-    }
-    if (regData.tipoDoc === 'Otros' && !regData.tipoDocOtro.trim()) {
-      setAuthError('Escribe el nombre del tipo de documento.');
       return;
     }
     const tipoDocFinal = regData.tipoDoc === 'Otros' ? regData.tipoDocOtro.trim() : regData.tipoDoc;
@@ -1457,6 +1487,8 @@ const handleLogin = async e => {
   const handleSubmitReview = async e => {
     e.preventDefault(); setReviewError(''); setReviewSuccess('');
     if (!clienteSession) { setModal('auth'); setAuthTab('login'); return; }
+    if (!reviewForm.texto.trim()) { setReviewError('Escribe tu experiencia antes de enviar la reseña.'); return; }
+    if (!reviewForm.estrellas || reviewForm.estrellas < 1) { setReviewError('Selecciona una calificación en estrellas.'); return; }
     setReviewLoading(true);
     const r = await resenasService.create({ clienteId: clienteSession.id, nombre: clienteSession.nombre, rol: 'Cliente verificado', texto: reviewForm.texto, estrellas: reviewForm.estrellas });
     setReviewLoading(false);
@@ -1781,6 +1813,14 @@ const handleLogin = async e => {
                   return s + ((Number(p.precioOriginal)||0) + adicionesTotal) * (p.cantidad||1);
                 }, 0);
                 const ahorro = totalOrig > combo.precio ? totalOrig - combo.precio : 0;
+                // El backend devuelve fecha_inicio/fecha_fin (snake_case) —
+                // leer combo.fechaFin daba siempre undefined. "Desde" se
+                // muestra siempre (con created_at como respaldo si no hay
+                // fecha de inicio explícita); "Hasta" solo si el combo tiene
+                // una fecha de fin definida — mismo comportamiento que ya
+                // usa el panel admin de Combos.
+                const fechaInicioCombo = soloFecha(combo.fecha_inicio || combo.fechaInicio) || soloFecha(combo.created_at);
+                const fechaFinCombo    = soloFecha(combo.fecha_fin    || combo.fechaFin);
                 return (
                   <div key={combo.id} style={{background:'var(--lx-surface)',borderRadius:16,border:'1px solid var(--lx-border)',overflow:'hidden',transition:'transform 0.2s,box-shadow 0.2s'}}
                     onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-4px)';e.currentTarget.style.boxShadow='0 12px 32px rgba(0,0,0,0.4)'}}
@@ -1799,20 +1839,25 @@ const handleLogin = async e => {
                     <div style={{padding:'16px 18px'}}>
                       <div style={{fontSize:16,fontWeight:800,color:'var(--lx-text)',marginBottom:6}}>{combo.nombre}</div>
                       {combo.descripcion && <div style={{fontSize:13,color:'var(--lx-muted)',marginBottom:10}}>{combo.descripcion}</div>}
-                      {combo.fechaFin && (() => {
-                        const [y,m,d] = combo.fechaFin.split('-');
-                        const today = new Date().toISOString().slice(0,10);
-                        const diff = Math.ceil((new Date(combo.fechaFin) - new Date(today)) / 86400000);
-                        const urgente = diff >= 0 && diff <= 3;
-                        return (
-                          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={urgente?'#FF8A80':'var(--lx-muted)'} strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            <span style={{fontSize:12,color:urgente?'#FF8A80':'var(--lx-muted)',fontWeight:urgente?700:400}}>
-                              {urgente && diff === 0 ? '⚡ Último día' : urgente ? `⚡ Vence en ${diff} día${diff!==1?'s':''}` : `Válido hasta ${d}/${m}/${y}`}
-                            </span>
-                          </div>
-                        );
-                      })()}
+                      {fechaInicioCombo && (
+                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10,flexWrap:'wrap'}}>
+                          <span style={{fontSize:11,color:'var(--lx-muted)',background:'rgba(255,255,255,0.06)',borderRadius:6,padding:'3px 8px',display:'flex',alignItems:'center',gap:4}}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            Desde {formatFecha(fechaInicioCombo)}
+                          </span>
+                          {fechaFinCombo && (() => {
+                            const today = new Date().toISOString().slice(0,10);
+                            const diff = Math.ceil((new Date(fechaFinCombo) - new Date(today)) / 86400000);
+                            const urgente = diff >= 0 && diff <= 3;
+                            return (
+                              <span style={{fontSize:11,color:urgente?'#FF8A80':'var(--lx-muted)',fontWeight:urgente?700:400,background:'rgba(255,255,255,0.06)',borderRadius:6,padding:'3px 8px',display:'flex',alignItems:'center',gap:4}}>
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                {urgente && diff === 0 ? '⚡ Último día' : urgente ? `⚡ Vence en ${diff} día${diff!==1?'s':''}` : `Hasta ${formatFecha(fechaFinCombo)}`}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      )}
                       <div style={{fontSize:12,color:'var(--lx-muted)',marginBottom:12}}>
                         {(combo.items||[]).map((p,i)=>(
                           <span key={p.id ?? i}>{i>0&&<span style={{color:'var(--lx-muted)'}}> + </span>}{p.cantidad>1?`${p.cantidad}× `:''}{p.nombre}</span>
@@ -1908,7 +1953,13 @@ const handleLogin = async e => {
           )}
           <div className="lx-grid">
             {shown.map(p => {
-              const pd = p.descuento > 0 ? Math.round(p.precio * (1 - p.descuento / 100)) : null;
+              // descuentoVigente ya revisa fecha_inicio_desc/fecha_fin_desc: un
+              // descuento programado para el futuro (o ya vencido) no debe
+              // mostrarse como "con descuento" en el catálogo hasta que llegue
+              // esa fecha. Antes esto solo miraba p.descuento > 0, sin importar
+              // la vigencia, así que un descuento programado ya se veía aplicado.
+              const descVigente = descuentoVigente(p);
+              const pd = descVigente ? calcPrecioFinal(p) : null;
               const precioCarrito = pd || p.precio;
               const hayStock = productoDisponible(p.id);
               return (
@@ -1918,9 +1969,9 @@ const handleLogin = async e => {
                     ? <img src={p.imagen||p.img} alt={p.nombre} className="lx-card__img" onError={e=>{e.target.style.display='none'}}/>
                     : <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:36}}>☕</div>
                   }
-                  {p.descuento > 0 && (
+                  {descVigente && (
                     <span style={{position:'absolute',top:10,left:10,background:'#E53935',color:'white',fontSize:11,fontWeight:800,padding:'3px 9px',borderRadius:20,zIndex:2}}>
-                      -{p.descuento}%
+                      -{descVigente}%
                     </span>
                   )}
                 </div>
@@ -2009,7 +2060,7 @@ const handleLogin = async e => {
                   ))}
                 </div>
               </div>
-              <textarea className="lx-review-textarea" placeholder="Cuéntanos tu experiencia..." value={reviewForm.texto} onChange={e => setReviewForm(f => ({...f, texto: e.target.value}))} rows={4} maxLength={400}/>
+              <textarea className="lx-review-textarea" placeholder="Cuéntanos tu experiencia..." value={reviewForm.texto} onChange={e => setReviewForm(f => ({...f, texto: e.target.value.slice(0, 400)}))} rows={4}/>
               <div style={{fontSize:11,color:'var(--muted)',textAlign:'right',marginTop:4}}>{reviewForm.texto.length}/400</div>
               {reviewError   && <div className="lx-modal__err" style={{marginTop:8}}>{reviewError}</div>}
               {reviewSuccess && <div className="lx-modal__ok"  style={{marginTop:8}}>{reviewSuccess}</div>}
@@ -2138,7 +2189,7 @@ const handleLogin = async e => {
                     <div className="lx-drawer__ctrl">
                       <button onClick={() => updateQty(item._cartKey || item.id,-1,item.id)}>−</button>
                       <input
-                        type="number" min="1" className="lx-drawer__qty-input"
+                        type="number" className="lx-drawer__qty-input"
                         value={item.qty}
                         onChange={e => setCartQty(item._cartKey || item.id, e.target.value, item.id)}
                         onBlur={e => { if (!e.target.value || Number(e.target.value) < 1) setCartQty(item._cartKey || item.id, 1, item.id); }}
@@ -2175,8 +2226,8 @@ const handleLogin = async e => {
             {authSuccess && <div className="lx-modal__ok">{authSuccess}</div>}
             {authTab==="login" && (
               <form className="lx-form" onSubmit={handleLogin}>
-                <div className="lx-field"><label>Correo / Usuario</label><input type="text" placeholder="tu@correo.com o usuario admin" required value={loginData.correo} onChange={e=>setLoginData({...loginData,correo:e.target.value})}/></div>
-                <div className="lx-field"><label>Contraseña</label><div className="lx-pass-wrap"><input type={showLoginPass?'text':'password'} placeholder="••••••••" required value={loginData.password} onChange={e=>setLoginData({...loginData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowLoginPass(v=>!v)}>{showLoginPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
+                <div className="lx-field"><label>Correo / Usuario</label><input type="text" placeholder="tu@correo.com o usuario admin" value={loginData.correo} onChange={e=>setLoginData({...loginData,correo:e.target.value})}/></div>
+                <div className="lx-field"><label>Contraseña</label><div className="lx-pass-wrap"><input type={showLoginPass?'text':'password'} placeholder="••••••••" value={loginData.password} onChange={e=>setLoginData({...loginData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowLoginPass(v=>!v)}>{showLoginPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                 <button type="submit" className="lx-btn lx-btn--full" disabled={authLoading}>{authLoading?"Ingresando...":"Ingresar"}</button>
                 <p style={{textAlign:'center',marginTop:12,fontSize:13}}>
                   <span style={{color:'var(--lx-accent)',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setModal(null);navigate('/recuperar-password');}}>¿Olvidaste tu contraseña?</span>
@@ -2191,16 +2242,16 @@ const handleLogin = async e => {
                       <option>Cédula de Ciudadanía</option><option>Tarjeta de Identidad</option><option>Cédula de Extranjería</option><option>Otros</option>
                     </select>
                   </div>
-                  <div className="lx-field"><label>Número de documento *</label><input type="text" inputMode="numeric" required minLength={6} placeholder="Solo números" value={regData.numeroDoc} onChange={e=>setRegData({...regData,numeroDoc:e.target.value.replace(/[^0-9]/g,'')})}/></div>
+                  <div className="lx-field"><label>Número de documento *</label><input type="text" inputMode="numeric" placeholder="Solo números" value={regData.numeroDoc} onChange={e=>setRegData({...regData,numeroDoc:e.target.value.replace(/[^0-9]/g,'')})}/></div>
                 </div>
                 {regData.tipoDoc === 'Otros' && (
-                  <div className="lx-field"><label>¿Cuál documento? *</label><input type="text" required minLength={3} value={regData.tipoDocOtro} placeholder="Ej: Pasaporte, Permiso Especial..." onChange={e=>setRegData({...regData,tipoDocOtro:e.target.value})}/></div>
+                  <div className="lx-field"><label>¿Cuál documento? *</label><input type="text" value={regData.tipoDocOtro} placeholder="Ej: Pasaporte, Permiso Especial..." onChange={e=>setRegData({...regData,tipoDocOtro:e.target.value})}/></div>
                 )}
                 <div className="lx-form__2">
-                  <div className="lx-field"><label>Nombre *</label><input type="text" required minLength={3} placeholder="Solo letras y espacios" value={regData.nombre} onChange={e=>setRegData({...regData,nombre:e.target.value.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü ]/g,'')})}/></div>
-                  <div className="lx-field"><label>Teléfono</label><input type="tel" inputMode="numeric" minLength={7} maxLength={10} placeholder="Solo números" value={regData.telefono} onChange={e=>setRegData({...regData,telefono:e.target.value.replace(/[^0-9]/g,'')})}/></div>
+                  <div className="lx-field"><label>Nombre *</label><input type="text" placeholder="Solo letras y espacios" value={regData.nombre} onChange={e=>setRegData({...regData,nombre:e.target.value.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü ]/g,'')})}/></div>
+                  <div className="lx-field"><label>Teléfono</label><input type="tel" inputMode="numeric" placeholder="Solo números" value={regData.telefono} onChange={e=>setRegData({...regData,telefono:e.target.value.replace(/[^0-9]/g,'').slice(0, 10)})}/></div>
                 </div>
-                <div className="lx-field"><label>Correo *</label><input type="email" required value={regData.correo} onChange={e=>setRegData({...regData,correo:e.target.value})}/></div>
+                <div className="lx-field"><label>Correo *</label><input type="text" value={regData.correo} onChange={e=>setRegData({...regData,correo:e.target.value})}/></div>
                 <div style={{display:'flex',alignItems:'flex-start',gap:8,padding:'10px 12px',borderRadius:8,background:'rgba(129,199,132,0.12)',border:'1px solid rgba(129,199,132,0.35)',marginBottom:4}}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#66BB6A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                   <span style={{fontSize:11.5,color:'var(--lx-text)',lineHeight:1.4}}>Actualmente solo prestamos servicio en Medellín, específicamente en las comunas 8 y 9.</span>
@@ -2220,8 +2271,8 @@ const handleLogin = async e => {
                   <p style={{fontSize:12,color:'#81C784',marginTop:-8,marginBottom:4,fontWeight:600}}>✓ ¡Perfecto! Hacemos domicilios a tu zona.</p>
                 )}
                 <div className="lx-form__2">
-                  <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Mín. 8, 1 mayúscula" required minLength={8} value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
-                  <div className="lx-field"><label>Confirmar *</label><div className="lx-pass-wrap"><input type={showRegConf?'text':'password'} placeholder="••••••••" required minLength={8} value={regData.confirm} onChange={e=>setRegData({...regData,confirm:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegConf(v=>!v)}>{showRegConf?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
+                  <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Mín. 8, 1 mayúscula" value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
+                  <div className="lx-field"><label>Confirmar *</label><div className="lx-pass-wrap"><input type={showRegConf?'text':'password'} placeholder="••••••••" value={regData.confirm} onChange={e=>setRegData({...regData,confirm:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegConf(v=>!v)}>{showRegConf?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                 </div>
                 <p style={{fontSize:11,color:'var(--lx-muted)',marginTop:-8,marginBottom:4}}>La contraseña debe tener mínimo 8 caracteres y al menos una letra mayúscula.</p>
                 <button type="submit" className="lx-btn lx-btn--full" disabled={authLoading}>{authLoading?"Creando...":"Crear cuenta"}</button>
@@ -2290,7 +2341,7 @@ const handleLogin = async e => {
                 <form onSubmit={handleEditPerfil} style={{display:'flex',flexDirection:'column',gap:14}}>
                   {editError && <div className="lx-modal__err">{editError}</div>}
                   {editSuccess && <div className="lx-modal__ok">{editSuccess}</div>}
-                  <div className="lx-field"><label>Nombre completo *</label><input type="text" required value={editData.nombre||""} onChange={e=>setEditData({...editData,nombre:e.target.value})}/></div>
+                  <div className="lx-field"><label>Nombre completo *</label><input type="text" value={editData.nombre||""} onChange={e=>setEditData({...editData,nombre:e.target.value})}/></div>
                   <div className="lx-field"><label>Teléfono</label><input type="tel" value={editData.telefono||""} onChange={e=>setEditData({...editData,telefono:e.target.value})}/></div>
                   <div className="lx-field">
                     <label>Comuna <span style={{fontSize:11,color:'var(--lx-muted)',fontWeight:400}}>(servicio disponible solo en comunas 8 y 9)</span></label>

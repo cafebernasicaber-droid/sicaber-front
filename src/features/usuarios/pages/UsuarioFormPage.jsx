@@ -29,8 +29,18 @@ const UsuarioFormPage = ({ mode }) => {
   }, [isEdit, id, navigate]);
 
   const handleSubmit = async (e) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    if (form.password && form.password !== confirm) { setError('Las contraseñas no coinciden.'); setLoading(false); return; }
+    e.preventDefault(); setError('');
+
+    if (!form.nombre.trim())   { setError('El nombre completo es obligatorio.'); return; }
+    if (!form.username.trim()) { setError('El nombre de usuario es obligatorio.'); return; }
+    if (form.correo && !/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    if (!isEdit && !form.password) { setError('La contraseña es obligatoria.'); return; }
+    if (!isEdit && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    if (!isEdit && !confirm) { setError('Debes confirmar la contraseña.'); return; }
+    if (form.password && form.password !== confirm) { setError('Las contraseñas no coinciden.'); return; }
+    if (!form.rolId) { setError('Selecciona un rol.'); return; }
+
+    setLoading(true);
     const data = { ...form, rolId: parseInt(form.rolId) };
     try {
       const r = isEdit ? await update(parseInt(id), data) : await create(data);
@@ -62,17 +72,17 @@ const UsuarioFormPage = ({ mode }) => {
             <div className="form-row">
               <div className="form-group">
                 <label>Nombre completo *</label>
-                <input type="text" placeholder="Nombre completo" required value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} />
+                <input type="text" placeholder="Nombre completo" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} />
               </div>
               <div className="form-group">
                 <label>Nombre de usuario *</label>
-                <input type="text" placeholder="usuario_ejemplo" required value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
+                <input type="text" placeholder="usuario_ejemplo" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
               </div>
             </div>
             <div className="form-row">
               <div className="form-group">
                 <label>Correo electrónico</label>
-                <input type="email" placeholder="correo@ejemplo.com" value={form.correo} onChange={e => setForm({...form, correo: e.target.value})} />
+                <input type="text" placeholder="correo@ejemplo.com" value={form.correo} onChange={e => setForm({...form, correo: e.target.value})} />
               </div>
               <div className="form-group">
                 <label>Teléfono</label>
@@ -88,12 +98,12 @@ const UsuarioFormPage = ({ mode }) => {
             <div className="form-row">
               <div className="form-group">
                 <label>{isEdit ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}</label>
-                <input type="password" placeholder={isEdit ? 'Nueva contraseña...' : 'Mín. 6 caracteres'} required={!isEdit}
+                <input type="password" placeholder={isEdit ? 'Nueva contraseña...' : 'Mín. 6 caracteres'}
                   value={form.password} onChange={e => setForm({...form, password: e.target.value})} />
               </div>
               <div className="form-group">
                 <label>{isEdit ? 'Confirmar nueva contraseña' : 'Confirmar contraseña *'}</label>
-                <input type="password" placeholder="Repite la contraseña" required={!isEdit}
+                <input type="password" placeholder="Repite la contraseña"
                   value={confirm} onChange={e => setConfirm(e.target.value)}
                   style={{borderColor: confirm && form.password && confirm !== form.password ? '#E53935' : confirm && form.password && confirm === form.password ? '#4CAF50' : ''}}/>
                 {confirm && form.password && confirm !== form.password && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>Las contraseñas no coinciden</div>}
@@ -103,7 +113,7 @@ const UsuarioFormPage = ({ mode }) => {
             <div className="form-row">
               <div className="form-group">
                 <label>Rol *</label>
-                <select required value={form.rolId} onChange={e => setForm({...form, rolId: e.target.value})}>
+                <select value={form.rolId} onChange={e => setForm({...form, rolId: e.target.value})}>
                   <option value="">Seleccionar rol...</option>
                   {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
                 </select>
