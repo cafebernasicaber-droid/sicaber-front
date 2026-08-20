@@ -1,5 +1,14 @@
 /* ---- MODULE SHARED ---- */
 .mod-root { max-width: 1100px; }
+/* El listado de Roles (tarjetas) usaba el mismo .mod-root que los
+   formularios/detalle, pensados como columna angosta a propósito. Eso
+   topaba el contenedor a 1100px sin importar el ancho real de pantalla:
+   el .roles-grid de abajo ya es un grid auto-fill que aprovecha el ancho
+   disponible, pero quedaba encerrado en esa caja de 1100px, dejando una
+   franja vacía grande a la derecha en pantallas anchas. Este modificador
+   quita el tope solo donde se usa (el listado), sin tocar los formularios
+   ni "Ver rol", que sí deben seguir angostos para ser legibles. */
+.mod-root--wide { max-width: none; }
 .mod-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .mod-header__left { display: flex; align-items: center; gap: 16px; }
 .mod-header__icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
@@ -17,7 +26,19 @@
 .btn-nuevo:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(58,125,68,0.3); }
 
 /* ---- ROLES GRID ---- */
-.roles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+/* Máximo 3 columnas por fila — auto-fill dejaba caber 4+ tarjetas en
+   pantallas muy anchas, quedando demasiado angostas. Con repeat(3, 1fr)
+   cada tarjeta se reparte el ancho disponible en partes iguales (máx. 3),
+   y en pantallas más chicas se reduce a 2 y luego a 1 por fila. */
+.roles-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+@media (max-width: 1024px) {
+  .roles-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .roles-grid { grid-template-columns: 1fr; }
+}
 
 .rol-card {
   background: var(--bg-surface); border-radius: 16px; overflow: hidden;
@@ -88,24 +109,39 @@
 .colors-grid { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .color-dot {
   width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
-  border: 3px solid transparent; transition: all 0.2s;
+  border: 3px solid transparent; transition: all 0.2s; padding: 0; outline: none;
+  display: flex; align-items: center; justify-content: center;
 }
-.color-dot--selected { border-color: var(--text-primary); transform: scale(1.15); }
+.color-dot:focus-visible { box-shadow: 0 0 0 3px var(--color-green-glow, rgba(58,125,68,0.35)); }
+.color-dot--selected { border-color: var(--text-primary); transform: scale(1.15); box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
 
 /* PERMISOS */
 .permisos-section { margin-top: 4px; }
 .permisos-section > label { font-size: 13px; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 12px; }
-.modulo-block { background: #faf8f5; border: 1px solid #ede8e1; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-.modulo-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+/* Acordeón: colapsado por defecto (padding-bottom 0 y sin margin-bottom
+   en el header cuando está cerrado, para que no quede un hueco vacío
+   donde antes estaban los checkboxes). */
+.modulo-block { background: #faf8f5; border: 1px solid #ede8e1; border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; transition: background 0.15s; }
+.modulo-block--abierto { background: var(--bg-surface); border-color: rgba(58,125,68,0.35); }
+.modulo-header { display: flex; align-items: center; justify-content: space-between; }
+.modulo-block--abierto .modulo-header { margin-bottom: 12px; }
+.modulo-header--clickable { cursor: pointer; user-select: none; }
+.modulo-header__left { display: flex; align-items: center; gap: 8px; }
+.modulo-chevron { color: var(--text-muted); flex-shrink: 0; transition: transform 0.18s ease; }
 .modulo-name { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
-.modulo-toggle { font-size: 12px; color: #3A7D44; cursor: pointer; font-weight: 600; background: none; border: none; }
+.modulo-count { font-size: 11px; font-weight: 700; color: #3A7D44; background: rgba(58,125,68,0.12); padding: 2px 8px; border-radius: 100px; }
+.modulo-toggle { font-size: 12px; color: #3A7D44; cursor: pointer; font-weight: 600; background: none; border: none; flex-shrink: 0; }
 .modulo-permisos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
 .permiso-item { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; }
 .permiso-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: #3A7D44; cursor: pointer; }
 .permiso-item span { font-size: 13px; color: var(--text-secondary); }
 
 /* VER ROL */
-.ver-card { background: var(--bg-surface); border-radius: 20px; padding: 32px; border: 1px solid rgba(0,0,0,0.07); max-width: 760px; }
+/* La tarjeta quedaba pegada al borde izquierdo: max-width sin margin
+   la deja como bloque normal (alineado a la izquierda) dentro de
+   .mod-root--wide, así que en pantallas anchas sobra todo el lado
+   derecho. margin:0 auto la centra en el ancho disponible. */
+.ver-card { background: var(--bg-surface); border-radius: 20px; padding: 32px; border: 1px solid rgba(0,0,0,0.07); max-width: 900px; margin: 0 auto; }
 .ver-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #f0ede8; }
 .ver-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 26px; flex-shrink: 0; }
 .ver-nombre { font-size: 24px; font-weight: 800; color: var(--text-primary); }

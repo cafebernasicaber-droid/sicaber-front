@@ -359,6 +359,10 @@ export default function ProductosPage() {
   const [modal,     setModal]     = useState(null);
   const [verTarget, setVerTarget] = useState(null);
   const [deleteTarget, setDel]    = useState(null);
+  // Producto pendiente de confirmar el cambio de estado — antes el switch
+  // Activo/Inactivo aplicaba el cambio al primer clic, sin preguntar nada:
+  // desactivar un producto por error lo sacaba de la landing al instante.
+  const [estadoTarget, setEstadoTarget] = useState(null);
   const [success,   setSuccess]   = useState('');
   const [page,      setPage]      = useState(1);
   const PER_PAGE = 5;
@@ -399,6 +403,18 @@ export default function ProductosPage() {
       showOk(err.message || 'No se pudo eliminar el producto.');
     }
     setDel(null);
+  };
+
+  const confirmarToggleEstado = async () => {
+    const objetivo = estadoTarget;
+    setEstadoTarget(null);
+    try {
+      await productosService.toggleEstado(objetivo);
+      refresh();
+      showOk(objetivo.estado === 'Activo' ? 'Producto desactivado correctamente.' : 'Producto activado correctamente.');
+    } catch (err) {
+      showOk(err.message || 'No se pudo cambiar el estado del producto.');
+    }
   };
 
   // Renderiza precio con descuento vigente o precio normal
@@ -552,10 +568,8 @@ export default function ProductosPage() {
                       <td>{renderDescuentoBadge(p)}</td>
                       <td>
                         <button className={`toggle-btn ${p.estado==='Activo'?'toggle-on':'toggle-off'}`}
-                          onClick={async () => {
-                            try { await productosService.toggleEstado(p); refresh(); }
-                            catch (err) { showOk(err.message || 'No se pudo cambiar el estado del producto.'); }
-                          }}>
+                          title={p.estado === 'Activo' ? 'Desactivar producto' : 'Activar producto'}
+                          onClick={() => setEstadoTarget(p)}>
                           <span className="toggle-thumb"/>
                         </button>
                       </td>
@@ -609,10 +623,8 @@ export default function ProductosPage() {
                       <div className="prod-card__foot">
                         <button className={`toggle-btn ${p.estado==='Activo'?'toggle-on':'toggle-off'}`}
                           style={{ transform:'scale(0.85)' }}
-                          onClick={async () => {
-                            try { await productosService.toggleEstado(p); refresh(); }
-                            catch (err) { showOk(err.message || 'No se pudo cambiar el estado del producto.'); }
-                          }}>
+                          title={p.estado === 'Activo' ? 'Desactivar producto' : 'Activar producto'}
+                          onClick={() => setEstadoTarget(p)}>
                           <span className="toggle-thumb"/>
                         </button>
                         <div className="actions-group">
@@ -657,6 +669,31 @@ export default function ProductosPage() {
             </div>
           )}
         </div>
+
+        {/* Confirmar activar/desactivar — nunca aplica el cambio al primer
+            clic del switch de la columna Estado. */}
+        {estadoTarget && (
+          <div className="modal-overlay" onClick={() => setEstadoTarget(null)}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
+              <div className="modal-icon" style={{ background: estadoTarget.estado === 'Activo' ? 'rgba(245,127,23,0.15)' : 'rgba(76,175,80,0.15)', color: estadoTarget.estado === 'Activo' ? '#F57F17' : '#4CAF50' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              </div>
+              <h3>{estadoTarget.estado === 'Activo' ? '¿Deseas desactivar este producto?' : '¿Deseas activar este producto?'}</h3>
+              <p>
+                {estadoTarget.estado === 'Activo'
+                  ? 'Dejará de mostrarse en la landing pública, pero seguirá apareciendo aquí marcado como Inactivo.'
+                  : 'Volverá a mostrarse en la landing pública.'}
+              </p>
+              <div className="modal-detail">"{estadoTarget.nombre}"</div>
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => setEstadoTarget(null)}>Cancelar</button>
+                <button className="btn-add" onClick={confirmarToggleEstado}>
+                  {estadoTarget.estado === 'Activo' ? 'Desactivar' : 'Activar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {deleteTarget && (
           <div className="modal-overlay" onClick={() => setDel(null)}>

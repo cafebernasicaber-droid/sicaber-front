@@ -73,7 +73,7 @@ useEffect(() => {
 
   return (
     <Layout>
-      <div className="mod-root">
+      <div className="mod-root mod-root--wide">
         {success && <div className="toast toast-success">✓ {success}</div>}
 
         <div className="page-header roles-page-header" style={{display:'flex', alignItems:'flex-start', justifyContent:'space-between'}}>

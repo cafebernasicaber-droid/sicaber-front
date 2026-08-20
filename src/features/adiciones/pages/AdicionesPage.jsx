@@ -205,6 +205,7 @@ function AdicionDetalleModal({ adicion: a, insumos, onClose }) {
             ['Insumo asociado', insumoSel ? insumoSel.nombre : 'Ninguno (solo extra de precio)'],
             ['Cantidad consumida', insumoSel && a.cantidad != null ? `${a.cantidad} ${insumoSel.unidadMedida || ''}` : '—'],
             ['Fecha de creación', fmtFecha(a.created_at)],
+            ['Última actualización', fmtFecha(a.updated_at)],
           ].map(([label, val]) => (
             <div key={label} style={{ background: 'var(--bg-surface)', borderRadius: 10, padding: '10px 14px' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 3 }}>{label}</div>
@@ -276,6 +277,9 @@ export default function AdicionesPage() {
   // llegaba en el orden que devolvía el backend.
   const [estadoFiltro, setEstadoFiltro] = useState('Todos');
   const [orden,        setOrden]        = useState('nombre_az');
+  // Filtro por precio (rango mín/máx), además del buscador por nombre.
+  const [precioMin, setPrecioMin] = useState('');
+  const [precioMax, setPrecioMax] = useState('');
   // Adición pendiente de confirmar el cambio de estado: antes el toggle se
   // aplicaba de inmediato al primer clic, sin preguntar nada.
   const [estadoTarget, setEstadoTarget] = useState(null);
@@ -296,6 +300,8 @@ export default function AdicionesPage() {
         (a.descripcion || '').toLowerCase().includes(q))
     : adiciones;
   if (estadoFiltro !== 'Todos') filtradas = filtradas.filter(a => (a.estado || 'Activo') === estadoFiltro);
+  if (precioMin !== '') filtradas = filtradas.filter(a => Number(a.precio) >= Number(precioMin));
+  if (precioMax !== '') filtradas = filtradas.filter(a => Number(a.precio) <= Number(precioMax));
 
   const COMPARADORES = {
     nombre_az:     (a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }),
@@ -370,6 +376,18 @@ export default function AdicionesPage() {
             <option value="Activo">Activas</option>
             <option value="Inactivo">Inactivas</option>
           </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Filtrar adiciones por precio">
+            <input type="number" placeholder="Precio mín." value={precioMin}
+              onChange={e => { setPrecioMin(e.target.value); setPage(1); }}
+              style={{ width: 105, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>–</span>
+            <input type="number" placeholder="Precio máx." value={precioMax}
+              onChange={e => { setPrecioMax(e.target.value); setPage(1); }}
+              style={{ width: 105, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+            {(precioMin !== '' || precioMax !== '') && (
+              <button className="search-clear" title="Limpiar filtro de precio" onClick={() => { setPrecioMin(''); setPrecioMax(''); setPage(1); }}>✕</button>
+            )}
+          </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 'auto' }}>
             {shown.length} adición{shown.length !== 1 ? 'es' : ''}
           </span>

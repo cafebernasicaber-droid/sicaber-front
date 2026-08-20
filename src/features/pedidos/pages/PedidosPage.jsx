@@ -497,6 +497,10 @@ export default function PedidosPage() {
   const [deleteTarget, setDel]      = useState(null);
   const [anularMotivo, setAnularMotivo] = useState('');
   const [buscar,       setBuscar]   = useState('');
+  // Filtro por precio total del pedido (rango mín/máx), además del
+  // buscador de texto (cliente, producto, estado, método de pago...).
+  const [precioMin,    setPrecioMin] = useState('');
+  const [precioMax,    setPrecioMax] = useState('');
   const [pagina,       setPagina]   = useState(1);
   const [success,      setSuccess]  = useState('');
 const [vista,         setVista]   = useState('activos'); 
@@ -643,9 +647,11 @@ const pedidoMatchesTexto = (p, q) => {
   const prods = Array.isArray(p.productos) ? p.productos : (Array.isArray(p.items) ? p.items : []);
   return prods.some(x => (x.nombre || (typeof x === 'string' ? x : '')).toLowerCase().includes(q));
 };
-const filtrados = lq
+let filtrados = lq
   ? base.filter(p => pedidoMatchesTexto(p, lq))
   : base;
+  if (precioMin !== '') filtrados = filtrados.filter(p => Number(p.total || 0) >= Number(precioMin));
+  if (precioMax !== '') filtrados = filtrados.filter(p => Number(p.total || 0) <= Number(precioMax));
   const ordenados  = [...filtrados].sort((a,b) => Number(b.id) - Number(a.id));
   const totalPags  = Math.ceil(ordenados.length / POR_PAGINA);
   const paginados  = ordenados.slice((pagina-1)*POR_PAGINA, pagina*POR_PAGINA);
@@ -793,6 +799,18 @@ const filtrados = lq
                 {buscar && <button className="search-clear" onClick={() => setBuscar('')}>✕</button>}
               </div>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Filtrar pedidos por total">
+              <input type="number" placeholder="Total mín." value={precioMin}
+                onChange={e => { setPrecioMin(e.target.value); setPagina(1); }}
+                style={{ width: 105, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+              <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>–</span>
+              <input type="number" placeholder="Total máx." value={precioMax}
+                onChange={e => { setPrecioMax(e.target.value); setPagina(1); }}
+                style={{ width: 105, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+              {(precioMin !== '' || precioMax !== '') && (
+                <button className="search-clear" title="Limpiar filtro de total" onClick={() => { setPrecioMin(''); setPrecioMax(''); setPagina(1); }}>✕</button>
+              )}
+            </div>
             <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{filtrados.length} pedido{filtrados.length!==1?'s':''}</span>
           </div>
 
@@ -801,14 +819,34 @@ const filtrados = lq
               <div className="empty-icon">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
               </div>
-              <h3>{buscar ? 'Sin coincidencias' : 'No hay pedidos'}</h3>
-              <p>{buscar ? `Sin resultados para "${buscar}"` : 'Crea el primer pedido del día usando el botón "Nuevo pedido" de arriba'}</p>
+              <h3>{buscar || precioMin !== '' || precioMax !== '' ? 'Sin coincidencias' : 'No hay pedidos'}</h3>
+              <p>{buscar ? `Sin resultados para "${buscar}"` : (precioMin !== '' || precioMax !== '') ? 'Ningún pedido cae en ese rango de total' : 'Crea el primer pedido del día usando el botón "Nuevo pedido" de arriba'}</p>
             </div>
           ) : (
             <div className="table-wrap">
               <table className="insumos-table">
                 <thead>
-                  <tr><th>#</th><th>Cliente</th><th>Tipo</th><th>Local</th><th>Atendido por</th><th>Domiciliario</th><th>Productos</th><th>Total</th><th>Hora</th><th>Estado</th><th>Acciones</th></tr>
+                  {/* Columna "Domiciliario" eliminada: en la práctica casi
+                      todos los pedidos visibles aquí son "En el Local" (esa
+                      celda siempre quedaba en "—"), y los pocos pedidos a
+                      domicilio que sí tienen domiciliario asignado ya lo
+                      muestran en el modal "Ver detalle" (pd-modal-grid, más
+                      abajo) — no hace falta reservarle una columna fija a la
+                      tabla. Las demás columnas se repartieron el espacio que
+                      dejó libre con anchos porcentuales explícitos, en vez de
+                      dejarlo como espacio vacío. */}
+                  <tr>
+                    <th style={{ width: '5%' }}>#</th>
+                    <th style={{ width: '13%' }}>Cliente</th>
+                    <th style={{ width: '9%' }}>Tipo</th>
+                    <th style={{ width: '11%' }}>Local</th>
+                    <th style={{ width: '10%' }}>Atendido por</th>
+                    <th style={{ width: '22%' }}>Productos</th>
+                    <th style={{ width: '9%' }}>Total</th>
+                    <th style={{ width: '7%' }}>Hora</th>
+                    <th style={{ width: '10%' }}>Estado</th>
+                    <th style={{ width: '4%' }}>Acciones</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {paginados.map(p => {
@@ -828,8 +866,7 @@ const filtrados = lq
                         </td>
                         <td>{p.sede ? <span className="badge-cat" style={{background:'rgba(25,118,210,0.12)',color:'#1976D2'}}>{p.sede}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
                         <td>{p.barista ? <span className="pd-pill-barista">{p.barista}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                        <td>{p.tipo==='domicilio' ? (p.domiciliario ? <span className="pd-pill-domi">🛵 {p.domiciliario}</span> : <span style={{color:'var(--text-muted)'}}>—</span>) : <span style={{color:'#ccc'}}>N/A</span>}</td>
-                        <td style={{fontSize:12,color:'var(--text-secondary)',maxWidth:180}}>
+                        <td style={{fontSize:12,color:'var(--text-secondary)'}}>
                           {vis}
                           <button className="btn-ver-mas" onClick={() => setDetalle(p)} style={{marginLeft:4}}>
                             {extra > 0 ? `+${extra} más` : 'ver'}

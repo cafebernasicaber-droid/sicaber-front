@@ -15,6 +15,13 @@ const RolFormPage = ({ mode }) => {
   const [form, setForm] = useState({ nombre: '', descripcion: '', color: colores[0], permisos: [] });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Acordeón de permisos: antes los 18 módulos (Dashboard, Usuarios, Roles,
+  // Clientes...) se mostraban todos expandidos a la vez, con un scroll
+  // larguísimo. Ahora solo un módulo puede estar abierto a la vez —
+  // guardamos su nombre acá; colapsar/expandir es puramente visual y no
+  // toca form.permisos, así que los permisos ya marcados de un módulo
+  // colapsado se conservan.
+  const [moduloAbierto, setModuloAbierto] = useState(null);
 
   useEffect(() => {
     if (mode === 'edit' && id) {
@@ -135,11 +142,23 @@ const RolFormPage = ({ mode }) => {
                     <label>Color identificador</label>
                     <div className="colors-grid">
                       {colores.map(c => (
-                        <div key={c}
+                        <button key={c}
+                          type="button"
+                          aria-label={`Color ${c}`}
+                          aria-pressed={form.color === c}
                           className={`color-dot ${form.color === c ? 'color-dot--selected' : ''}`}
                           style={{ background: c }}
-                          onClick={() => setForm({ ...form, color: c })}
-                        />
+                          onClick={() => setForm(f => ({ ...f, color: c }))}
+                        >
+                          {/* Check visible sobre el color elegido — además del
+                              borde/escala de .color-dot--selected, para que la
+                              selección sea inconfundible sin importar el tema. */}
+                          {form.color === c && (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          )}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -156,24 +175,39 @@ const RolFormPage = ({ mode }) => {
                   {modulos.map(mod => {
                     const ids = mod.permisos.map(p => p.id);
                     const allOn = ids.every(pid => form.permisos.includes(pid));
+                    const seleccionados = ids.filter(pid => form.permisos.includes(pid)).length;
+                    const abierto = moduloAbierto === mod.modulo;
                     return (
-                      <div className="modulo-block" key={mod.modulo}>
-                        <div className="modulo-header">
-                          <span className="modulo-name">{mod.modulo}</span>
-                          <button type="button" className="modulo-toggle" onClick={() => toggleModulo(mod)}>
+                      <div className={`modulo-block ${abierto ? 'modulo-block--abierto' : ''}`} key={mod.modulo}>
+                        <div
+                          className="modulo-header modulo-header--clickable"
+                          onClick={() => setModuloAbierto(m => m === mod.modulo ? null : mod.modulo)}
+                        >
+                          <span className="modulo-header__left">
+                            <svg className="modulo-chevron" style={{ transform: abierto ? 'rotate(90deg)' : 'none' }}
+                              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                            <span className="modulo-name">{mod.modulo}</span>
+                            {seleccionados > 0 && <span className="modulo-count">{seleccionados}/{ids.length}</span>}
+                          </span>
+                          <button type="button" className="modulo-toggle"
+                            onClick={(e) => { e.stopPropagation(); toggleModulo(mod); }}>
                             {allOn ? 'Desmarcar todos' : 'Marcar todos'}
                           </button>
                         </div>
-                        <div className="modulo-permisos">
-                          {mod.permisos.map(p => (
-                            <label className="permiso-item" key={p.id}>
-                              <input type="checkbox"
-                                checked={form.permisos.includes(p.id)}
-                                onChange={() => togglePermiso(p.id)} />
-                              <span>{p.label}</span>
-                            </label>
-                          ))}
-                        </div>
+                        {abierto && (
+                          <div className="modulo-permisos">
+                            {mod.permisos.map(p => (
+                              <label className="permiso-item" key={p.id}>
+                                <input type="checkbox"
+                                  checked={form.permisos.includes(p.id)}
+                                  onChange={() => togglePermiso(p.id)} />
+                                <span>{p.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

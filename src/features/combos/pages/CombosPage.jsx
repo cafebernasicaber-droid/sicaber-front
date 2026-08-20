@@ -400,6 +400,98 @@ function ComboModal({ inicial, onClose, onSave }) {
   );
 }
 
+// ── Modal "Ver detalle" ──────────────────────────────────────
+// Muestra toda la información del combo: productos incluidos (con sus
+// toppings/adiciones), precio, descuento/ahorro frente al precio
+// individual, vigencia (inicio/fin) y estado — todo lo que la tarjeta ya
+// insinúa pero no siempre alcanza a mostrar completo.
+function ComboDetalleModal({ combo, onClose }) {
+  const totalOrig = (combo.items || []).reduce((s, p) => {
+    const adicionesTotal = (p.adiciones || []).reduce((s2, a) => s2 + (Number(a.precio) || 0), 0);
+    return s + ((p.precioOriginal || 0) + adicionesTotal) * (p.cantidad || 1);
+  }, 0);
+  const ahorro = totalOrig > combo.precio ? totalOrig - combo.precio : 0;
+  const fechaInicio = soloFecha(combo.fecha_inicio || combo.fechaInicio) || soloFecha(combo.created_at);
+  const fechaFin    = soloFecha(combo.fecha_fin    || combo.fechaFin);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 520, textAlign: 'left', padding: '32px 36px', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+          {combo.imagen
+            ? <img src={combo.imagen} alt={combo.nombre} style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover' }} onError={e => e.target.style.display = 'none'}/>
+            : <div style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--bg-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🎁</div>
+          }
+          <div>
+            <h3 style={{ margin: 0 }}>{combo.nombre}</h3>
+            <span style={{ fontSize: 12, fontWeight: 700, color: combo.estado === 'Activo' ? '#2E7D32' : 'var(--text-muted)' }}>
+              {combo.estado === 'Activo' ? '● Activo' : 'Inactivo'}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+          <div style={{ background: 'var(--bg-surface)', borderRadius: 10, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Precio combo</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#4CAF50' }}>{fmt(combo.precio)}</div>
+          </div>
+          <div style={{ background: 'var(--bg-surface)', borderRadius: 10, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Precio individual</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', textDecoration: totalOrig > 0 ? 'line-through' : 'none' }}>{totalOrig > 0 ? fmt(totalOrig) : '—'}</div>
+          </div>
+          <div style={{ background: 'var(--bg-surface)', borderRadius: 10, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Ahorro / descuento</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: ahorro > 0 ? '#E53935' : 'var(--text-primary)' }}>{ahorro > 0 ? fmt(ahorro) : 'Sin ahorro'}</div>
+          </div>
+          <div style={{ background: 'var(--bg-surface)', borderRadius: 10, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Vigencia</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
+              {fechaInicio ? `Desde ${formatFecha(fechaInicio)}` : '—'}{fechaFin ? ` — Hasta ${formatFecha(fechaFin)}` : ''}
+            </div>
+          </div>
+        </div>
+
+        {combo.descripcion && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>Descripción</div>
+            <p style={{ fontSize: 13, margin: 0, whiteSpace: 'pre-wrap' }}>{combo.descripcion}</p>
+          </div>
+        )}
+
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+            Productos incluidos ({combo.items?.length || 0})
+          </div>
+          {(combo.items || []).length === 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>Este combo no tiene productos configurados.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {combo.items.map((p, i) => (
+                <div key={p.id ?? i} style={{ background: 'var(--bg-surface-2)', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {p.cantidad > 1 ? `${p.cantidad}× ` : ''}{p.nombre}
+                    {p.precioOriginal != null && <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}> · {fmt(p.precioOriginal)} c/u</span>}
+                  </div>
+                  {p.toppings?.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>Toppings: {p.toppings.map(t => t.nombre).join(', ')}</div>
+                  )}
+                  {p.adiciones?.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>Adiciones: {p.adiciones.map(a => a.nombre).join(', ')}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Paginación ────────────────────────────────────────────────
 const PER_PAGE = 6;
 
@@ -432,7 +524,11 @@ export default function CombosPage() {
   const [combos,     setCombos]     = useState([]);
   const [query,      setQuery]      = useState('');
   const [modal,      setModal]      = useState(null);
+  const [verCombo,   setVerCombo]   = useState(null);
   const [delCombo,   setDelCombo]   = useState(null);
+  // Combo pendiente de confirmar el cambio de estado — antes el botón
+  // Activar/Desactivar aplicaba el cambio al primer clic, sin preguntar.
+  const [estadoTarget, setEstadoTarget] = useState(null);
   const [page,       setPage]       = useState(1);
   const [success,    setSuccess]    = useState('');
   // Filtros que faltaban por completo en este módulo: estado, rango de
@@ -502,6 +598,10 @@ export default function CombosPage() {
               showOk(modal === 'new' ? 'Combo creado' : 'Combo actualizado');
             }}
           />
+        )}
+
+        {verCombo && (
+          <ComboDetalleModal combo={verCombo} onClose={() => setVerCombo(null)} />
         )}
 
         {/* ── Toolbar ── */}
@@ -664,10 +764,16 @@ export default function CombosPage() {
                         </div>
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 'auto', paddingTop: 8 }}>
-                          <button onClick={async () => { await combosService.toggleEstado(combo.id); refresh(); }}
+                          <button onClick={() => setEstadoTarget(combo)}
                             style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: `1.5px solid ${combo.estado === 'Activo' ? '#E53935' : 'var(--color-green)'}`, background: 'var(--bg-surface)', color: combo.estado === 'Activo' ? '#E53935' : 'var(--color-green)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                             {combo.estado === 'Activo' ? 'Desactivar' : 'Activar'}
                           </button>
+                          <Tooltip label="Ver detalle" position="bottom">
+                            <button onClick={() => setVerCombo(combo)}
+                              style={{ width: 34, height: 34, borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                          </Tooltip>
                           <Tooltip label="Editar" position="bottom">
                             <button onClick={() => setModal(combo)}
                               style={{ width: 34, height: 34, borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -686,6 +792,40 @@ export default function CombosPage() {
             </>
           )}
         </div>
+
+        {/* ── Modal confirmar activar/desactivar ── */}
+        {estadoTarget && (
+          <div className="modal-overlay" onClick={() => setEstadoTarget(null)}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
+              <div className="modal-icon" style={{ background: estadoTarget.estado === 'Activo' ? 'rgba(245,127,23,0.15)' : 'rgba(76,175,80,0.15)', color: estadoTarget.estado === 'Activo' ? '#F57F17' : '#4CAF50' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              </div>
+              <h3>{estadoTarget.estado === 'Activo' ? '¿Deseas desactivar este combo?' : '¿Deseas activar este combo?'}</h3>
+              <p>
+                {estadoTarget.estado === 'Activo'
+                  ? 'Dejará de estar disponible en la landing pública.'
+                  : 'Volverá a estar disponible en la landing pública.'}
+              </p>
+              <div className="modal-detail">"{estadoTarget.nombre}"</div>
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => setEstadoTarget(null)}>Cancelar</button>
+                <button className="btn-add" onClick={async () => {
+                  const objetivo = estadoTarget;
+                  setEstadoTarget(null);
+                  try {
+                    await combosService.toggleEstado(objetivo.id);
+                    refresh();
+                    showOk(`Combo "${objetivo.nombre}" ${objetivo.estado === 'Activo' ? 'desactivado' : 'activado'} correctamente.`);
+                  } catch (err) {
+                    showOk(err.message || 'No se pudo cambiar el estado del combo.');
+                  }
+                }}>
+                  {estadoTarget.estado === 'Activo' ? 'Desactivar' : 'Activar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Modal eliminar ── */}
         {delCombo && (

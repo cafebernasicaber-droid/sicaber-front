@@ -25,7 +25,7 @@ const VerRolPage = () => {
 
   if (loading) return (
     <Layout>
-      <div className="mod-root">
+      <div className="mod-root mod-root--wide">
         <button className="btn-back" onClick={() => navigate('/admin/roles')}>← Volver</button>
         <p>Cargando rol…</p>
       </div>
@@ -34,7 +34,7 @@ const VerRolPage = () => {
 
   if (!rol) return (
     <Layout>
-      <div className="mod-root">
+      <div className="mod-root mod-root--wide">
         <button className="btn-back" onClick={() => navigate('/admin/roles')}>← Volver</button>
         <p>Rol no encontrado.</p>
       </div>
@@ -45,7 +45,7 @@ const VerRolPage = () => {
 
   return (
     <Layout>
-      <div className="mod-root">
+      <div className="mod-root mod-root--wide">
         <button className="btn-back" onClick={() => navigate('/admin/roles')}>← Volver a roles</button>
         <div className="ver-card">
           <div className="ver-header">

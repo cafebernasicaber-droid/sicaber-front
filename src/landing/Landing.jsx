@@ -17,7 +17,7 @@ import ventasService from '../features/ventas/services/ventasService';
 import devolucionesService from '../features/devoluciones/services/devolucionesService';
 import notificacionesService from '../features/notificaciones/services/notificacionesService';
 import disponibilidadService from '../shared/services/disponibilidadService';
-import { validarComprobanteCliente, procesarComprobante } from '../shared/services/ocrService';
+import { validarComprobanteCliente, procesarComprobante, totalDentroDeTolerancia } from '../shared/services/ocrService';
 import { toppingsParaProducto } from '../shared/utils/toppings';
 import PedidoProgreso from '../shared/components/PedidoProgreso';
 import '../shared/components/PedidoProgreso.css';
@@ -347,7 +347,12 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     // local elegido, esto es solo defensa adicional antes de confirmar.
     if (tipoEntrega === 'local' && !localId) return;
     if (metodo !== 'efectivo' && modoComprobante === 'archivo' && !archivo) return;
-    if (metodo !== 'efectivo' && modoComprobante === 'archivo' && !ocrOk) return;
+    // El OCR ya NO bloquea el envío del pedido (ver procesarArchivoSeleccionado
+    // más abajo): es puramente informativo, la verificación final siempre la
+    // hace un humano (Admin/Cajero) viendo la imagen. Basta con que el
+    // cliente haya adjuntado un archivo — sin importar si el OCR lo pudo
+    // leer, si coincidió el total, o si sigue procesando en segundo plano —
+    // para que el pedido se registre y quede "pendiente_verificacion".
     if (metodo !== 'efectivo' && modoComprobante === 'whatsapp' && !waSent) return;
     if (metodo !== 'efectivo' && !modoComprobante) return;
 
@@ -416,7 +421,14 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
   // imagen, extracción de texto y detección del total por contexto.
   const [ocrProcesando, setOcrProcesando] = useState(false);
   const [ocrProgreso, setOcrProgreso]     = useState(0);
+  // ocrError: solo para rechazos "duros" (formato/tamaño de archivo
+  // inválido, ver validarComprobanteCliente) — esos SÍ siguen bloqueando,
+  // no son parte de la verificación del contenido del comprobante.
   const [ocrError, setOcrError]           = useState('');
+  // ocrAviso: mensaje informativo sobre lo que encontró (o no) el OCR en el
+  // contenido del comprobante — NUNCA bloquea el envío del pedido, ver
+  // confirmar() y el botón "Confirmar pedido" más abajo.
+  const [ocrAviso, setOcrAviso]           = useState('');
   const [ocrOk, setOcrOk]                 = useState(false);
   const [ocrTotalDetectado, setOcrTotalDetectado] = useState(null);
 
@@ -433,8 +445,16 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     if (f) await procesarArchivoSeleccionado(f);
   };
 
+  // OCR puramente informativo (ver ocrService.js): la verificación final del
+  // comprobante siempre la hace un humano (Admin/Cajero) mirando la imagen
+  // antes de aprobar o rechazar el pedido, así que nada de lo que pase acá
+  // debe impedir que el pedido se registre. El archivo ya quedó adjunto
+  // (setArchivo/comprobanteB64) apenas se elige, ANTES de correr el OCR —
+  // si el análisis falla, tarda, o el total no coincide, el cliente igual
+  // puede continuar y el pedido queda "pendiente_verificacion" para que el
+  // equipo lo revise a simple vista.
   const procesarArchivoSeleccionado = async f => {
-    setOcrError(''); setOcrOk(false); setOcrTotalDetectado(null);
+    setOcrError(''); setOcrAviso(''); setOcrOk(false); setOcrTotalDetectado(null);
 
     const check = validarComprobanteCliente(f);
     if (!check.valid) { setOcrError(check.error); return; }
@@ -449,7 +469,7 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
 
     if (!total || total <= 0) {
       // Defensivo: no debería pasar aquí sin un total de pedido válido.
-      setOcrError('No se pudo determinar el total del pedido para comparar.');
+      setOcrAviso('No se pudo comparar el total automáticamente. Tu comprobante quedará pendiente de revisión manual.');
       return;
     }
 
@@ -457,15 +477,25 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     setOcrProgreso(0);
     try {
       const resultado = await procesarComprobante(f, setOcrProgreso);
-      if (!resultado.ok) { setOcrError(resultado.error); return; }
+      if (!resultado.ok) {
+        // No se pudo leer el comprobante con buena confianza (mala calidad,
+        // formato inusual, total no identificado, etc.) — informativo, NO
+        // un rechazo: el pedido sigue su curso normal hacia verificación
+        // manual.
+        setOcrAviso('No pudimos leer el comprobante automáticamente. No hay problema: tu pedido quedará pendiente de verificación y nuestro equipo lo revisará manualmente.');
+        return;
+      }
       setOcrTotalDetectado(resultado.total);
-      if (resultado.total !== total) {
-        setOcrError('El total encontrado en el comprobante no coincide con el total del pedido.');
+      if (!totalDentroDeTolerancia(resultado.total, total)) {
+        // Discrepancia clara (fuera del margen de tolerancia por redondeo o
+        // errores menores de lectura) — se le avisa al cliente, pero
+        // tampoco bloquea: el Admin/Cajero decide con sus propios ojos.
+        setOcrAviso('El total del comprobante no coincide con el total del pedido. No hay problema: quedará pendiente de revisión manual por nuestro equipo.');
         return;
       }
       setOcrOk(true);
     } catch (err) {
-      setOcrError('No se pudo analizar el comprobante. Intenta con otra foto.');
+      setOcrAviso('No pudimos analizar el comprobante automáticamente. Tu pedido quedará pendiente de verificación manual.');
     } finally {
       setOcrProcesando(false);
     }
@@ -831,6 +861,16 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                         </div>
                       )}
 
+                      {/* Informativo, no bloqueante: el pedido puede confirmarse igual — ver
+                          procesarArchivoSeleccionado. Estilo neutro (ámbar), no rojo de error,
+                          para no dar la impresión de que el comprobante fue rechazado. */}
+                      {!ocrProcesando && ocrAviso && (
+                        <div style={{marginTop:12,padding:"12px 14px",borderRadius:10,background:"rgba(255,152,0,0.10)",border:"1px solid rgba(255,152,0,0.3)",color:"#B26A00",fontSize:12.5,fontWeight:600,display:"flex",gap:8,alignItems:"flex-start"}}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{flexShrink:0,marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                          {ocrAviso}
+                        </div>
+                      )}
+
                       {!ocrProcesando && ocrOk && (
                         <div style={{marginTop:12,padding:"14px 16px",borderRadius:10,background:"rgba(76,175,80,0.08)",border:"1px solid rgba(76,175,80,0.3)"}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,color:"#4CAF50",fontWeight:700,fontSize:13,marginBottom:10}}>
@@ -863,7 +903,12 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                 <div style={{display:"flex",gap:12,marginTop:20}}>
                   <button className="btn-cancel" onClick={() => setStep(4)}>← Atrás</button>
                   <button className="lx-btn" style={{flex:1,justifyContent:"center"}}
-                    disabled={loading || ocrProcesando || !modoComprobante || (modoComprobante==='archivo' && (!archivo || !ocrOk)) || (modoComprobante==='whatsapp' && !waSent)}
+                    // El OCR ya no condiciona este botón (ver confirmar() y
+                    // procesarArchivoSeleccionado): solo se exige haber adjuntado
+                    // el archivo. Se espera a que termine de procesar
+                    // (ocrProcesando) únicamente para no enviar el pedido a mitad
+                    // de la lectura, no porque el resultado deba ser positivo.
+                    disabled={loading || ocrProcesando || !modoComprobante || (modoComprobante==='archivo' && !archivo) || (modoComprobante==='whatsapp' && !waSent)}
                     onClick={confirmar}>
                     {loading ? <span className="pay-spinner"/> : "Confirmar pedido →"}
                   </button>

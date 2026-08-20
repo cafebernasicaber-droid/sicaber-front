@@ -228,6 +228,37 @@ const parsearMonto = (str) => {
   return isNaN(num) ? null : num;
 };
 
+// ── Tolerancia al comparar el total leído por OCR contra el total real ──────
+// El OCR (Tesseract.js corriendo en el navegador, sin API de pago) es
+// puramente INFORMATIVO: la verificación final del comprobante siempre la
+// hace un humano (Admin o Cajero, mirando la imagen antes de aprobar o
+// rechazar el pedido — ver PATCH /pedidos/:id/comprobante/aprobar en el
+// backend). Por eso esta comparación nunca debe usarse para bloquear un
+// pedido, solo para decidir si se le muestra al cliente "el total coincide"
+// o "quedará pendiente de revisión" — y para avisarle al Admin/Cajero, vía
+// comprobanteVerificadoOcr, cuándo vale la pena prestarle más atención a esa
+// imagen. Antes se exigía coincidencia EXACTA (===), lo que fallaba con
+// cualquier error menor de lectura del OCR (un "8" leído como "3", un punto
+// de miles de más/de menos, etc.) — un problema del OCR, no del cliente.
+//
+// Margen = el mayor entre un 3% del total del pedido y $1.000 COP fijos:
+// el porcentaje cubre pedidos grandes (donde un error de lectura de OCR
+// puede ser de varios cientos de pesos) y el piso fijo cubre pedidos
+// pequeños (donde un 3% sería un margen casi nulo, ej. $150 sobre $5.000).
+const TOLERANCIA_TOTAL_PORCENTAJE = 0.03;
+const TOLERANCIA_TOTAL_MINIMA = 1000;
+
+export const margenToleranciaTotal = (totalPedido) =>
+  Math.max(TOLERANCIA_TOTAL_MINIMA, Math.round((Number(totalPedido) || 0) * TOLERANCIA_TOTAL_PORCENTAJE));
+
+// true = el total leído por OCR está "razonablemente cerca" del total real
+// (coincidencia exacta, redondeo o pequeño error de formato/lectura). false
+// = diferencia clara y evidente, no explicable por un error menor de OCR.
+export const totalDentroDeTolerancia = (totalOcr, totalPedido) => {
+  if (totalOcr == null || totalPedido == null) return false;
+  return Math.abs(Number(totalOcr) - Number(totalPedido)) <= margenToleranciaTotal(totalPedido);
+};
+
 export const detectarTotalComprobante = (texto) => {
   const lineas = (texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const candidatos = [];
