@@ -62,10 +62,13 @@ export const AuthProvider = ({ children }) => {
         nombre:   data.usuario.nombre,
         role:     data.usuario.rol,
         esAdmin:  data.usuario.rol === 'Administrador',
-        // Local al que pertenece el usuario ('Local 1' / 'Local 2' /
-        // 'Ambos' para el Administrador). Se usa para que cada cajero y
-        // bartender solo vea los pedidos de su propio local.
-        sede:     data.usuario.sede || 'Local 1',
+        // Local al que pertenece el usuario (nombre real del local, ej.
+        // "Local Villa Liliam" — o 'Ambos' para el Administrador). Se usa
+        // para que cada cajero y bartender solo vea los pedidos de su
+        // propio local. Sin fallback fijo: un local inventado aquí no
+        // coincidiría con ningún local real y dejaría al usuario sin ver
+        // ningún pedido en vez de fallar de forma visible.
+        sede:     data.usuario.sede || '',
       };
       setUser(u);
       localStorage.setItem('sicaber_session', JSON.stringify(u));

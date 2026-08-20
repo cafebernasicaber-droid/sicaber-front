@@ -4,6 +4,8 @@ import Layout from '../../../shared/components/Layout';
 import rolesService from '../services/rolesService';
 import './Roles.css';
 
+const fmtFecha = iso => iso ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'long' }).format(new Date(iso)) : '—';
+
 const VerRolPage = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -39,13 +41,15 @@ const VerRolPage = () => {
     </Layout>
   );
 
+  const colorRol = rol.color || rolesService.getColor(rol.nombre);
+
   return (
     <Layout>
       <div className="mod-root">
         <button className="btn-back" onClick={() => navigate('/admin/roles')}>← Volver a roles</button>
         <div className="ver-card">
           <div className="ver-header">
-            <div className="ver-icon" style={{background: rol.color+'18', border:`1.5px solid ${rol.color}33`}}>
+            <div className="ver-icon" style={{background: colorRol+'18', border:`1.5px solid ${colorRol}33`}}>
   {rolesService.getIcon(rol.nombre)}
 </div>
             <div style={{flex:1}}>
@@ -54,6 +58,9 @@ const VerRolPage = () => {
                 {rol.esAdmin && <span className="badge-admin">Admin</span>}
               </div>
               <div className="ver-desc">{rol.descripcion || 'Sin descripción.'}</div>
+              <div style={{fontSize:12, color:'var(--text-muted)', marginTop:6}}>
+                Creado el {fmtFecha(rol.created_at)}
+              </div>
             </div>
           {/*   {!rol.esAdmin && (
               <button className="btn-nuevo" onClick={() => navigate(`/admin/roles/editar/${rol.id}`)}>

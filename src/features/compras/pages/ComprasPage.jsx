@@ -191,11 +191,14 @@ const ComprasPage = () => {
   // llamaba a "comprasService.search(...)", que nunca existió en el
   // servicio — cada vez que alguien escribía en el buscador, la página
   // tiraba un error ("comprasService.search is not a function").
+  // Proveedor e insumos: son los datos visibles en la tabla (columnas
+  // "Proveedor" e "Insumos"). El id de la compra se quitó del filtro porque
+  // no se muestra en ninguna parte de la tabla/tarjeta, así que buscar por
+  // él no coincidía con nada visible en pantalla.
   const buscarCompras = (texto) => {
     const term = texto.toLowerCase();
     return compras.filter(c =>
       (c.proveedorNombre || '').toLowerCase().includes(term) ||
-      String(c.id).includes(term) ||
       (c.items || []).some(it => (it.insumo || '').toLowerCase().includes(term))
     );
   };

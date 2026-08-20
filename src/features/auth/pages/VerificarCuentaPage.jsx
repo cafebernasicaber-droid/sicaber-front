@@ -20,7 +20,12 @@ export default function VerificarCuentaPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(''); setLoading(true);
+    setError('');
+    if (!correo.trim()) { setError('El correo es obligatorio.'); return; }
+    if (!/\S+@\S+\.\S+/.test(correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    if (!token.trim()) { setError('Ingresa el código de verificación.'); return; }
+    if (token.length !== 6) { setError('El código debe tener 6 dígitos.'); return; }
+    setLoading(true);
     try {
       const res = await fetch(`${API}/auth/cliente/verificar`, {
         method: 'POST',
@@ -63,15 +68,15 @@ export default function VerificarCuentaPage() {
             {!correoInicial && (
               <div className="auth-field">
                 <label>Correo electrónico</label>
-                <input type="email" value={correo} onChange={e => setCorreo(e.target.value)} required placeholder="tu@correo.com" />
+                <input type="text" value={correo} onChange={e => setCorreo(e.target.value)} placeholder="tu@correo.com" />
               </div>
             )}
             <div className="auth-field">
               <label>Código de verificación</label>
               <input
-                type="text" maxLength={6} value={token}
-                onChange={e => setToken(e.target.value.replace(/\D/g,''))}
-                placeholder="123456" required
+                type="text" value={token}
+                onChange={e => setToken(e.target.value.replace(/\D/g,'').slice(0, 6))}
+                placeholder="123456"
                 style={{fontSize:28, letterSpacing:8, textAlign:'center', fontWeight:'bold'}}
               />
             </div>

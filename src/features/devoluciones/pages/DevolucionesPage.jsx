@@ -7,6 +7,7 @@ import LocalFiltro from '../../../shared/components/LocalFiltro';
 import Tooltip from '../../../shared/components/Tooltip';
 import '../../insumos/pages/InsumosPage.css';
 import './DevolucionesPage.css';
+import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 const fmtFecha = iso => iso ? new Intl.DateTimeFormat('es-CO',{dateStyle:'medium'}).format(new Date(iso)) : '—';
@@ -182,7 +183,9 @@ function ModalRegistrar({ ventaPrefill, onClose, onSave }) {
               <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Motivo *</label>
               <textarea value={form.motivo} onChange={e => setForm(f => ({...f, motivo: e.target.value}))}
                 placeholder="Describe el motivo de la devolución (mínimo 10 caracteres)..." rows={4}
+                maxLength={LIMITES.MOTIVO}
                 style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',resize:'vertical',fontFamily:'inherit',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
+              <div style={{fontSize:11,color:enElTope(form.motivo,LIMITES.MOTIVO)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.motivo,LIMITES.MOTIVO)}</div>
             </div>
           </div>
 

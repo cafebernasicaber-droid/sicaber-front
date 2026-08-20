@@ -9,6 +9,7 @@ import clientesService from '../../clientes/services/clientesService';
 import useProveedores from '../../proveedores/hooks/useProveedores';
 import useEmpleados from '../../empleados/hooks/useEmpleados';
 import { EmpleadoModal } from '../../empleados/pages/EmpleadosPage';
+import localesService from '../../../shared/services/localesService';
 import '../../insumos/pages/InsumosPage.css';
 import './Usuarios.css';
 import './Usuarios.modal.css';
@@ -25,16 +26,47 @@ const inputStyle = {
 };
 
 // ── Tipos de registro disponibles desde el módulo de Usuarios ────────────────
-const TIPOS = [
-  { key: 'Administrador', label: 'Administrador', icon: '🛡️', color: '#E53935', desc: 'Acceso total al sistema, igual que el admin principal' },
-  { key: 'Cliente',   label: 'Cliente',   icon: '🧑', color: '#00ACC1', desc: 'Cuenta para comprar en la tienda en línea' },
-  { key: 'Cajero',    label: 'Cajero',    icon: '💰', color: '#FB8C00', desc: 'Acceso al módulo de caja y ventas' },
-  { key: 'Bartender', label: 'Bartender', icon: '🍹', color: '#43A047', desc: 'Acceso al módulo de preparación de pedidos' },
-/*   { key: 'Proveedor', label: 'Proveedor', icon: '🚚', color: '#8E24AA', desc: 'Empresa o persona que suministra insumos' },
- */
-/*   { key: 'Empleado',  label: 'Empleado',  icon: '👔', color: '#3949AB', desc: 'Miembro del equipo de trabajo interno' },
- */];
-const getTipoInfo = key => TIPOS.find(t => t.key === key);
+// Antes: 4 tarjetas fijas escritas en el código (Administrador, Cliente,
+// Cajero, Bartender) — un rol nuevo creado en Gestión de Roles (ej.
+// "Supervisor") nunca aparecía acá aunque sí existiera en la tabla `roles`.
+//
+// Cliente sigue aparte: no es una fila de la tabla `roles` sino su propio
+// flujo de registro (tabla `clientes`, formulario distinto). Administrador,
+// Cajero y Bartender mantienen su ícono/color propio y SIEMPRE se ofrecen
+// como tarjeta aunque todavía no exista una fila para ellos en `roles` (para
+// no perder la opción de registrar un Cajero si nadie lo creó ahí todavía).
+// Cualquier otro rol activo que devuelva GET /roles (incluido uno nuevo)
+// aparece como tarjeta extra con un ícono/color genérico por defecto.
+const TIPO_CLIENTE = { key: 'Cliente', label: 'Cliente', color: '#00ACC1', desc: 'Cuenta para comprar en la tienda en línea' };
+const ROLES_FIJOS_INFO = {
+  'Administrador': {  color: '#E53935', desc: 'Acceso total al sistema, igual que el admin principal' },
+  'Cajero':        {  color: '#FB8C00', desc: 'Acceso al módulo de caja y ventas' },
+  'Bartender':     {  color: '#43A047', desc: 'Acceso al módulo de preparación de pedidos' },
+};
+const ROLES_FIJOS_NOMBRES = Object.keys(ROLES_FIJOS_INFO);
+// `roles` es opcional: sin la lista real solo se pierde la descripción
+// personalizada de un rol nuevo (queda un texto genérico) — el ícono y el
+// color siempre funcionan igual, así que cualquier llamado existente que no
+// tenía cómo pasar `roles` (ModalVerUsuario, ModalFormUsuario) sigue
+// funcionando sin cambios.
+const getTipoInfo = (key, roles) => {
+  if (key === 'Cliente') return TIPO_CLIENTE;
+  const fijo = ROLES_FIJOS_INFO[key];
+  if (fijo) return { key, label: key, icon: fijo.icon, color: fijo.color, desc: fijo.desc };
+  const rol = Array.isArray(roles) ? roles.find(r => r.nombre === key) : null;
+  return { key, label: key, icon: '👤', color: rolesService.getColor(key), desc: rol?.descripcion || 'Rol personalizado creado en Gestión de Roles' };
+};
+// Lista de tarjetas para "¿Qué deseas registrar?": Cliente + los 3 roles
+// fijos + cualquier otro rol activo devuelto por GET /roles.
+const construirTiposRegistro = (roles) => {
+  const rolesList = Array.isArray(roles) ? roles : [];
+  const fijos = ['Administrador', 'Cajero', 'Bartender'];
+  const yaListados = new Set(['cliente', ...fijos.map(f => f.toLowerCase())]);
+  const extras = rolesList
+    .filter(r => r.nombre && !yaListados.has(r.nombre.trim().toLowerCase()))
+    .map(r => getTipoInfo(r.nombre, rolesList));
+  return [TIPO_CLIENTE, ...fijos.map(f => getTipoInfo(f, rolesList)), ...extras];
+};
 
 // ── Ubicación (usado por el formulario de cliente) ────────────────────────────
 const DEPARTAMENTOS = {
@@ -55,7 +87,7 @@ const DEPARTAMENTOS = {
 const COMUNAS_MEDELLIN = ['Comuna 8 - Villa Hermosa', 'Comuna 9 - Buenos Aires'];
 
 // ── Modal: Seleccionar tipo de registro ───────────────────────────────────────
-function ModalSeleccionarTipo({ onSelect, onClose }) {
+function ModalSeleccionarTipo({ tipos, onSelect, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="usuario-modal-box" style={{ width: '100%', maxWidth: 540 }} onClick={e => e.stopPropagation()}>
@@ -72,7 +104,7 @@ function ModalSeleccionarTipo({ onSelect, onClose }) {
         </div>
         <div className="usuario-modal-body">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {TIPOS.map(t => (
+            {tipos.map(t => (
               <button key={t.key} type="button" onClick={() => onSelect(t.key)}
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6,
@@ -182,21 +214,35 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
     rol:      usuario?.rol || tipoFijo || '',
     // Local físico al que queda asignado el usuario. Solo aplica a
     // Cajero y Bartender: el Administrador siempre opera 'Ambos' locales.
-    sede:     usuario?.sede || 'Local 1',
+    sede:     usuario?.sede || '',
   });
   const [confirm, setConfirm] = useState('');
   const [error, setError]     = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Antes: <option value="Local 1">/<option value="Local 2"> fijos en el
+  // código — no reflejaban los locales reales (GET /locales).
+  const [locales, setLocales] = useState([]);
+  useEffect(() => {
+    localesService.getActivos()
+      .then(d => setLocales(Array.isArray(d) ? d : []))
+      .catch(() => setLocales([]));
+  }, []);
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   // Opciones del selector de rol: los 3 roles fijos del sistema + cualquier
   // rol personalizado creado en Gestión de Roles (todos son solo texto).
-  const rolesFijos = TIPOS.filter(t => t.key !== 'Cliente' && t.key !== 'Proveedor' && t.key !== 'Empleado').map(t => t.key);
-  const rolesOpciones = Array.from(new Set([...rolesFijos, ...roles.map(r => r.nombre)]));
+  const rolesOpciones = Array.from(new Set([...ROLES_FIJOS_NOMBRES, ...roles.map(r => r.nombre)]));
 
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
+    if (!form.nombre.trim())   { setError('El nombre completo es obligatorio.'); return; }
+    if (!form.username.trim()) { setError('El nombre de usuario es obligatorio.'); return; }
+    if (form.correo && !/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    if (!isEdit && !form.password) { setError('La contraseña es obligatoria.'); return; }
+    if (!isEdit && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    if (!isEdit && !confirm) { setError('Debes confirmar la contraseña.'); return; }
     if (!form.rol) { setError('Selecciona un rol.'); return; }
     // El local solo es obligatorio para Cajero y Bartender: son los roles
     // que operan pedidos de un local específico. El Administrador siempre
@@ -261,12 +307,12 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Nombre completo *</label>
-                  <input style={inputStyle} type="text" placeholder="Nombre completo" required
+                  <input style={inputStyle} type="text" placeholder="Nombre completo"
                     value={form.nombre} onChange={e => set('nombre', e.target.value)} />
                 </div>
                 <div>
                   <label style={labelStyle}>Nombre de usuario *</label>
-                  <input style={inputStyle} type="text" placeholder="usuario_ejemplo" required
+                  <input style={inputStyle} type="text" placeholder="usuario_ejemplo"
                     value={form.username} onChange={e => set('username', e.target.value)} />
                 </div>
               </div>
@@ -274,7 +320,7 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
               {/* Fila 2: Correo */}
               <div>
                 <label style={labelStyle}>Correo electrónico</label>
-                <input style={inputStyle} type="email" placeholder="correo@ejemplo.com"
+                <input style={inputStyle} type="text" placeholder="correo@ejemplo.com"
                   value={form.correo} onChange={e => set('correo', e.target.value)} />
               </div>
 
@@ -286,7 +332,6 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
                   </label>
                   <input style={inputStyle} type="password"
                     placeholder={isEdit ? 'Nueva contraseña...' : 'Mín. 6 caracteres'}
-                    required={!isEdit}
                     value={form.password} onChange={e => set('password', e.target.value)} />
                 </div>
                 <div>
@@ -296,7 +341,6 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
                   <input
                     style={{ ...inputStyle, borderColor: pwNoMatch ? '#E53935' : pwMatch ? '#4CAF50' : '#ddd' }}
                     type="password" placeholder="Repite la contraseña"
-                    required={!isEdit}
                     value={confirm} onChange={e => setConfirm(e.target.value)} />
                   {pwNoMatch && <div style={{ fontSize: 11, color: '#E53935', marginTop: 3 }}>Las contraseñas no coinciden</div>}
                   {pwMatch   && <div style={{ fontSize: 11, color: '#4CAF50', marginTop: 3 }}>✓ Las contraseñas coinciden</div>}
@@ -324,7 +368,7 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
                     {tipoFijo}
                   </span>
                 ) : (
-                  <select style={inputStyle} required
+                  <select style={inputStyle}
                     value={form.rol} onChange={e => set('rol', e.target.value)}>
                     <option value="">Seleccionar rol...</option>
                     {rolesOpciones.map(nombre => <option key={nombre} value={nombre}>{nombre}</option>)}
@@ -342,11 +386,16 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
               {form.rol && form.rol !== 'Administrador' && (
                 <div style={{ maxWidth: '50%', paddingRight: 6 }}>
                   <label style={labelStyle}>Local *</label>
-                  <select style={inputStyle} required
+                  <select style={inputStyle}
                     value={form.sede === 'Ambos' ? '' : form.sede} onChange={e => set('sede', e.target.value)}>
                     <option value="">Seleccionar local...</option>
-                    <option value="Local 1">Local 1</option>
-                    <option value="Local 2">Local 2</option>
+                    {locales.map(l => <option key={l.id} value={l.nombre}>{l.nombre}</option>)}
+                    {/* Conserva un local de una versión anterior que ya no
+                        existe en `locales`, para no perder el dato hasta
+                        que se reasigne. */}
+                    {form.sede && form.sede !== 'Ambos' && !locales.some(l => l.nombre === form.sede) && (
+                      <option value={form.sede}>{form.sede} (local antiguo, reasignar)</option>
+                    )}
                   </select>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 5 }}>
                     Los pedidos de este local son los únicos que este usuario podrá ver y atender.
@@ -391,7 +440,10 @@ function ModalFormCliente({ cliente, onCreate, onUpdate, onClose }) {
     e.preventDefault(); setError('');
     if (!form.nombre.trim())  { setError('El nombre es obligatorio.'); return; }
     if (!form.correo.trim())  { setError('El correo es obligatorio.'); return; }
+    if (!/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    if (!isEdit && !form.password) { setError('La contraseña es obligatoria.'); return; }
     if (!isEdit && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    if (!isEdit && !form.confirm) { setError('Debes confirmar la contraseña.'); return; }
     if (form.password && form.password !== form.confirm) { setError('Las contraseñas no coinciden.'); return; }
 
     setLoading(true);
@@ -440,7 +492,7 @@ function ModalFormCliente({ cliente, onCreate, onUpdate, onClose }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Nombre completo *</label>
-                  <input style={inputStyle} type="text" placeholder="Nombre completo" required
+                  <input style={inputStyle} type="text" placeholder="Nombre completo"
                     value={form.nombre} onChange={e => set('nombre', e.target.value)} />
                 </div>
                 <div>
@@ -452,7 +504,7 @@ function ModalFormCliente({ cliente, onCreate, onUpdate, onClose }) {
 
               <div>
                 <label style={labelStyle}>Correo electrónico *</label>
-                <input style={inputStyle} type="email" placeholder="correo@ejemplo.com" required
+                <input style={inputStyle} type="text" placeholder="correo@ejemplo.com"
                   value={form.correo} onChange={e => set('correo', e.target.value)} />
               </div>
 
@@ -509,12 +561,12 @@ function ModalFormCliente({ cliente, onCreate, onUpdate, onClose }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>{isEdit ? 'Nueva contraseña (opcional)' : 'Contraseña *'}</label>
-                  <input style={inputStyle} type="password" placeholder="Mín. 6 caracteres" required={!isEdit}
+                  <input style={inputStyle} type="password" placeholder="Mín. 6 caracteres"
                     value={form.password} onChange={e => set('password', e.target.value)} />
                 </div>
                 <div>
                   <label style={labelStyle}>{isEdit ? 'Confirmar nueva contraseña' : 'Confirmar contraseña *'}</label>
-                  <input style={inputStyle} type="password" placeholder="Repite la contraseña" required={!isEdit}
+                  <input style={inputStyle} type="password" placeholder="Repite la contraseña"
                     value={form.confirm} onChange={e => set('confirm', e.target.value)} />
                 </div>
               </div>
@@ -598,12 +650,12 @@ function ModalFormProveedor({ proveedor, onCreate, onUpdate, onClose }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Nombre del proveedor *</label>
-                  <input style={inputStyle} type="text" placeholder="Ej: Distribuidora Central S.A.S" required
+                  <input style={inputStyle} type="text" placeholder="Ej: Distribuidora Central S.A.S"
                     value={form.nombre} onChange={e => set('nombre', e.target.value)} />
                 </div>
                 <div>
                   <label style={labelStyle}>NIT / RUT *</label>
-                  <input style={inputStyle} type="text" placeholder="Ej: 900123456-1" required
+                  <input style={inputStyle} type="text" placeholder="Ej: 900123456-1"
                     value={form.nit} onChange={e => set('nit', e.target.value)} />
                 </div>
               </div>
@@ -611,12 +663,12 @@ function ModalFormProveedor({ proveedor, onCreate, onUpdate, onClose }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Teléfono *</label>
-                  <input style={inputStyle} type="text" placeholder="Ej: 3001234567" required
+                  <input style={inputStyle} type="text" placeholder="Ej: 3001234567"
                     value={form.telefono} onChange={e => set('telefono', e.target.value)} />
                 </div>
                 <div>
                   <label style={labelStyle}>Correo electrónico *</label>
-                  <input style={inputStyle} type="email" placeholder="proveedor@correo.com" required
+                  <input style={inputStyle} type="text" placeholder="proveedor@correo.com"
                     value={form.correo} onChange={e => set('correo', e.target.value)} />
                 </div>
               </div>
@@ -646,10 +698,25 @@ const UsuariosPage = () => {
   const { usuarios, create, update, remove, toggleEstado } = useUsuarios();
   const { clientes, update: updateCliente, remove: removeCliente, toggleEstado: toggleClienteEstado, refresh: refreshClientes } = useClientes();
   const { proveedores, create: createProveedor, update: updateProveedor, remove: removeProveedor, toggleEstado: toggleProveedorEstado } = useProveedores();
-/*   const { empleados, remove: removeEmpleado, toggleActivo: toggleEmpleadoEstado, refresh: refreshEmpleados } = useEmpleados();
- */
+  // ⚠️ Esta línea estaba COMENTADA, pero las tres funciones que devuelve se
+  // seguían usando más abajo: handleToggleEstado (tipo 'Empleado'),
+  // handleDelete (tipo 'Empleado') y el onSave del EmpleadoModal
+  // (refreshEmpleados). Al no existir, cualquiera de esos tres caminos
+  // reventaba con "ReferenceError: refreshEmpleados is not defined" — el
+  // caso más fácil de reproducir es registrar/editar un empleado desde esta
+  // pantalla: se guardaba en el servidor, pero la pantalla se caía justo
+  // después, al refrescar.
+  //
+  // Se restaura solo lo que de verdad se usa: `empleados` (la lista) sigue
+  // fuera a propósito, porque las filas de empleados ya no se mezclan en la
+  // tabla unificada de esta página (ver empleadoRows, comentado más abajo).
+  const { remove: removeEmpleado, toggleActivo: toggleEmpleadoEstado, refresh: refreshEmpleados } = useEmpleados();
   const [query, setQuery]           = useState('');
   const [rolFiltro, setRolFiltro]   = useState('Todos');
+  // Filtro por fecha de registro (columna "Registro" ya visible en la
+  // tabla) — rango desde/hasta, además de la búsqueda por nombre/usuario/correo.
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
   const [page, setPage]             = useState(1);
   const PER_PAGE = 8;
   // modal: null | 'tipo' | 'nuevo' | 'editar' | 'ver'
@@ -666,6 +733,10 @@ const UsuariosPage = () => {
       .then(d => setRoles(Array.isArray(d) ? d : []))
       .catch(() => setRoles([]));
   }, []);
+  // Tarjetas de "¿Qué deseas registrar?" — Cliente + roles fijos + cualquier
+  // otro rol activo que exista en Gestión de Roles, recalculado cada vez que
+  // cambia `roles` (ej. justo después de crear un rol nuevo).
+  const tiposRegistro = construirTiposRegistro(roles);
 
   // ── Construcción del listado combinado ──────────────────────────────────────
   // El backend de "usuarios" solo maneja: id, nombre, username, correo, rol (texto), estado, created_at.
@@ -727,19 +798,31 @@ const UsuariosPage = () => {
       if (!counts.has(r.filtroKey)) counts.set(r.filtroKey, { key: r.filtroKey, count: 0, color: r.rolColor || '#888' });
       counts.get(r.filtroKey).count += 1;
     });
-    const ordenFijo = TIPOS.map(t => t.key).filter(k => counts.has(k));
+    const ordenFijo = ['Administrador', 'Cliente', ...ROLES_FIJOS_NOMBRES.filter(n => n !== 'Administrador')].filter(k => counts.has(k));
     const extras = Array.from(counts.keys()).filter(k => !ordenFijo.includes(k));
     return [...ordenFijo, ...extras].map(k => counts.get(k));
   })();
 
   const rolFilteredRows = rolFiltro === 'Todos' ? allRows : allRows.filter(r => r.filtroKey === rolFiltro);
 
-  const shownFiltered = query.trim()
+  // El buscador ahora cubre TODOS los campos de la fila, no solo
+  // nombre/usuario/correo: también teléfono, dirección, rol, sede, estado y
+  // el id — así se puede encontrar a alguien por cualquier dato registrado.
+  const q = query.trim().toLowerCase();
+  let shownFiltered = q
     ? rolFilteredRows.filter(u =>
-        u.nombre.toLowerCase().includes(query.toLowerCase()) ||
-        (u.username || '').toLowerCase().includes(query.toLowerCase()) ||
-        (u.correo || '').toLowerCase().includes(query.toLowerCase()))
+        (u.nombre    || '').toLowerCase().includes(q) ||
+        (u.username  || '').toLowerCase().includes(q) ||
+        (u.correo    || '').toLowerCase().includes(q) ||
+        (u.telefono  || '').toLowerCase().includes(q) ||
+        (u.direccion || '').toLowerCase().includes(q) ||
+        (u.rolNombre || '').toLowerCase().includes(q) ||
+        (u.sede      || '').toLowerCase().includes(q) ||
+        (u.estado    || '').toLowerCase().includes(q) ||
+        String(u.id).includes(q))
     : rolFilteredRows;
+  if (fechaDesde) shownFiltered = shownFiltered.filter(u => u.fecha && String(u.fecha).slice(0,10) >= fechaDesde);
+  if (fechaHasta) shownFiltered = shownFiltered.filter(u => u.fecha && String(u.fecha).slice(0,10) <= fechaHasta);
 
   // El admin siempre queda anclado de primero; el resto ordenado por fecha de registro (más reciente primero)
   const shown = [...shownFiltered].sort((a, b) => {
@@ -851,7 +934,7 @@ const UsuariosPage = () => {
 
         {/* ── Modales ── */}
         {modal === 'tipo' && (
-          <ModalSeleccionarTipo onSelect={seleccionarTipo} onClose={closeModal} />
+          <ModalSeleccionarTipo tipos={tiposRegistro} onSelect={seleccionarTipo} onClose={closeModal} />
         )}
 
         {modal === 'ver' && targetItem && (
@@ -997,6 +1080,17 @@ const UsuariosPage = () => {
               {query && <button className="search-clear" onClick={() => { setQuery(''); setPage(1); }}>✕</button>}
             </div>
           </div>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <label style={{fontSize:12,color:'var(--text-muted)'}}>Registrado entre</label>
+            <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPage(1); }}
+              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
+            <span style={{color:'var(--text-muted)',fontSize:13}}>–</span>
+            <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPage(1); }}
+              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
+            {(fechaDesde || fechaHasta) && (
+              <button className="search-clear" onClick={() => { setFechaDesde(''); setFechaHasta(''); setPage(1); }}>✕</button>
+            )}
+          </div>
           <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 'auto' }}>
             {shown.length} resultado{shown.length !== 1 ? 's' : ''}
           </span>
@@ -1011,15 +1105,17 @@ const UsuariosPage = () => {
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
                 </svg>
               </div>
-              <h3>{query || rolFiltro !== 'Todos' ? 'Sin resultados' : 'No hay usuarios'}</h3>
+              <h3>{query || rolFiltro !== 'Todos' || fechaDesde || fechaHasta ? 'Sin resultados' : 'No hay usuarios'}</h3>
               <p>
                 {query
                   ? 'Intenta con otro término.'
                   : rolFiltro !== 'Todos'
                     ? `No hay registros con el rol "${rolFiltro}".`
-                    : 'Registra el primer usuario del sistema.'}
+                    : (fechaDesde || fechaHasta)
+                      ? 'No hay registros en ese rango de fechas.'
+                      : 'Registra el primer usuario del sistema.'}
               </p>
-              {!query && rolFiltro === 'Todos' && (
+              {!query && rolFiltro === 'Todos' && !fechaDesde && !fechaHasta && (
                 <button className="btn-add-first" onClick={openNuevo}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>

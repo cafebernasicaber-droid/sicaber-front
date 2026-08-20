@@ -7,6 +7,7 @@ import { validarArchivoComprobante, procesarComprobante, normalizarFechaComproba
 import ImageLightbox from '../../../shared/components/ImageLightbox';
 import '../../../shared/components/ImageLightbox.css';
 import './CompraForm.css';
+import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_ITEM = {
   insumo: '', cantidad: '', precioUnitario: '', unidad: '',
@@ -474,7 +475,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           <label>Fecha de compra <span className="req">*</span></label>
           <input
             type="date" name="fecha" value={form.fecha}
-            onChange={handleChange} max={getTodayStr()}
+            onChange={handleChange}
           />
           {errors.fecha && <span className="err-msg">{errors.fecha}</span>}
         </div>
@@ -484,7 +485,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           <textarea
             name="observaciones" value={form.observaciones}
             onChange={handleChange} placeholder="Notas sobre esta compra..." rows={2}
+            maxLength={LIMITES.OBSERVACIONES}
           />
+          <div style={{fontSize:11,color:enElTope(form.observaciones,LIMITES.OBSERVACIONES)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.observaciones,LIMITES.OBSERVACIONES)}</div>
         </div>
       </div>
 
@@ -572,7 +575,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
               ) : (
                 <>
                   <input
-                    type="number" placeholder="0" min="1" step="1"
+                    type="number" placeholder="0" step="1"
                     value={item.cantidad}
                     onChange={e => handleItemChange(idx, 'cantidad', e.target.value)}
                     onKeyDown={e => {
@@ -584,7 +587,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                     const cantidadValida = item.cantidad !== '' && !isNaN(item.cantidad) && Number(item.cantidad) >= 1 && Number.isInteger(Number(item.cantidad));
                     return (
                       <input
-                        type="number" placeholder={cantidadValida ? 'Mín. $1.000' : 'Ingresa cantidad primero'} min="1000" step="1"
+                        type="number" placeholder={cantidadValida ? 'Mín. $1.000' : 'Ingresa cantidad primero'} step="1"
                         value={item.precioUnitario}
                         disabled={!cantidadValida}
                         onChange={e => handleItemChange(idx, 'precioUnitario', e.target.value)}
@@ -638,7 +641,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                 <div className="fg">
                   <label>{item.presentacionTipo ? `Cantidad de ${pluralPresentacion(item.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
                   <input
-                    type="number" min="1" step="1"
+                    type="number" step="1"
                     placeholder={preguntaCantidadPresentacion(item.presentacionTipo)}
                     value={item.presentacionCantidad}
                     onChange={e => handlePresentacionChange(idx, 'presentacionCantidad', e.target.value)}
@@ -648,7 +651,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                 <div className="fg">
                   <label>{preguntaContenidoPresentacion(item.unidad, item.presentacionTipo)}</label>
                   <input
-                    type="number" min="0" step={contenidoEsEntero ? '1' : '0.01'}
+                    type="number" step={contenidoEsEntero ? '1' : '0.01'}
                     placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
                     value={item.presentacionContenido}
                     onChange={e => handlePresentacionChange(idx, 'presentacionContenido', e.target.value)}
@@ -658,7 +661,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                 <div className="fg">
                   <label>Precio por {(item.presentacionTipo || 'presentación').toLowerCase()}</label>
                   <input
-                    type="number" min="1000" step="1" placeholder="Mín. $1.000"
+                    type="number" step="1" placeholder="Mín. $1.000"
                     value={item.presentacionPrecio}
                     onChange={e => handlePresentacionChange(idx, 'presentacionPrecio', e.target.value)}
                   />
@@ -684,7 +687,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             Descuento (%)
             <input
-              type="number" min="0" max="100" step="0.01" placeholder="0"
+              type="number" step="0.01" placeholder="0"
               value={descuento}
               onChange={e => { setDescuento(e.target.value); if (errors.descuento) setErrors(prev => ({ ...prev, descuento: '' })); }}
               style={{ width: 70, padding: '5px 8px', borderRadius: 6, border: `1.5px solid ${errors.descuento ? '#EF5350' : 'var(--border-input)'}`, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}

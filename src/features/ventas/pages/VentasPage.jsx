@@ -214,6 +214,10 @@ export default function VentasPage() {
   }, []);
   const [query, setQuery]       = useState('');
   const [filtroEstado, setFiltro] = useState('todos');
+  // Filtro por rango de fechas — la columna "Fecha" ya estaba en la tabla
+  // pero no había ninguna forma de acotar las ventas por periodo.
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
   const [modal, setModal]       = useState(null); // null | 'new' | venta
   const [detalle, setDetalle]   = useState(null);
   const [success, setSuccess]   = useState('');
@@ -247,7 +251,13 @@ export default function VentasPage() {
     const mq = !lq || String(getVentaId(v)).includes(lq) || (v.cliente||'').toLowerCase().includes(lq) || (v.metodo_pago||'').toLowerCase().includes(lq);
     const me = filtroEstado === 'todos' || v.estado === filtroEstado;
     const ml = localSel === 'todos' || v.sede === localSel;
-    return mq && me && ml;
+    // v.fecha viene como timestamp ISO; slice(0,10) lo deja en YYYY-MM-DD,
+    // el mismo formato que devuelve un <input type="date">, así que la
+    // comparación de texto es correcta y no depende de zona horaria.
+    const dia = v.fecha ? String(v.fecha).slice(0, 10) : '';
+    const mfd = !fechaDesde || (dia && dia >= fechaDesde);
+    const mfh = !fechaHasta || (dia && dia <= fechaHasta);
+    return mq && me && ml && mfd && mfh;
   });
   const ordenadas  = [...filtradas].sort((a,b) => (getVentaId(b)||0) - (getVentaId(a)||0));
   const totalPags  = Math.ceil(ordenadas.length / POR_PAG);
@@ -304,6 +314,17 @@ export default function VentasPage() {
               <option value="vendido">Vendido</option>
               <option value="devuelto">Devuelto</option>
             </select>
+            <div style={{display:'flex',alignItems:'center',gap:6}} title="Filtrar ventas por rango de fechas">
+              <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPagina(1); }}
+                style={{padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,outline:'none',background:'var(--bg-surface)',color:'var(--text-primary)'}}/>
+              <span style={{fontSize:12,color:'var(--text-muted)'}}>–</span>
+              <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPagina(1); }}
+                style={{padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,outline:'none',background:'var(--bg-surface)',color:'var(--text-primary)'}}/>
+              {(fechaDesde || fechaHasta) && (
+                <button className="search-clear" title="Limpiar filtro de fechas"
+                  onClick={() => { setFechaDesde(''); setFechaHasta(''); setPagina(1); }}>✕</button>
+              )}
+            </div>
             <LocalFiltro value={localSel} onChange={v => { setLocalSel(v); setPagina(1); }} sedeUsuario={user?.sede}/>
             <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{filtradas.length} venta{filtradas.length!==1?'s':''}</span>
           </div>
@@ -311,7 +332,7 @@ export default function VentasPage() {
           {paginadas.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/></svg></div>
-              <h3>{query || filtroEstado !== 'todos' ? 'Sin coincidencias' : 'No hay ventas registradas'}</h3>
+              <h3>{query || filtroEstado !== 'todos' || fechaDesde || fechaHasta ? 'Sin coincidencias' : 'No hay ventas registradas'}</h3>
               <p>{query ? `Sin resultados para "${query}"` : 'Registra ventas desde pedidos entregados'}</p>
             </div>
           ) : (

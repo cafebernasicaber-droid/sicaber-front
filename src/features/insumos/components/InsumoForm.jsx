@@ -3,6 +3,7 @@ import insumosService from '../services/insumosService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
 import './InsumoForm.css';
+import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -252,7 +253,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             </select>
             {tamanoOzEsOtro && (
               <input
-                type="number" min="0.1" step="0.1" placeholder="Escribe el tamaño en oz" style={{ marginTop: 8 }}
+                type="number" step="0.1" placeholder="Escribe el tamaño en oz" style={{ marginTop: 8 }}
                 value={form.tamanoOz}
                 onChange={e => { setForm(prev => ({ ...prev, tamanoOz: e.target.value })); if (errors.tamanoOz) setErrors(prev => ({ ...prev, tamanoOz: '' })); }}
               />
@@ -297,7 +298,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                   if (val !== '' && Number(val) < 0) return;
                   handleChange(e);
                 }}
-                placeholder="0" min="0" step="1"
+                placeholder="0" step="1"
               />
               {isEditing && (
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
@@ -318,7 +319,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               if (val !== '' && Number(val) < 1) return;
               handleChange(e);
             }}
-            placeholder="1" min="1" step="1"
+            placeholder="1" step="1"
           />
           <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
             Se mostrará alerta cuando el stock caiga por debajo de este valor
@@ -353,7 +354,8 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
 
         <div className="fg fg-full">
           <label>Descripción</label>
-          <textarea name="descripcion" value={form.descripcion} onChange={handleChange} placeholder="Descripción opcional del insumo..." rows={3} />
+          <textarea name="descripcion" value={form.descripcion} onChange={handleChange} placeholder="Descripción opcional del insumo..." rows={3} maxLength={LIMITES.DESCRIPCION} />
+          <div style={{fontSize:11,color:enElTope(form.descripcion,LIMITES.DESCRIPCION)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.descripcion,LIMITES.DESCRIPCION)}</div>
         </div>
       </div>
 

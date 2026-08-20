@@ -61,9 +61,9 @@ export const ESTADO_CONFIG = {
   en_camino:  { label: 'En camino',  color: '#00838F', bg: '#E0F7FA' },
   entregado:  { label: 'Entregado',  color: '#388E3C', bg: '#F1F8E9' },
   cancelado:  { label: 'Cancelado',  color: '#B71C1C', bg: '#FFEBEE' },
-  // Los pedidos "anulados" (vista "En Stop") usan este estado — el valor
-  // interno sigue siendo 'anulado' (no se toca la lógica ni la BD), solo
-  // cambia la etiqueta visible: "En Stop" describe mejor un pedido
-  // detenido/reversible que "Anulados".
-  anulado:    { label: 'En Stop',    color: '#757575', bg: '#EEEEEE' },
+  // La vista/tab "En Stop" se eliminó del todo: un pedido anulado queda
+  // anulado (sin vuelta atrás vía dropdown de estado, solo por el flujo
+  // dedicado de Anular con motivo). El valor interno sigue siendo
+  // 'anulado' (no se toca la lógica ni la BD); solo cambia la etiqueta.
+  anulado:    { label: 'Anulado',    color: '#757575', bg: '#EEEEEE' },
 };

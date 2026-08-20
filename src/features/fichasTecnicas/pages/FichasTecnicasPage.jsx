@@ -9,6 +9,7 @@ import toppingsService from '../../toppings/services/toppingsService';
 import adicionesService from '../../adiciones/services/adicionesService';
 import InsumoSearchSelect from '../../../shared/components/InsumoSearchSelect';
 import '../../insumos/pages/InsumosPage.css';
+import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 const fmtPct = n => `${Math.round((n||0)*100)}%`;
@@ -101,6 +102,18 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   const [form, setForm] = useState(def);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // ── Asistente paso a paso (4 pasos) ──────────────────────────────────────
+  // Cambio puramente visual: el formulario sigue siendo un único `form` en
+  // memoria (nada se pierde al ir y volver entre pasos) y se envía en un
+  // solo request al mismo endpoint de siempre — ver handleSubmit más abajo.
+  const [paso, setPaso] = useState(1);
+  const PASOS = [
+    { n: 1, titulo: 'Producto',           desc: 'Elige el producto del menú y ajusta sus parámetros de producción.' },
+    { n: 2, titulo: 'Insumos',            desc: 'Agrega los insumos que requiere esta ficha y su cantidad.' },
+    { n: 3, titulo: 'Toppings',           desc: 'Toppings gratuitos, específicos de este producto (opcional).' },
+    { n: 4, titulo: 'Vaso y preparación', desc: 'Elige el vaso, describe la preparación y guarda la ficha.' },
+  ];
 
   // 2 — Toppings: se manejan como registros aparte en la tabla `toppings`
   // (nombre + insumo_id + cantidad + productos_ids), ligados SIEMPRE a un
@@ -256,15 +269,15 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     if (!form.id_producto) er.id_producto = 'Selecciona un producto';
     if (!form.porciones || isNaN(form.porciones) || Number(form.porciones)<1) er.porciones = 'Número ≥ 1';
     if (!form.tiempo_prep || isNaN(form.tiempo_prep) || Number(form.tiempo_prep)<1) er.tiempo_prep = 'Número ≥ 1';
-    if (!form.costo_estimado || isNaN(form.costo_estimado)) er.costo_estimado = 'Valor numérico requerido';
+    if (!form.costo_estimado || isNaN(form.costo_estimado) || Number(form.costo_estimado) < 0) er.costo_estimado = 'Valor numérico ≥ 0 requerido';
     else if (costoEstimadoSuperaPrecio) er.costo_estimado = 'El costo estimado supera o iguala el valor de venta del producto. Revisa la ficha para evitar pérdidas.';
     if (!form.preparacion.trim()) er.preparacion = 'La preparación es obligatoria';
-    if (form.insumos.some(i => !i.id_insumo || !i.cantidad || isNaN(i.cantidad))) er.insumos = 'Completa todos los insumos';
+    if (form.insumos.some(i => !i.id_insumo || !i.cantidad || isNaN(i.cantidad) || Number(i.cantidad) <= 0)) er.insumos = 'Completa todos los insumos con una cantidad mayor a 0';
     if (!form.vaso_id) er.vaso_id = 'Selecciona el vaso utilizado para este producto';
     // 2 — los toppings son opcionales (la ficha puede no tener ninguno),
     // pero una fila que ya se empezó a llenar debe completarse o quitarse.
-    if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || !t.cantidad || isNaN(t.cantidad)))) {
-      er.toppings = 'Completa o quita las filas de toppings incompletas';
+    if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || !t.cantidad || isNaN(t.cantidad) || Number(t.cantidad) <= 0))) {
+      er.toppings = 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)';
     }
     // Bloqueo real: no se puede guardar una ficha cuyo costo de producción
     // (insumos + vaso) iguale o supere el precio de venta del producto.
@@ -280,8 +293,62 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     setErrors(er); return Object.keys(er).length === 0;
   };
 
+  // ── Validación por paso (para el botón "Siguiente") ──────────────────────
+  // Mismas reglas que `validate()`, solo repartidas por paso para no exigir
+  // en el Paso 1 (Producto) campos que todavía no se han mostrado, como
+  // Insumos o Vaso. `validate()` completo se vuelve a correr al guardar en
+  // el Paso 4, como red de seguridad final.
+  const stepDeCampo = campo => {
+    if (['id_producto','porciones','tiempo_prep','costo_estimado'].includes(campo)) return 1;
+    if (campo === 'insumos') return 2;
+    if (campo === 'toppings') return 3;
+    return 4; // vaso_id, preparacion, general
+  };
+
+  const validarPaso1 = () => {
+    const er = { id_producto:'', porciones:'', tiempo_prep:'', costo_estimado:'' };
+    if (!form.id_producto) er.id_producto = 'Selecciona un producto';
+    else if (fichaDuplicada) er.id_producto = 'Este producto ya tiene una ficha técnica activa. Edítala en vez de crear una nueva.';
+    if (!form.porciones || isNaN(form.porciones) || Number(form.porciones)<1) er.porciones = 'Número ≥ 1';
+    if (!form.tiempo_prep || isNaN(form.tiempo_prep) || Number(form.tiempo_prep)<1) er.tiempo_prep = 'Número ≥ 1';
+    if (!form.costo_estimado || isNaN(form.costo_estimado) || Number(form.costo_estimado) < 0) er.costo_estimado = 'Valor numérico ≥ 0 requerido';
+    else if (costoEstimadoSuperaPrecio) er.costo_estimado = 'El costo estimado supera o iguala el valor de venta del producto. Revisa la ficha para evitar pérdidas.';
+    setErrors(e => ({ ...e, ...er }));
+    return !er.id_producto && !er.porciones && !er.tiempo_prep && !er.costo_estimado;
+  };
+
+  const validarPaso2 = () => {
+    const hayError = form.insumos.some(i => !i.id_insumo || !i.cantidad || isNaN(i.cantidad) || Number(i.cantidad) <= 0);
+    setErrors(e => ({ ...e, insumos: hayError ? 'Completa todos los insumos con una cantidad mayor a 0' : '' }));
+    return !hayError;
+  };
+
+  const validarPaso3 = () => {
+    const hayError = form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || !t.cantidad || isNaN(t.cantidad) || Number(t.cantidad) <= 0));
+    setErrors(e => ({ ...e, toppings: hayError ? 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)' : '' }));
+    return !hayError;
+  };
+
+  const handleSiguiente = () => {
+    const ok = paso === 1 ? validarPaso1() : paso === 2 ? validarPaso2() : validarPaso3();
+    if (ok) setPaso(p => Math.min(4, p + 1));
+  };
+  const handleAtras = () => setPaso(p => Math.max(1, p - 1));
+
   const handleSubmit = async e => {
-    e.preventDefault(); if (!validate()) return;
+    e.preventDefault();
+    if (!validate()) {
+      // Si algún campo de un paso anterior quedó inválido (ej. se limpió el
+      // producto por fuera), llevamos al usuario de vuelta a ese paso para
+      // que el error sea visible — los campos de los pasos 1-3 no se
+      // muestran estando en el Paso 4.
+      setErrors(er => {
+        const primerCampo = Object.keys(er).find(k => er[k]);
+        if (primerCampo) setPaso(stepDeCampo(primerCampo));
+        return er;
+      });
+      return;
+    }
     setLoading(true); await new Promise(r => setTimeout(r, 600)); setLoading(false);
     // 3 — cantidad de cada topping específica de este producto: va en el
     // campo `toppings_ficha` de la propia ficha (igual que `insumos`), no
@@ -363,10 +430,52 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
         <form onSubmit={handleSubmit} style={{padding:'20px 28px'}}>
           {errors.general && <div style={{background:'rgba(229,57,53,0.12)',color:'var(--color-red)',padding:'10px 16px',borderRadius:8,marginBottom:20,fontSize:13}}>⚠ {errors.general}</div>}
 
+          {/* ── Indicador de progreso del asistente: círculos numerados
+              conectados por una línea, con el paso actual (y los ya
+              completados) resaltados en verde. ── */}
+          <div style={{marginBottom:20}}>
+            <div style={{display:'flex',alignItems:'flex-start',marginBottom:14}}>
+              {PASOS.map((s, idx) => (
+                <React.Fragment key={s.n}>
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,flex:'0 0 auto'}}>
+                    <div style={{
+                      width:32,height:32,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+                      fontSize:13,fontWeight:800,flexShrink:0,transition:'all .2s',
+                      border: `2px solid ${s.n<=paso?'#4CAF50':'var(--border-input)'}`,
+                      background: s.n<=paso?'#4CAF50':'var(--bg-surface)',
+                      color: s.n<=paso?'#fff':'var(--text-muted)',
+                    }}>
+                      {s.n < paso ? '✓' : s.n}
+                    </div>
+                    <span style={{fontSize:10.5,fontWeight:700,color: s.n<=paso?'#4CAF50':'var(--text-muted)',textAlign:'center',width:74,lineHeight:1.2}}>{s.titulo}</span>
+                  </div>
+                  {idx < PASOS.length - 1 && (
+                    <div style={{flex:1,height:2,background: s.n<paso?'#4CAF50':'var(--border-input)',margin:'15px 4px 0',transition:'background .2s'}}/>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+            <div style={{fontSize:11,fontWeight:800,color:'#4CAF50',textTransform:'uppercase',letterSpacing:0.6}}>
+              Paso {paso} de {PASOS.length}
+            </div>
+            <div style={{fontSize:16,fontWeight:800,color:'var(--text-primary)',marginTop:2}}>{PASOS[paso-1].titulo}</div>
+            <p style={{fontSize:12.5,color:'var(--text-secondary)',marginTop:4,marginBottom:0}}>{PASOS[paso-1].desc}</p>
+          </div>
+
+          {/* Referencia fija del producto y su precio de venta — visible
+              durante el resto del proceso una vez elegido en el Paso 1. */}
+          {paso > 1 && prodSel && (
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,background:'var(--color-green-glow)',borderRadius:8,padding:'8px 14px',marginBottom:16,fontSize:12.5,flexWrap:'wrap'}}>
+              <span><strong>{prodSel.nombre}</strong> <span style={{color:'var(--text-secondary)'}}>({prodSel.categoria})</span></span>
+              <span>Precio de venta: <strong style={{color:'var(--color-green)'}}>{fmt(prodSel.precio)}</strong></span>
+            </div>
+          )}
+
           {/* 1. Producto */}
+          {paso === 1 && <>
           <div className="insumos-card" style={{padding:'20px 24px',marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:14}}>1. Producto</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14}}>
               <div>
                 <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Producto *</label>
                 <select value={form.id_producto} onChange={e => setF('id_producto', e.target.value)}
@@ -391,6 +500,17 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
                 )}
               </div>
               <div>
+                <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Categoría</label>
+                {/* 4 — la categoría pertenece al producto, no a la ficha
+                    técnica: se autocompleta al elegir el producto y queda
+                    bloqueada (readOnly), no es un dato que el usuario deba
+                    poder cambiar manualmente aquí. */}
+                <input type="text" readOnly disabled value={prodSel ? prodSel.categoria : ''}
+                  placeholder="Elige un producto"
+                  title="Categoría del producto — se autocompleta y no es editable"
+                  style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-surface-2)',color:'var(--text-secondary)',cursor:'not-allowed'}}/>
+              </div>
+              <div>
                 <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Tipo de preparación</label>
                 <select value={form.categoria_prep} onChange={e => setF('categoria_prep', e.target.value)}
                   title="Cómo se prepara este producto"
@@ -402,10 +522,6 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
             {prodSel && (
               <div style={{background:'var(--color-green-glow)',borderRadius:8,padding:'10px 14px',marginTop:10,display:'flex',gap:20,fontSize:13,flexWrap:'wrap'}}>
                 <span><strong>Nombre:</strong> {prodSel.nombre}</span>
-                {/* 4 — categoría del producto autocompletada al elegirlo:
-                    solo informativa/de referencia, no es el mismo campo que
-                    "Tipo de preparación" (categoria_prep) de la ficha. */}
-                <span title="Categoría del producto — solo informativa, no es el 'Tipo de preparación' de la ficha"><strong>Categoría (ref.):</strong> {prodSel.categoria}</span>
                 <span><strong>Precio venta:</strong> <span style={{color:'var(--color-green)',fontWeight:700}}>{fmt(prodSel.precio)}</span></span>
                 {form.costo_estimado && !isNaN(form.costo_estimado) && <span><strong>Margen:</strong> <span style={{color:'var(--color-green)',fontWeight:700}}>{fmt(prodSel.precio - Number(form.costo_estimado))}</span></span>}
               </div>
@@ -445,7 +561,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               ].map(([label,key,type,tip]) => (
                 <div key={key}>
                   <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>{label}</label>
-                  <input type={type} min="0" value={form[key]} onChange={e => setF(key, e.target.value)} title={tip}
+                  <input type={type} value={form[key]} onChange={e => setF(key, e.target.value)} title={tip}
                     style={{width:'100%',padding:'10px 12px',border:`1.5px solid ${errors[key]?'#EF5350':'var(--border-input)'}`,borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
                   {errors[key] && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>{errors[key]}</div>}
                   {/* 4 — precio de venta del producto, visible y permanente
@@ -477,8 +593,10 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               </div>
             </div>
           </div>
+          </>}
 
           {/* 3. Insumos */}
+          {paso === 2 && <>
           <div className="insumos-card" style={{padding:'20px 24px',marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:14}}>3. Insumos requeridos</div>
             {errors.insumos && <div style={{fontSize:12,color:'#E53935',marginBottom:10}}>{errors.insumos}</div>}
@@ -497,7 +615,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
                   excludeIds={idsUsadosEnOtrasFilas(form.insumos, i)}
                   onSelect={found => { setIns(i,'id_insumo',String(found.id)); setIns(i,'unidad',found.unidadMedida||'g'); }}
                   placeholder="Buscar insumo..." hasError={!!errors.insumos && !ins.id_insumo}/>
-                <input type="number" min="0" step="0.1" placeholder="Cant." value={ins.cantidad} onChange={e => setIns(i,'cantidad',e.target.value)}
+                <input type="number" step="0.1" placeholder="Cant." value={ins.cantidad} onChange={e => setIns(i,'cantidad',e.target.value)}
                   title="Cantidad a utilizar, en la unidad del insumo"
                   style={{padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
                 {/* 16.4 — la unidad no es editable: siempre es la registrada en
@@ -518,6 +636,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               Agregar insumo
             </button>
           </div>
+          </>}
 
           {/* 4. Toppings — a diferencia de "Insumos requeridos" (siempre se
               consumen), estos quedan registrados como toppings ligados
@@ -526,6 +645,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               módulo aparte): las adiciones son de pago y aplican por igual
               a TODOS los productos; estos toppings son gratuitos y pueden
               variar de un producto a otro. */}
+          {paso === 3 && <>
           <div className="insumos-card" style={{padding:'20px 24px',marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:6}}>4. Toppings</div>
             <p style={{fontSize:12,color:'var(--text-muted)',marginTop:0,marginBottom:14}}>
@@ -547,7 +667,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
                         excludeIds={idsUsadosEnOtrasFilas(form.toppings, i)}
                         onSelect={found => { setTop(i,'id_insumo',String(found.id)); setTop(i,'unidad',found.unidadMedida||'g'); }}
                         placeholder="Buscar insumo para el topping..." hasError={!!errors.toppings && !top.id_insumo}/>
-                      <input type="number" min="0" step="0.1" placeholder="Cant." value={top.cantidad} onChange={e => setTop(i,'cantidad',e.target.value)}
+                      <input type="number" step="0.1" placeholder="Cant." value={top.cantidad} onChange={e => setTop(i,'cantidad',e.target.value)}
                         title="Cantidad de este insumo que lleva el topping"
                         style={{padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
                       <span title="Unidad de medida registrada para este insumo — no se puede cambiar aquí"
@@ -567,6 +687,9 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               Agregar topping
             </button>
           </div>
+          </>}
+
+          {paso === 4 && <>
 
           {/* Vista previa de preparación — bloque colapsable, solo lectura/
               simulación: no guarda nada ni llama al backend, combina lo que
@@ -694,7 +817,9 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               <textarea value={form.preparacion} onChange={e => setF('preparacion', e.target.value)} rows={4}
                 placeholder={'1. Primer paso...\n2. Segundo paso...\n3. Tercer paso...'}
                 title="Pasos numerados del proceso de preparación"
+                maxLength={LIMITES.PREPARACION}
                 style={{width:'100%',padding:'10px 12px',border:`1.5px solid ${errors.preparacion?'#EF5350':'var(--border-input)'}`,borderRadius:8,fontSize:13,outline:'none',resize:'vertical',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
+              <div style={{fontSize:11,color:enElTope(form.preparacion,LIMITES.PREPARACION)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.preparacion,LIMITES.PREPARACION)}</div>
               {errors.preparacion && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>{errors.preparacion}</div>}
             </div>
           </div>
@@ -705,16 +830,46 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
             <textarea value={form.notas} onChange={e => setF('notas', e.target.value)} rows={3}
               placeholder="Temperatura de servicio, variaciones, observaciones..."
               title="Observaciones adicionales, opcionales"
+              maxLength={LIMITES.NOTAS_FICHA}
               style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',resize:'vertical',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
+            <div style={{fontSize:11,color:enElTope(form.notas,LIMITES.NOTAS_FICHA)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.notas,LIMITES.NOTAS_FICHA)}</div>
           </div>
 
-          <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
-            <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn-add" disabled={loading || costoSuperaPrecio || costoEstimadoSuperaPrecio || !!fichaDuplicada}
-              title={costoSuperaPrecio || costoEstimadoSuperaPrecio ? 'El costo de producción supera o iguala el precio de venta — corrige la ficha antes de guardar' : fichaDuplicada ? 'Este producto ya tiene una ficha técnica activa' : undefined}
-              style={{display:'flex',alignItems:'center',gap:6}}>
-              {loading ? 'Guardando...' : fichaInicial ? <><IconGuardar/> Actualizar ficha</> : <><IconMas/> Registrar ficha técnica</>}
-            </button>
+          </>}
+
+          {/* Navegación del asistente: Atrás/Siguiente en los pasos 1-3;
+              el botón final "Guardar ficha técnica" solo aparece en el
+              Paso 4 y envía todo en un único request (mismo endpoint de
+              siempre — ver handleSubmit). */}
+          <div style={{display:'flex',justifyContent:'space-between',gap:10}}>
+            <div>
+              {paso > 1 && (
+                <button type="button" className="btn-cancel" onClick={handleAtras}>← Atrás</button>
+              )}
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
+              {paso < 4 ? (
+                // key distinta a la del botón de abajo: si React reutiliza el
+                // mismo nodo <button> del DOM al pasar de "Siguiente" (type
+                // button) a "Guardar" (type submit), el navegador llega a
+                // procesar el click como un submit real de formulario justo
+                // en ese cambio de paso — de ahí que apareciera el error de
+                // "Selecciona el vaso" antes de que el usuario llegara a
+                // verlo. Con key distinta, React desmonta y monta un botón
+                // nuevo en vez de mutar el existente, y el submit espurio
+                // desaparece.
+                <button key="btn-siguiente" type="button" className="btn-add" onClick={handleSiguiente} style={{display:'flex',alignItems:'center',gap:6}}>
+                  Siguiente →
+                </button>
+              ) : (
+                <button key="btn-guardar" type="submit" className="btn-add" disabled={loading || costoSuperaPrecio || costoEstimadoSuperaPrecio || !!fichaDuplicada}
+                  title={costoSuperaPrecio || costoEstimadoSuperaPrecio ? 'El costo de producción supera o iguala el precio de venta — corrige la ficha antes de guardar' : fichaDuplicada ? 'Este producto ya tiene una ficha técnica activa' : undefined}
+                  style={{display:'flex',alignItems:'center',gap:6}}>
+                  {loading ? 'Guardando...' : fichaInicial ? <><IconGuardar/> Actualizar ficha</> : <><IconMas/> Guardar ficha técnica</>}
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>
@@ -730,7 +885,13 @@ function ModalDetalleFicha({ ficha, onClose, onEditar, onAnular }) {
     productosService.getAll().then(d => setProductos(Array.isArray(d) ? d : [])).catch(()=>{});
     insumosService.getAll().then(d => setInsumos(Array.isArray(d) ? d : [])).catch(()=>{});
   }, []);
-  const p = productos.find(x => x.id === ficha.id_producto);
+  // Comparación con String() a ambos lados: id_producto e id_insumo salen
+  // de columnas JSONB (ingredientes) o de un alias del backend, así que
+  // pueden llegar como número O como texto según la ruta. Con === estricto
+  // el find fallaba cuando los tipos no coincidían y el detalle mostraba
+  // "Insumo #5" en vez del nombre, y el costo por insumos se calculaba en 0.
+  // El formulario de esta misma pantalla ya comparaba así (ver setIns/InsumoSearchSelect).
+  const p = productos.find(x => String(x.id) === String(ficha.id_producto));
   const pasos = (ficha.preparacion || '').split('\n').filter(x => x.trim());
   // Antes: ficha.insumos (sin respaldo) — si el backend no traía el
   // arreglo, tronaba al abrir el detalle de esa ficha.
@@ -741,7 +902,7 @@ function ModalDetalleFicha({ ficha, onClose, onEditar, onAnular }) {
   // ficha ya guardada.
   const vasoSel = insumos.find(i => String(i.id) === String(ficha.vaso_id));
   const costoCalculado = fichaInsumos.reduce((s, i) => {
-    const insumo = insumos.find(x => x.id === i.id_insumo);
+    const insumo = insumos.find(x => String(x.id) === String(i.id_insumo));
     return s + (Number(i.cantidad) || 0) * (insumo?.precioUnitario || 0);
   }, 0) + (vasoSel?.precioUnitario || 0);
   const margenCalculado = p && p.precio > 0 ? (p.precio - costoCalculado) / p.precio : null;
@@ -816,7 +977,7 @@ function ModalDetalleFicha({ ficha, onClose, onEditar, onAnular }) {
               <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Esta ficha no tiene insumos registrados.</p>
             )}
             {fichaInsumos.map((ins, i) => {
-              const insumo = insumos.find(s => s.id === ins.id_insumo);
+              const insumo = insumos.find(s => String(s.id) === String(ins.id_insumo));
               return (
                 <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',borderRadius:6,background:i%2===0?'var(--bg-hover)':'transparent',fontSize:13}}>
                   <span style={{fontWeight:600,color:'var(--text-primary)'}}>{insumo?.nombre||`Insumo #${ins.id_insumo}`}</span>
