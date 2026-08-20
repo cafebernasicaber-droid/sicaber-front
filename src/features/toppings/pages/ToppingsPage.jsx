@@ -34,6 +34,11 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
 
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
+    if (!form.nombre.trim()) { setError('El nombre del topping es obligatorio.'); return; }
+    if (form.insumo_id && form.cantidad !== '' && (isNaN(form.cantidad) || Number(form.cantidad) < 0)) {
+      setError('La cantidad consumida debe ser un número válido (mayor o igual a 0).');
+      return;
+    }
     // Sin insumo asociado no tiene sentido guardar una cantidad suelta.
     const payload = { ...form, cantidad: form.insumo_id && form.cantidad !== '' ? Number(form.cantidad) : null };
     try {
@@ -56,7 +61,7 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
         <form onSubmit={handleSubmit} style={{display:'flex',flexDirection:'column',gap:14}}>
           <div>
             <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Nombre *</label>
-            <input type="text" required value={form.nombre} onChange={set('nombre')} placeholder="Ej: Crema batida" style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14,outline:'none'}}/>
+            <input type="text" value={form.nombre} onChange={set('nombre')} placeholder="Ej: Crema batida" style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14,outline:'none'}}/>
           </div>
 
           <div>
@@ -77,7 +82,7 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
                   <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>
                     Cantidad de {insumoSel.unidadMedida || 'unidad'} que consume <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span>
                   </label>
-                  <input type="number" min="0" step="0.1" value={form.cantidad} onChange={set('cantidad')}
+                  <input type="number" step="0.1" value={form.cantidad} onChange={set('cantidad')}
                     placeholder={`Ej: 1 ${insumoSel.unidadMedida || ''}`}
                     style={{width:'100%',padding:'9px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13,outline:'none'}}/>
                 </div>

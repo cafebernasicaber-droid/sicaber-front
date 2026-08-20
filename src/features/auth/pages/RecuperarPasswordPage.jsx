@@ -15,7 +15,10 @@ export default function RecuperarPasswordPage() {
   const [ok,            setOk]      = useState(false);
 
   const handleSolicitar = async (e) => {
-    e.preventDefault(); setError(''); setLoading(true);
+    e.preventDefault(); setError('');
+    if (!correo.trim()) { setError('El correo es obligatorio.'); return; }
+    if (!/\S+@\S+\.\S+/.test(correo)) { setError('Ingresa un correo electrónico válido.'); return; }
+    setLoading(true);
     try {
       const res  = await fetch(`${API}/auth/cliente/recuperar`, {
         method: 'POST', headers: {'Content-Type':'application/json'},
@@ -29,6 +32,10 @@ export default function RecuperarPasswordPage() {
 
   const handleReset = async (e) => {
     e.preventDefault(); setError('');
+    if (!token.trim())     { setError('Ingresa el código de verificación.'); return; }
+    if (token.length !== 6) { setError('El código debe tener 6 dígitos.'); return; }
+    if (!nuevaPass)         { setError('La nueva contraseña es obligatoria.'); return; }
+    if (!confirmar)         { setError('Debes confirmar la nueva contraseña.'); return; }
     if (nuevaPass !== confirmar) { setError('Las contraseñas no coinciden'); return; }
     if (nuevaPass.length < 6)    { setError('Mínimo 6 caracteres'); return; }
     setLoading(true);
@@ -57,7 +64,7 @@ export default function RecuperarPasswordPage() {
             <p className="auth-sub">Ingresa tu correo y te enviaremos un código de recuperación.</p>
             <div className="auth-field">
               <label>Correo electrónico</label>
-              <input type="email" value={correo} onChange={e=>setCorreo(e.target.value)} required placeholder="tu@correo.com"/>
+              <input type="text" value={correo} onChange={e=>setCorreo(e.target.value)} placeholder="tu@correo.com"/>
             </div>
             {error && <div className="auth-error">⚠ {error}</div>}
             <button className="auth-btn" type="submit" disabled={loading}>
@@ -70,18 +77,18 @@ export default function RecuperarPasswordPage() {
             <p className="auth-sub">Ingresa el código enviado a <strong>{correo}</strong> y tu nueva contraseña.</p>
             <div className="auth-field">
               <label>Código de verificación</label>
-              <input type="text" maxLength={6} value={token}
-                onChange={e=>setToken(e.target.value.replace(/\D/g,''))}
-                placeholder="123456" required
+              <input type="text" value={token}
+                onChange={e=>setToken(e.target.value.replace(/\D/g,'').slice(0, 6))}
+                placeholder="123456"
                 style={{fontSize:28,letterSpacing:8,textAlign:'center',fontWeight:'bold'}}/>
             </div>
             <div className="auth-field">
               <label>Nueva contraseña</label>
-              <input type="password" value={nuevaPass} onChange={e=>setNueva(e.target.value)} required placeholder="Mínimo 6 caracteres"/>
+              <input type="password" value={nuevaPass} onChange={e=>setNueva(e.target.value)} placeholder="Mínimo 6 caracteres"/>
             </div>
             <div className="auth-field">
               <label>Confirmar contraseña</label>
-              <input type="password" value={confirmar} onChange={e=>setConfirm(e.target.value)} required placeholder="Repite la contraseña"/>
+              <input type="password" value={confirmar} onChange={e=>setConfirm(e.target.value)} placeholder="Repite la contraseña"/>
             </div>
             {error && <div className="auth-error">⚠ {error}</div>}
             <button className="auth-btn" type="submit" disabled={loading}>

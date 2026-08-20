@@ -216,9 +216,12 @@ function ModalPedido({ pedido, onClose, onSave }) {
   const crear = () => {
     if (!f.productos.length) { alert('Selecciona al menos un producto'); return; }
     if (!f.barista)          { alert('Selecciona quién atiende el pedido'); return; }
-    if (!f.sede)             { alert('Selecciona para qué local es este pedido'); return; }
-    // 3 — igual que en el checkout del cliente: obligatorio elegir el
-    // local de recogida cuando el tipo de entrega es "En el Local".
+    if (!f.sede)             { alert('Selecciona el local de este pedido'); return; }
+    // "Local de recogida" y "Local *" apuntaban al mismo local físico
+    // (mismo `locales`/GET /locales) y se pedían dos veces en dos campos
+    // distintos — ahora un único selector ("Local *") llena ambos: `sede`
+    // (a quién se le asigna el pedido) y localId/localNombre (local de
+    // recogida real, mismo campo que ya usa el checkout del cliente).
     if (f.tipo === 'local' && !f.localId) { alert('Selecciona el local donde el cliente recogerá el pedido'); return; }
     if (f.tipo === 'domicilio' && !f.domiciliario) { alert('Selecciona un domiciliario'); return; }
     if (f.tipo === 'domicilio' && (!isEdit || pedido.tipo !== 'domicilio')) {
@@ -267,46 +270,58 @@ function ModalPedido({ pedido, onClose, onSave }) {
 
         <div className="pd-form-group">
           <label>Tipo de entrega</label>
-          <div className="pd-tipo-selector">
-            {[{val:'local',lbl:'En el Local',ic:'🏠'},{val:'domicilio',lbl:'A Domicilio',ic:'🛵'}].map(t => (
-              <div key={t.val} className={`pd-tipo-option ${f.tipo===t.val?'pd-tipo-selected':''}`} onClick={() => set('tipo', t.val)}>
-                <span>{t.ic}</span><span>{t.lbl}</span>
+          {/* Los domicilios solo aplican a pedidos que el cliente hace por su
+              cuenta desde la tienda/app — un pedido creado a mano por el
+              admin siempre es para recoger en el local. Se mantiene la
+              opción "A Domicilio" únicamente si se está editando un pedido
+              que YA es a domicilio (no se le cambia el tipo a un pedido real
+              del cliente solo por abrirlo en el admin). */}
+          {(isEdit && pedido.tipo === 'domicilio') ? (
+            <div className="pd-tipo-selector">
+              {[{val:'local',lbl:'En el Local',ic:'🏠'},{val:'domicilio',lbl:'A Domicilio',ic:'🛵'}].map(t => (
+                <div key={t.val} className={`pd-tipo-option ${f.tipo===t.val?'pd-tipo-selected':''}`} onClick={() => set('tipo', t.val)}>
+                  <span>{t.ic}</span><span>{t.lbl}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="pd-tipo-selector">
+                <div className="pd-tipo-option pd-tipo-selected">
+                  <span>🏠</span><span>En el Local</span>
+                </div>
               </div>
-            ))}
-          </div>
+              <p className="pd-hint" style={{marginTop:6}}>
+                Los pedidos a domicilio solo se piden desde la tienda del cliente.
+              </p>
+            </>
+          )}
         </div>
 
-        {/* 3 — local físico de recogida (distinto de "Local *"/sede debajo,
-            que es a qué local pertenece el pedido para efectos de quién lo
-            atiende) — igual que ya existe en el checkout del cliente. */}
-        {f.tipo === 'local' && (
-          <div className="pd-form-group">
-            <label>Local de recogida <span className="required">*</span></label>
-            {locales.length === 0 ? (
-              <p className="pd-hint">No hay locales activos registrados.</p>
-            ) : (
-              <select value={f.localId} onChange={e => {
-                const loc = locales.find(l => String(l.id) === e.target.value);
-                setF(p => ({ ...p, localId: e.target.value, localNombre: loc?.nombre || '' }));
-              }}>
-                <option value="">-- Seleccionar --</option>
-                {locales.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-              </select>
-            )}
-          </div>
-        )}
-
+        {/* Antes: dos campos pidiendo lo mismo — "Local de recogida"
+            (select) y "Local *" (botones), ambos sacados del mismo GET
+            /locales. Ahora un único selector llena los dos campos que
+            espera el backend: `sede` (a qué local/personal se asigna el
+            pedido) y localId/localNombre (local de recogida, mismo campo
+            que ya usa el checkout del cliente). */}
         <div className="pd-form-group">
-          <label>Local *</label>
-          <div className="pd-tipo-selector">
-            {[{val:'Local 1',ic:'1️⃣'},{val:'Local 2',ic:'2️⃣'}].map(s => (
-              <div key={s.val} className={`pd-tipo-option ${f.sede===s.val?'pd-tipo-selected':''}`} onClick={() => set('sede', s.val)}>
-                <span>{s.ic}</span><span>{s.val}</span>
-              </div>
-            ))}
-          </div>
+          <label>Local <span className="required">*</span></label>
+          {locales.length === 0 ? (
+            <p className="pd-hint">No hay locales activos registrados.</p>
+          ) : (
+            <div className="pd-tipo-selector">
+              {locales.map(l => (
+                <div key={l.id} className={`pd-tipo-option ${f.sede===l.nombre?'pd-tipo-selected':''}`}
+                  onClick={() => setF(p => ({ ...p, sede: l.nombre, localId: String(l.id), localNombre: l.nombre }))}>
+                  <span>🏪</span><span>{l.nombre}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <p className="pd-hint" style={{marginTop:6}}>
-            El pedido solo aparecerá para el cajero y el bartender de ese local.
+            {f.tipo === 'local'
+              ? 'El local donde el cliente recogerá el pedido, y el único cajero/bartender que lo verá.'
+              : 'El pedido solo aparecerá para el cajero y el bartender de ese local.'}
           </p>
         </div>
 
@@ -480,10 +495,6 @@ export default function PedidosPage() {
   const [editTarget,   setEditTarget] = useState(null);
   const [detalle,      setDetalle]  = useState(null);
   const [deleteTarget, setDel]      = useState(null);
-  // Paso del flujo de Anular: 'elegir' (Anular pedido vs Poner en Stop) o
-  // 'motivo' (solo para "Anular pedido", permanente — pide el motivo antes
-  // de confirmar, igual que ya se hace al rechazar un pago).
-  const [anularPaso, setAnularPaso] = useState('elegir');
   const [anularMotivo, setAnularMotivo] = useState('');
   const [buscar,       setBuscar]   = useState('');
   const [pagina,       setPagina]   = useState(1);
@@ -591,26 +602,7 @@ const [vista,         setVista]   = useState('activos');
     setRechazoTarget(null);
   };
 
-  const cerrarAnular = () => { setDel(null); setAnularPaso('elegir'); setAnularMotivo(''); };
-
-  // "Poner en Stop" — exactamente la misma lógica que ya existía para el
-  // único botón "Anular" de antes: reversible, el pedido pasa a la sección
-  // "En Stop" y puede reactivarse. No se toca nada de este comportamiento.
-  // Llama a pedidosService.cambiarEstado directamente (no al wrapper
-  // cambiarEstado de arriba) porque ese wrapper bloquea transiciones que no
-  // sean 'en_proceso'/'cancelado' cuando el pedido viene de
-  // 'pendiente_verificacion' — una regla que no aplica a "Poner en Stop".
-  const handleStop = async () => {
-    try {
-      await pedidosService.cambiarEstado(deleteTarget.id, 'anulado');
-    } catch (err) {
-      showErr(err.message || 'No se pudo mover el pedido a En Stop.');
-      return;
-    }
-    await refresh();
-    showOk(`Pedido #${deleteTarget.id} movido a En Stop`);
-    cerrarAnular();
-  };
+  const cerrarAnular = () => { setDel(null); setAnularMotivo(''); };
 
   // "Anular pedido" — cancelación permanente. Reutiliza el mismo mecanismo
   // ya usado al rechazar un pago (confirmarRechazo, arriba): estado
@@ -629,15 +621,25 @@ const [vista,         setVista]   = useState('activos');
   };
 
   const pedidosLocal = localSel === 'todos' ? pedidos : pedidos.filter(p => p.sede === localSel);
-  const enStop = pedidosLocal.filter(p => p.estado === 'anulado');
-const activos = pedidosLocal.filter(p => p.estado !== 'anulado');
+  // "En Stop" se eliminó del todo: ya no existe una vista intermedia
+  // reversible aparte de Anular — un pedido anulado queda anulado.
+  const activos = pedidosLocal.filter(p => p.estado !== 'anulado');
 const pagosPendientes = pedidosLocal.filter(p => p.estado === 'pendiente_verificacion');
-const base = vista === 'stop' ? enStop : activos;
+const base = activos;
 
 const lq = buscar.toLowerCase().trim();
+// Busca el texto en CUALQUIER dato registrado del pedido: número, cliente,
+// mesa, estado, tipo, método de pago, sede, teléfono, dirección, quien lo
+// atendió (barista/domiciliario) y el nombre de los productos. Antes solo
+// miraba cliente/mesa, estado y productos, así que buscar por el número de
+// pedido o por el método de pago no devolvía nada.
 const pedidoMatchesTexto = (p, q) => {
-  if ((p.cliente||p.mesa||'').toLowerCase().includes(q)) return true;
-  if ((p.estado||'').toLowerCase().includes(q)) return true;
+  const campos = [
+    p.cliente, p.mesa, p.estado, p.tipo, p.metodo_pago, p.sede,
+    p.telefono, p.direccion, p.barista, p.domiciliario,
+  ];
+  if (campos.some(c => String(c || '').toLowerCase().includes(q))) return true;
+  if (String(p.id ?? '').toLowerCase().includes(q)) return true;
   const prods = Array.isArray(p.productos) ? p.productos : (Array.isArray(p.items) ? p.items : []);
   return prods.some(x => (x.nombre || (typeof x === 'string' ? x : '')).toLowerCase().includes(q));
 };
@@ -715,12 +717,6 @@ const filtrados = lq
     Pedidos activos ({activos.length})
   </button>
   <button
-    onClick={() => { setVista('stop'); setPagina(1); }}
-    className={vista==='stop' ? 'btn-confirm-danger' : 'btn-cancel'}
-  >
-    ⏸ En Stop {enStop.length > 0 ? `(${enStop.length})` : ''}
-  </button>
-  <button
     onClick={() => { setVista('pagos'); setPagina(1); }}
     className={vista==='pagos' ? 'btn-confirm-primary' : 'btn-cancel'}
     style={vista!=='pagos' && pagosPendientes.length>0 ? {borderColor:'#AD1457',color:'#AD1457'} : undefined}
@@ -793,7 +789,7 @@ const filtrados = lq
                 <span className="search-icon">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 </span>
-                <input className="search-input" placeholder="Buscar cliente o producto..." value={buscar} onChange={e => { setBuscar(e.target.value); setPagina(1); }}/>
+                <input className="search-input" placeholder="Buscar por N.º, cliente, producto, estado o pago..." value={buscar} onChange={e => { setBuscar(e.target.value); setPagina(1); }}/>
                 {buscar && <button className="search-clear" onClick={() => setBuscar('')}>✕</button>}
               </div>
             </div>
@@ -866,7 +862,11 @@ const filtrados = lq
                             </Tooltip>
                           ) : (
                             <select className="pd-estado-select" value={p.estado} style={{background:cfg.bg,color:cfg.color,borderColor:cfg.color+'55'}} onChange={e => cambiarEstado(p.id, e.target.value)}>
-                              {Object.entries(ESTADO_CONFIG).filter(([k]) => k!=='entregado'&&k!=='pendiente_verificacion').map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+                              {/* 'anulado' queda fuera a propósito: anular un
+                                  pedido solo debe pasar por el botón
+                                  dedicado (con motivo), no como una
+                                  transición más de este selector genérico. */}
+                              {Object.entries(ESTADO_CONFIG).filter(([k]) => k!=='entregado'&&k!=='pendiente_verificacion'&&k!=='anulado').map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
                             </select>
                           )}
                         </td>
@@ -887,16 +887,8 @@ const filtrados = lq
                                 </button>
                               </Tooltip>
                             )}
-{vista === 'stop' ? (
-  <Tooltip label="Reactivar">
-    <button className="btn-add" onClick={() => cambiarEstado(p.id, 'pendiente')}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.04"/></svg>
-    </button>
-  </Tooltip>
-) : (
-  p.estado!=='listo'&&p.estado!=='entregado' && (
-    <AnularButton onClick={() => setDel(p)}/>
-  )
+{p.estado!=='listo'&&p.estado!=='entregado' && (
+  <AnularButton onClick={() => setDel(p)}/>
 )}                          </div>
                         </td>
                       </tr>
@@ -921,33 +913,7 @@ const filtrados = lq
           )}
         </div>
 
-        {deleteTarget && anularPaso === 'elegir' && (
-          <div className="modal-overlay" onClick={cerrarAnular}>
-            <div className="modal-box" onClick={e => e.stopPropagation()}>
-              <div className="modal-icon modal-icon-danger">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-              </div>
-              <h3>¿Qué deseas hacer con este pedido?</h3>
-              <p>Pedido #{deleteTarget.id} — {deleteTarget.cliente || deleteTarget.mesa}. Elige una opción:</p>
-              <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:6,marginBottom:6,textAlign:'left'}}>
-                <button type="button" onClick={() => setAnularPaso('motivo')}
-                  style={{padding:'12px 14px',borderRadius:10,border:'1.5px solid rgba(229,57,53,0.3)',background:'rgba(229,57,53,0.06)',cursor:'pointer'}}>
-                  <div style={{fontWeight:700,color:'#E53935',fontSize:14}}>Anular pedido</div>
-                  <div style={{fontSize:12,color:'var(--text-secondary)',marginTop:2}}>Cancelación permanente. Se pide un motivo y se notifica al cliente.</div>
-                </button>
-                <button type="button" onClick={handleStop}
-                  style={{padding:'12px 14px',borderRadius:10,border:'1.5px solid var(--border-input)',background:'var(--bg-surface-2)',cursor:'pointer'}}>
-                  <div style={{fontWeight:700,color:'var(--text-primary)',fontSize:14}}>Poner en Stop</div>
-                  <div style={{fontSize:12,color:'var(--text-secondary)',marginTop:2}}>El pedido pasa a "En Stop". Podrás reactivarlo cuando quieras.</div>
-                </button>
-              </div>
-              <div className="modal-actions">
-                <button className="btn-cancel" onClick={cerrarAnular}>Cancelar</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {deleteTarget && anularPaso === 'motivo' && (
+        {deleteTarget && (
           <div className="modal-overlay" onClick={cerrarAnular}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
               <div className="modal-icon modal-icon-danger">
@@ -963,7 +929,7 @@ const filtrados = lq
                 onChange={e => setAnularMotivo(e.target.value)}
               />
               <div className="modal-actions">
-                <button className="btn-cancel" onClick={() => setAnularPaso('elegir')}>← Volver</button>
+                <button className="btn-cancel" onClick={cerrarAnular}>Cancelar</button>
                 <button className="btn-confirm-danger" onClick={handleAnularPedido}>Sí, anular pedido</button>
               </div>
             </div>

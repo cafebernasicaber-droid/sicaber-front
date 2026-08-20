@@ -141,7 +141,7 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Nombre completo *</label>
-                  <input style={inputStyle} type="text" placeholder="Nombre completo" required
+                  <input style={inputStyle} type="text" placeholder="Nombre completo"
                     value={form.nombre} onChange={e => set('nombre', e.target.value)} />
                 </div>
                 <div>
@@ -153,7 +153,7 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
 
               <div>
                 <label style={labelStyle}>Correo electrónico</label>
-                <input style={lockedInputStyle} type="email" value={form.correo} readOnly disabled
+                <input style={lockedInputStyle} type="text" value={form.correo} readOnly disabled
                   title="El correo no se puede modificar" />
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>El correo es único y no se puede editar.</div>
               </div>
@@ -178,7 +178,7 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
               {form.tipoDoc === 'Otros' && (
                 <div>
                   <label style={labelStyle}>¿Cuál documento? *</label>
-                  <input style={inputStyle} type="text" placeholder="Ej: Pasaporte, Permiso Especial..." required
+                  <input style={inputStyle} type="text" placeholder="Ej: Pasaporte, Permiso Especial..."
                     value={form.tipoDocOtro} onChange={e => set('tipoDocOtro', e.target.value)} />
                 </div>
               )}

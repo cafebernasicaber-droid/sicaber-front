@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import proveedoresService from '../services/proveedoresService';
 import './ProveedorForm.css';
+import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -115,7 +116,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
 
         <div className={`fg ${errors.correo ? 'fg-error' : ''}`}>
           <label>Correo electrónico <span className="req">*</span></label>
-          <input type="email" name="correo" value={form.correo}
+          <input type="text" name="correo" value={form.correo}
             onChange={handleChange} placeholder="proveedor@correo.com" />
           {errors.correo && <span className="err-msg">{errors.correo}</span>}
         </div>
@@ -150,7 +151,9 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         <div className="fg fg-full">
           <label>Observaciones</label>
           <textarea name="observaciones" value={form.observaciones}
-            onChange={handleChange} placeholder="Notas adicionales sobre el proveedor..." rows={3} />
+            onChange={handleChange} placeholder="Notas adicionales sobre el proveedor..." rows={3}
+            maxLength={LIMITES.OBSERVACIONES} />
+          <div style={{fontSize:11,color:enElTope(form.observaciones,LIMITES.OBSERVACIONES)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.observaciones,LIMITES.OBSERVACIONES)}</div>
         </div>
       </div>
 

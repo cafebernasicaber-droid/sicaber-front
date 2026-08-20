@@ -29,7 +29,17 @@ const productosService = {
   create:     (data)    => productosApi.create(data),
   update:     (id, d)   => productosApi.update(id, d),
   remove:     (id)      => productosApi.remove(id),
-  toggleEstado: (id)      => productosApi.toggleEstado(id),
+  // El backend nunca implementó PATCH /productos/:id/estado (a diferencia
+  // de insumos/toppings/adiciones/etc., productos tiene su propio router en
+  // vez del CRUD genérico, y ese router no tiene ruta de estado) — el botón
+  // de activar/desactivar llamaba a una ruta que 404, en silencio porque el
+  // onClick no tenía try/catch, así que parecía que "no hacía nada".
+  // PUT /productos/:id sí existe y acepta el producto completo, así que se
+  // reusa ese para alternar el estado sin depender de la ruta que falta.
+  toggleEstado: (producto) => productosApi.update(producto.id, {
+    ...producto,
+    estado: producto.estado === 'Activo' ? 'Inactivo' : 'Activo',
+  }),
 };
 
 export default productosService;
