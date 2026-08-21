@@ -3,7 +3,7 @@ import insumosService from '../services/insumosService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
 import './InsumoForm.css';
-import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
+import { contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -30,22 +30,22 @@ const EMPTY_FORM = {
 // así que no es una lista cerrada.
 const TAMANOS_OZ_PRESET = [4, 7, 9, 12, 14, 16, 20, 24];
 
-const tieneComprasActivas = (insumoNombre) => {
-  try {
-    const compras = JSON.parse(localStorage.getItem('sicaber_compras') || '[]');
-    const nombre = (insumoNombre || '').toLowerCase().trim();
-    return compras
-      .filter(c => c.estado !== 'anulada')
-      .some(c => (c.items || []).some(it =>
-        (it.insumo || '').toLowerCase().trim() === nombre
-      ));
-  } catch { return false; }
-};
+// Topes propios de este formulario: 60 caracteres para el nombre del
+// insumo, 200 para la descripción — mismo criterio que Proveedores,
+// reemplazan al CAMPO_MAX/DESCRIPCION compartidos (150/500), que
+// siguen usándose sin cambios en otros módulos.
+const CAMPO_MAX = 60;
+const DESCRIPCION_INSUMO_MAX = 200;
+
+// Nombre del insumo: letras, números, espacios y la puntuación normal de
+// un nombre de producto (paréntesis, guiones, comas, %). Nada de espacio
+// como primer carácter.
+const filtrarNombreInsumo = (v) => v.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s.,%()-]/g, '');
+const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
 
 const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
-  const [hasActiveCompras, setHasActiveCompras] = useState(false);
   const [tamanoOzEsOtro, setTamanoOzEsOtro] = useState(false);
 
   useEffect(() => {
@@ -55,7 +55,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         categoria:    initialData.categoria    || '',
         categoriaId:  initialData.categoriaId  || '',
         unidadMedida: initialData.unidadMedida || '',
-        stockActual:  initialData.stockActual  ?? '',
+        stockActual:  initialData.stockActual  ?? 0,
         stockMinimo:  initialData.stockMinimo  ?? '',
         proveedor:    initialData.proveedor    || '',
         proveedorId:  initialData.proveedorId  || '',
@@ -67,9 +67,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       setTamanoOzEsOtro(
         initialData.tamanoOz != null && initialData.tamanoOz !== '' && !TAMANOS_OZ_PRESET.includes(Number(initialData.tamanoOz))
       );
-      if (isEditing && initialData.nombre) {
-        setHasActiveCompras(tieneComprasActivas(initialData.nombre));
-      }
     }
   }, [initialData, isEditing]);
 
@@ -99,7 +96,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       errs.tamanoOz = 'Selecciona o escribe el tamaño del vaso';
     }
     if (!form.unidadMedida)       errs.unidadMedida = 'Selecciona una unidad de medida';
-    if (form.stockActual === '' || isNaN(form.stockActual) || Number(form.stockActual) < 0) errs.stockActual = 'El stock actual debe ser 0 o mayor';
     if (form.stockMinimo === '' || isNaN(form.stockMinimo) || Number(form.stockMinimo) < 1) errs.stockMinimo = 'El stock mínimo debe ser 1 o mayor';
     if (proveedoresActivos.length > 0 && !form.proveedor.trim()) errs.proveedor = 'Selecciona un proveedor';
     return errs;
@@ -109,9 +105,16 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     const { name, value, type, checked } = e.target;
     if (type === 'checkbox' && name === 'estado') {
       setForm(prev => ({ ...prev, estado: checked ? 'Activo' : 'Inactivo' }));
-    } else {
-      setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+      if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+      return;
     }
+    let v = value;
+    if (name === 'nombre') {
+      v = sinEspacioAlInicio(filtrarNombreInsumo(v)).slice(0, CAMPO_MAX);
+    } else if (name === 'descripcion') {
+      v = sinEspacioAlInicio(v).slice(0, DESCRIPCION_INSUMO_MAX);
+    }
+    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : v }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
@@ -144,7 +147,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     onSubmit({
       ...form,
-      stockActual: parseInt(form.stockActual, 10) || 0,
       stockMinimo: Math.max(1, parseInt(form.stockMinimo, 10) || 1),
       tamanoOz: form.unidadMedida === 'oz' && form.tamanoOz !== '' ? Number(form.tamanoOz) : null,
     });
@@ -175,7 +177,8 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       <div className="form-grid">
         <div className={`fg ${errors.nombre ? 'fg-error' : ''}`}>
           <label>Nombre del insumo <span className="req">*</span></label>
-          <input type="text" name="nombre" value={form.nombre} onChange={handleChange} placeholder="Ej: Café tostado fino" />
+          <input type="text" name="nombre" value={form.nombre} onChange={handleChange} placeholder="Ej: Café tostado fino" maxLength={CAMPO_MAX} />
+          <div style={{fontSize:11,color:enElTope(form.nombre,CAMPO_MAX)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.nombre,CAMPO_MAX)}</div>
           {errors.nombre && <span className="err-msg">{errors.nombre}</span>}
         </div>
 
@@ -282,33 +285,17 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           {errors.proveedor && <span className="err-msg">{errors.proveedor}</span>}
         </div>
 
-        <div className={`fg ${errors.stockActual ? 'fg-error' : ''}`}>
-          <label>Stock actual <span className="req">*</span></label>
-          {isEditing && hasActiveCompras ? (
-            <div style={{ padding: '10px 14px', background: 'rgba(229,57,53,.1)', border: '1px solid rgba(239,83,80,.3)', borderRadius: 8, fontSize: 13, color: '#EF9A9A', lineHeight: 1.5 }}>
-              🔒 <strong style={{color:'#EF5350'}}>Stock bloqueado:</strong> Este insumo tiene compras activas. Para ajustar el stock, primero anula las compras correspondientes.
-              <div style={{ marginTop:6, fontWeight:700, color:'var(--text-primary)' }}>Stock actual: {form.stockActual}</div>
+        {isEditing && (
+          <div className="fg">
+            <label>Stock actual</label>
+            <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+              {form.stockActual} {form.unidadMedida}
             </div>
-          ) : (
-            <>
-              <input
-                type="number" name="stockActual" value={form.stockActual}
-                onChange={e => {
-                  const val = e.target.value;
-                  if (val !== '' && Number(val) < 0) return;
-                  handleChange(e);
-                }}
-                placeholder="0" step="1"
-              />
-              {isEditing && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                  Puedes corregir el stock manualmente. No puede ser menor a 0.
-                </span>
-              )}
-            </>
-          )}
-          {errors.stockActual && <span className="err-msg">{errors.stockActual}</span>}
-        </div>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+              El stock ya no se edita a mano — solo aumenta al registrar una compra, y disminuye al anularla.
+            </span>
+          </div>
+        )}
 
         <div className={`fg ${errors.stockMinimo ? 'fg-error' : ''}`}>
           <label>Stock mínimo <span className="req">*</span></label>
@@ -354,8 +341,10 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
 
         <div className="fg fg-full">
           <label>Descripción</label>
-          <textarea name="descripcion" value={form.descripcion} onChange={handleChange} placeholder="Descripción opcional del insumo..." rows={3} maxLength={LIMITES.DESCRIPCION} />
-          <div style={{fontSize:11,color:enElTope(form.descripcion,LIMITES.DESCRIPCION)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.descripcion,LIMITES.DESCRIPCION)}</div>
+          <textarea name="descripcion" value={form.descripcion} onChange={handleChange}
+            onBlur={() => setForm(prev => ({ ...prev, descripcion: prev.descripcion.trimEnd() }))}
+            placeholder="Descripción breve del insumo..." rows={3} maxLength={DESCRIPCION_INSUMO_MAX} />
+          <div style={{fontSize:11,color:enElTope(form.descripcion,DESCRIPCION_INSUMO_MAX)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.descripcion,DESCRIPCION_INSUMO_MAX)}</div>
         </div>
       </div>
 

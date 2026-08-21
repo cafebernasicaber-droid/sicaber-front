@@ -24,6 +24,7 @@ const filtrarProveedores = (lista, term) => {
   return lista.filter(p =>
     p.nombre?.toLowerCase().includes(q) ||
     p.nit?.toLowerCase().includes(q) ||
+    p.numeroDocumento?.toLowerCase().includes(q) ||
     p.correo?.toLowerCase().includes(q) ||
     p.ciudad?.toLowerCase().includes(q)
   );
@@ -72,7 +73,7 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Información de Contacto</div>
               {[
-                ['NIT', proveedor.nit],
+                [proveedor.tipoPersona === 'Natural' ? proveedor.tipoDocumento : 'NIT', proveedor.tipoPersona === 'Natural' ? proveedor.numeroDocumento : proveedor.nit],
                 ['Teléfono',  proveedor.telefono],
                 ['Correo',    proveedor.correo],
                 ['Estado',
@@ -132,6 +133,28 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
 }
 
 // ── Página principal ──────────────────────────────────────────────────────────
+// Lista de insumos afectados por una cascada (eliminar o desactivar un
+// proveedor), mostrando solo los primeros N y un "+X más" desplegable si
+// hay más, para no saturar la alerta de confirmación.
+function ListaInsumosAfectados({ insumos, limite = 5 }) {
+  const [expandido, setExpandido] = useState(false);
+  const visibles = expandido ? insumos : insumos.slice(0, limite);
+  const restantes = insumos.length - limite;
+  return (
+    <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+      {visibles.map(i => <li key={i.id}>{i.nombre}</li>)}
+      {!expandido && restantes > 0 && (
+        <li style={{ listStyle: 'none', marginLeft: -16, marginTop: 4 }}>
+          <button type="button" onClick={() => setExpandido(true)}
+            style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5 }}>
+            +{restantes} más — ver todos
+          </button>
+        </li>
+      )}
+    </ul>
+  );
+}
+
 const ProveedoresPage = () => {
   const { proveedores, remove, toggleEstado, refresh } = useProveedores();
   const [query, setQuery]             = useState('');
@@ -202,31 +225,64 @@ const ProveedoresPage = () => {
     setDeleteTarget(p);
   };
 
+  const [deactivateConfirm, setDeactivateConfirm] = useState(null); // { origen, proveedorId, proveedorNombre, insumos, data }
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const result = await remove(deleteTarget.id);
-    if (result?.error) {
-      showError(result.error);
+    try {
+      const result = await remove(deleteTarget.id);
+      setFiltered(query.trim() ? filtrarProveedores(proveedores, query) : null);
+      let msg = `Proveedor "${deleteTarget.nombre}" eliminado correctamente`;
+      if (result?.insumosEliminados > 0) {
+        msg += `. También se eliminaron ${result.insumosEliminados} insumo(s): ${result.nombresInsumos.join(', ')}`;
+      }
+      showSuccess(msg);
       setDeleteTarget(null); setDeleteInfo(null);
-      return;
+      // Cerrar modal ver si estaba abierto
+      if (modal?.ver) setModal(null);
+    } catch (err) {
+      showError(err.message || 'No se pudo eliminar el proveedor.');
+      setDeleteTarget(null); setDeleteInfo(null);
     }
-    setFiltered(query.trim() ? filtrarProveedores(proveedores, query) : null);
-    let msg = `Proveedor "${deleteTarget.nombre}" eliminado correctamente`;
-    if (result?.insumosEliminados > 0) {
-      msg += `. También se eliminaron ${result.insumosEliminados} insumo(s): ${result.nombresInsumos.join(', ')}`;
-    }
-    showSuccess(msg);
-    setDeleteTarget(null); setDeleteInfo(null);
-    // Cerrar modal ver si estaba abierto
-    if (modal?.ver) setModal(null);
   };
 
+  const insumosActivosDe = (proveedorId) => insumosTodos.filter(i => String(i.proveedorId) === String(proveedorId) && i.estado === 'Activo');
+
+  // El interruptor rápido ya no desactiva de inmediato: si el proveedor
+  // tiene insumos activos asociados, primero se avisa cuáles se van a
+  // desactivar junto con él.
   const handleToggle = async (id) => {
-    await toggleEstado(id);
+    const proveedor = proveedores.find(p => String(p.id) === String(id));
+    if (proveedor?.estado === 'Activo') {
+      const afectados = insumosActivosDe(id);
+      if (afectados.length > 0) {
+        setDeactivateConfirm({ origen: 'toggle', proveedorId: id, proveedorNombre: proveedor.nombre, insumos: afectados });
+        return;
+      }
+    }
+    await ejecutarToggle(id);
+  };
+
+  const ejecutarToggle = async (id) => {
+    const proveedor = proveedores.find(p => String(p.id) === String(id));
+    const result = await toggleEstado(id);
     if (query.trim()) setFiltered(filtrarProveedores(proveedores, query));
     // Actualizar modal ver si está abierto con este proveedor
     if (modal?.ver?.id === id) {
       setModal(prev => ({ ver: { ...prev.ver, estado: prev.ver.estado === 'Activo' ? 'Inactivo' : 'Activo' } }));
+    }
+    if (result?.insumosDesactivados > 0) {
+      showSuccess(`Proveedor "${proveedor?.nombre}" desactivado. También se desactivaron ${result.insumosDesactivados} insumo(s): ${result.nombresInsumosDesactivados.join(', ')}`);
+    }
+  };
+
+  const confirmarDesactivacion = async () => {
+    const { origen, proveedorId, data } = deactivateConfirm;
+    setDeactivateConfirm(null);
+    if (origen === 'toggle') {
+      await ejecutarToggle(proveedorId);
+    } else {
+      await guardarConDesactivacion(proveedorId, data);
     }
   };
 
@@ -243,24 +299,72 @@ const ProveedoresPage = () => {
   // la página de Agregar Proveedor, ya no usada).
   const handleFormSubmit = async (data, onDuplicateError) => {
     setServerError('');
-    let result;
     const esEdicion = modal && modal !== 'nuevo' && !modal.ver;
+    const idActual = esEdicion ? modal.id : null;
+
+    // Verificación local ANTES de tocar el backend: revisa contra la
+    // lista de proveedores ya cargada en pantalla. No sustituye la
+    // validación real del backend (dos registros simultáneos podrían
+    // saltarse esto), pero cubre el caso normal sin esperar una vuelta
+    // al servidor, y funciona incluso si el backend todavía no valida
+    // esto por su cuenta.
+    const dupErrsLocal = {};
+    if (data.tipoPersona === 'Natural' && data.numeroDocumento) {
+      const yaExiste = proveedores.some(p =>
+        String(p.id) !== String(idActual) &&
+        p.tipoPersona === 'Natural' &&
+        p.tipoDocumento === data.tipoDocumento &&
+        p.numeroDocumento === data.numeroDocumento
+      );
+      if (yaExiste) dupErrsLocal.numeroDocumento = true;
+    }
+    if (data.tipoPersona !== 'Natural' && data.nit) {
+      const yaExiste = proveedores.some(p =>
+        String(p.id) !== String(idActual) &&
+        p.tipoPersona !== 'Natural' &&
+        p.nit === data.nit
+      );
+      if (yaExiste) dupErrsLocal.nit = true;
+    }
+    if (Object.keys(dupErrsLocal).length > 0) {
+      if (onDuplicateError) onDuplicateError(Object.keys(dupErrsLocal));
+      setServerError(
+        dupErrsLocal.nit
+          ? 'Ya existe un proveedor con este NIT.'
+          : 'Ya existe un proveedor con este número de documento.'
+      );
+      return;
+    }
+
+    // Punto de desactivación en cascada: si se está editando y el estado
+    // pasa de Activo a Inactivo, y el proveedor tiene insumos activos
+    // asociados, se pregunta ANTES de guardar — igual que ya se hace con
+    // el interruptor rápido.
+    if (esEdicion && modal.estado === 'Activo' && data.estado === 'Inactivo') {
+      const afectados = insumosActivosDe(modal.id);
+      if (afectados.length > 0) {
+        setDeactivateConfirm({ origen: 'form', proveedorId: modal.id, proveedorNombre: modal.nombre, insumos: afectados, data });
+        return;
+      }
+    }
+
+    await guardarConDesactivacion(esEdicion ? modal.id : null, data, esEdicion, onDuplicateError);
+  };
+
+  const guardarConDesactivacion = async (id, data, esEdicionForzada, onDuplicateError) => {
+    const esEdicion = esEdicionForzada ?? (modal && modal !== 'nuevo' && !modal.ver);
     // api.js lanza (throw) cuando el backend responde con error — sin
     // try/catch esa excepción quedaba sin capturar y el modal no mostraba
     // ningún mensaje (mismo bug ya visto en FichasTecnicasPage/useInsumos).
     try {
-      if (modal === 'nuevo') {
-        result = await proveedoresService.create(data);
+      if (!esEdicion) {
+        await proveedoresService.create(data);
       } else {
-        result = await proveedoresService.update(modal.id, data);
+        await proveedoresService.update(id, data);
       }
     } catch (err) {
+      if (err.duplicateFields && onDuplicateError) onDuplicateError(err.duplicateFields);
       setServerError(err.message || 'No se pudo guardar el proveedor.');
-      return;
-    }
-    if (result.error) {
-      if (result.duplicateFields && onDuplicateError) onDuplicateError(result.duplicateFields);
-      setServerError(result.error);
       return;
     }
     refresh();
@@ -380,9 +484,7 @@ const ProveedoresPage = () => {
                   {deleteInfo.insumos.length > 0 && (
                     <div style={{ background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#E65100' }}>
                       ⚠ También se eliminarán los siguientes insumos asociados:
-                      <ul style={{ margin:'6px 0 0 16px',padding:0 }}>
-                        {deleteInfo.insumos.map(i => <li key={i.id}>{i.nombre}</li>)}
-                      </ul>
+                      <ListaInsumosAfectados insumos={deleteInfo.insumos} />
                     </div>
                   )}
                   <p>Esta acción es <strong>permanente</strong> y no se puede deshacer.</p>
@@ -393,6 +495,30 @@ const ProveedoresPage = () => {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Modal confirmar desactivación */}
+        {deactivateConfirm && (
+          <div className="modal-overlay" onClick={() => setDeactivateConfirm(null)}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
+              <div className="modal-icon modal-icon-warn">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <h3>¿Desactivar proveedor?</h3>
+              <div style={{ background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#E65100' }}>
+                ⚠ También se desactivarán los siguientes insumos asociados:
+                <ListaInsumosAfectados insumos={deactivateConfirm.insumos} />
+              </div>
+              <div className="modal-detail">"{deactivateConfirm.proveedorNombre}"</div>
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => setDeactivateConfirm(null)}>Cancelar</button>
+                <button className="btn-confirm-danger" onClick={confirmarDesactivacion}>Sí, desactivar</button>
+              </div>
             </div>
           </div>
         )}
@@ -488,7 +614,7 @@ const ProveedoresPage = () => {
               <table className="insumos-table">
                 <thead>
                   <tr>
-                    <th>Nombre</th><th>NIT</th><th>Correo</th>
+                    <th>Nombre</th><th>Documento</th><th>Correo</th>
                     <th>Teléfono</th><th>Ciudad</th>
                     <th>Estado</th><th>Acciones</th>
                   </tr>
@@ -497,7 +623,7 @@ const ProveedoresPage = () => {
                   {paginated.map(p => (
                     <tr key={p.id}>
                       <td className="td-nombre">{p.nombre}</td>
-                      <td>{p.nit}</td>
+                      <td>{p.tipoPersona === 'Natural' ? `${p.tipoDocumento}: ${p.numeroDocumento}` : p.nit}</td>
                       <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{p.correo || '—'}</td>
                       <td>{p.telefono}</td>
                       <td>{p.ciudad}</td>

@@ -427,6 +427,7 @@
   margin: 0 auto 20px;
 }
 .modal-icon-danger { background: #FFCDD2; color: #B71C1C; }
+.modal-icon-warn { background: rgba(230,115,0,0.16); color: #E65100; }
 .modal-box h3 { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
 .modal-box p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; }
 .modal-detail {

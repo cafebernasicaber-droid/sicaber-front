@@ -10,7 +10,7 @@ import './CompraForm.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_ITEM = {
-  insumo: '', cantidad: '', precioUnitario: '', unidad: '',
+  insumo: '', insumoId: '', cantidad: '', precioUnitario: '', unidad: '',
   // "Comprar por presentación": modo libre por ítem, no se guarda como
   // preferencia del insumo ni se recuerda entre compras — siempre arranca
   // en 'directo'. Los campos presentacion* solo se usan cuando modo es
@@ -207,6 +207,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       items[idx] = {
         ...items[idx],
         insumo:         nombreInsumo,
+        insumoId:       insumo ? insumo.id : '',
         unidad:         insumo ? (insumo.unidadMedida || '') : items[idx].unidad,
         cantidad:       '',         // usuario ingresa cantidad
         precioUnitario: '',         // usuario ingresa precio del día
@@ -330,8 +331,15 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       }
 
       let nitCoincide = null;
-      if (proveedorSel?.nit && resultado.nitDetectado) {
-        const nitLimpio = String(proveedorSel.nit).replace(/[.\-\s]/g, '');
+      // El documento a comparar depende del tipo de persona: Jurídica usa
+      // "nit"; Natural solo tiene un NIT real para comparar cuando eligió
+      // "NIT" como tipo de documento (con CC/TI/CE/Pasaporte no hay nada
+      // que comparar contra un NIT detectado, así que se omite el aviso).
+      const documentoNitProveedor = proveedorSel?.tipoPersona === 'Natural'
+        ? (proveedorSel?.tipoDocumento === 'NIT' ? proveedorSel?.numeroDocumento : null)
+        : proveedorSel?.nit;
+      if (documentoNitProveedor && resultado.nitDetectado) {
+        const nitLimpio = String(documentoNitProveedor).replace(/[.\-\s]/g, '');
         nitCoincide = !!nitLimpio && nitLimpio === resultado.nitDetectado;
         if (!nitCoincide) advertencias.push('El NIT detectado en el comprobante no coincide con el del proveedor seleccionado.');
       }

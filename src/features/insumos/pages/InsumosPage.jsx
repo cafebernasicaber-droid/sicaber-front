@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import useInsumos from '../hooks/useInsumos';
 import useCategoriasInsumos from '../hooks/useCategoriasInsumos';
+import comprasService from '../../compras/services/comprasService';
 import InsumoForm from '../components/InsumoForm';
 import './InsumosPage.css';
 import Layout from '../../../shared/components/Layout';
@@ -13,7 +14,7 @@ const formatDate = iso =>
   iso ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso)) : '—';
 
 // ── Modal: Ver insumo ─────────────────────────────────────────────────────────
-function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle }) {
+function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, deshabilitarEliminar }) {
   const stockOk = insumo.stockActual >= insumo.stockMinimo;
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -91,8 +92,8 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle }) {
           )}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            <AnularButton onClick={onEliminar} size={14} className=""
-              style={{ padding:10,background:'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
+            <AnularButton onClick={onEliminar} disabled={deshabilitarEliminar} size={14} className=""
+              style={{ padding:10,background: deshabilitarEliminar ? '#9E9E9E' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor: deshabilitarEliminar ? 'not-allowed' : 'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
             <Tooltip label="Editar insumo">
               <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
             </Tooltip>
@@ -425,6 +426,15 @@ function ModalRecategorizar({ target, categorias, onRecategorizar, onClose }) {
 // ── Página principal ──────────────────────────────────────────────────────────
 const InsumosPage = () => {
   const { insumos, create, update, remove, toggleEstado, refresh } = useInsumos();
+  const [comprasTodas, setComprasTodas] = useState([]);
+  useEffect(() => {
+    Promise.all([comprasService.getActivas(), comprasService.getHistorial()])
+      .then(([a, h]) => setComprasTodas([...(a || []), ...(h || [])]))
+      .catch(() => setComprasTodas([]));
+  }, []);
+  const insumoTieneCompras = (ins) => comprasTodas.some(c => (c.items || []).some(it =>
+    it.insumoId ? String(it.insumoId) === String(ins.id) : it.insumo === ins.nombre
+  ));
   const [query, setQuery]           = useState('');
   const [filtered, setFiltered]     = useState(null);
   const [tabFiltro, setTabFiltro]   = useState('todos'); // todos | activos | inactivos
@@ -584,6 +594,7 @@ const InsumosPage = () => {
             onEditar={() => setModal('editar')}
             onEliminar={() => setDeleteTarget(targetInsumo)}
             onToggle={() => handleToggle(targetInsumo.id)}
+            deshabilitarEliminar={insumoTieneCompras(targetInsumo)}
           />
         )}
         {(modal === 'nuevo' || modal === 'editar') && (
@@ -781,7 +792,7 @@ const InsumosPage = () => {
                 <thead>
                   <tr>
                     <th>Nombre</th><th>Categoría</th>
-                    <th>Unidad/Medida</th><th>Stock</th><th>Acciones</th>
+                    <th>Unidad/Medida</th><th>Stock</th><th>Estado</th><th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -795,16 +806,14 @@ const InsumosPage = () => {
                     // en la primera, para que se note de un vistazo al barrer
                     // la tabla con la mirada, sin tener que leer texto.
                     const stockBajo = esStockBajo(ins);
-                    const colorAlerta = sinStock ? '#EF5350' : '#FB8C00';
-                    const rowStyle = stockBajo ? { background: sinStock ? 'rgba(229,57,53,0.14)' : 'rgba(230,115,0,0.14)' } : undefined;
                     return (
-                      <tr key={ins.id} style={rowStyle}>
-                        <td className="td-nombre" style={{ borderLeft: `6px solid ${stockBajo ? colorAlerta : 'transparent'}` }}>
+                      <tr key={ins.id}>
+                        <td className="td-nombre">
                           {ins.nombre}
                         </td>
-                        <td style={rowStyle}><span className="badge-cat">{ins.categoria}</span></td>
-                        <td style={rowStyle}>{ins.unidadMedida}</td>
-                        <td className="td-stock" style={rowStyle}>
+                        <td><span className="badge-cat">{ins.categoria}</span></td>
+                        <td>{ins.unidadMedida}</td>
+                        <td className="td-stock">
                           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
                             <span>{stockReal} {ins.unidadMedida}</span>
                             {sinStock ? (
@@ -820,7 +829,13 @@ const InsumosPage = () => {
                             )}
                           </div>
                         </td>
-                        <td style={rowStyle}>
+                        <td >
+                          <button className={`toggle-btn ${ins.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
+                            onClick={() => handleToggle(ins.id)}>
+                            <span className="toggle-thumb"/>
+                          </button>
+                        </td>
+                        <td >
                           <div className="actions-group">
                             <Tooltip label="Ver detalle">
                               <button className="btn-accion btn-accion-ver"
@@ -834,7 +849,7 @@ const InsumosPage = () => {
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                               </button>
                             </Tooltip>
-                            <AnularButton onClick={() => setDeleteTarget(ins)} size={14} className="btn-accion btn-accion-eliminar"/>
+                            <AnularButton onClick={() => setDeleteTarget(ins)} disabled={insumoTieneCompras(ins)} size={14} className="btn-accion btn-accion-eliminar"/>
                           </div>
                         </td>
                       </tr>

@@ -55,8 +55,9 @@ const useProveedores = () => {
   }, []);
 
   const toggleEstado = useCallback(async (id) => {
-    await proveedoresService.toggleEstado(id);
+    const result = await proveedoresService.toggleEstado(id);
     await refresh();
+    return result;
   }, [refresh]);
 
   return { proveedores, loading, refresh, search, create, update, remove, getById, toggleEstado };

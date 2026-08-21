@@ -147,3 +147,33 @@
   border-color: var(--border-input) !important;
   color: var(--text-primary) !important;
 }
+
+/* ── Toggle Persona Natural / Persona Jurídica ── */
+.tipo-persona-toggle-wrap {
+  display: flex;
+  justify-content: center;
+}
+.tipo-persona-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-surface-2, #f0f0f0);
+  border-radius: 10px;
+  border: 1px solid var(--border, #ddd);
+}
+.tp-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary, #666);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.tp-btn:hover { color: var(--text-primary, #222); }
+.tp-btn-active {
+  background: var(--color-green, #3A9E42);
+  color: #fff;
+}
