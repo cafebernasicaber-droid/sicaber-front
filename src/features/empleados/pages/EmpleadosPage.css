@@ -1,0 +1,146 @@
+.emp-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(135deg, #5DBB63, #3d9142);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #ffffff; font-family: 'Montserrat', sans-serif;
+}
+.emp-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.emp-form-group { display: flex; flex-direction: column; gap: 6px; }
+.emp-form-group label { font-size: 12px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
+.emp-form-group input, .emp-form-group select {
+  padding: 10px 12px; border: 1.5px solid var(--border-input); border-radius: 8px;
+  font-size: 13px; outline: none; font-family: 'Open Sans', sans-serif; color: var(--text-primary);
+  transition: border-color 0.2s; background: var(--bg-surface);
+}
+.emp-form-group input:focus, .emp-form-group select:focus { border-color: #4CAF50; }
+
+.emp-switch { position: relative; display: inline-block; width: 40px; height: 22px; cursor: pointer; }
+.emp-switch input { display: none; }
+.emp-slider {
+  position: absolute; inset: 0; background: #ccc; border-radius: 22px; transition: background 0.25s;
+}
+.emp-slider::before {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: var(--toggle-thumb, #ffffff);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.25s;
+}
+.emp-switch input:checked + .emp-slider { background: #4CAF50; }
+.emp-switch input:checked + .emp-slider::before { transform: translateX(18px); }
+
+/* ════════════════════════════════════════════════════════════
+   THEME PATCH — reemplaza colores hardcoded con variables CSS
+   Aplica tanto en dark como en light gracias a global.css vars
+   ════════════════════════════════════════════════════════════ */
+
+/* Page header */
+.page-title    { color: var(--text-primary) !important; }
+.page-subtitle { color: var(--text-secondary) !important; }
+
+/* Search input */
+.search-input {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.search-input::placeholder { color: var(--text-muted) !important; }
+.search-input:focus {
+  border-color: var(--color-green) !important;
+  box-shadow: 0 0 0 3px var(--color-green-glow) !important;
+}
+.search-icon { color: var(--text-muted) !important; }
+
+/* Table card container */
+.insumos-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+/* Table head */
+.insumos-table thead tr {
+  background: var(--tbl-head-bg) !important;
+  border-bottom-color: var(--tbl-border) !important;
+}
+.insumos-table th { color: var(--tbl-head-clr) !important; }
+.insumos-table tbody tr { border-bottom-color: var(--tbl-border) !important; }
+.insumos-table tbody tr:hover { background: var(--tbl-hover) !important; }
+.insumos-table td { color: var(--tbl-row-clr) !important; }
+.td-nombre { color: var(--text-primary) !important; }
+.td-id     { color: var(--text-muted) !important; }
+.td-muted  { color: var(--text-muted) !important; }
+
+/* Empty state */
+.empty-icon { background: var(--bg-surface-3) !important; color: var(--text-secondary) !important; }
+.empty-state h3 { color: var(--text-primary) !important; }
+.empty-state p  { color: var(--text-secondary) !important; }
+
+/* Modal */
+.modal-overlay { background: var(--modal-overlay) !important; }
+.modal-box {
+  background: var(--modal-bg) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+.modal-box h3   { color: var(--text-primary) !important; }
+.modal-box p    { color: var(--text-secondary) !important; }
+.modal-detail   { background: var(--bg-surface-2) !important; border-color: var(--border) !important; color: var(--text-primary) !important; }
+
+/* Buttons */
+.btn-add, .btn-add-first, .btn-search {
+  background: var(--color-green-btn) !important;
+  color: #fff !important;
+  box-shadow: 0 3px 12px rgba(76,175,80,0.35) !important;
+}
+.btn-cancel {
+  background: var(--bg-surface-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
+.btn-cancel:hover { background: var(--bg-surface-3) !important; color: var(--text-primary) !important; }
+.btn-confirm-primary { background: var(--color-green-btn) !important; }
+.btn-outline-green {
+  border-color: var(--color-green) !important;
+  color: var(--color-green) !important;
+}
+
+/* User cell */
+.user-cell__name { color: var(--text-primary) !important; }
+.user-cell__user { color: var(--text-muted) !important; }
+
+/* Toggle thumb adapts */
+.toggle-thumb { background: var(--toggle-thumb) !important; }
+
+/* Estado inactivo badge */
+.estado-inactivo {
+  background: var(--bg-surface-3) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border) !important;
+}
+
+/* Breadcrumbs */
+.breadcrumb      { color: var(--text-secondary) !important; }
+.breadcrumb-link { color: var(--color-green) !important; }
+
+/* search-results-info */
+.search-results-info { background: var(--bg-surface-2) !important; border-color: var(--border) !important; color: var(--text-secondary) !important; }
+
+/* ── LIGHT MODE — tbody rows explicit white (fixes dark table rows) ── */
+[data-theme="light"] .insumos-table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .insumos-table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}
+[data-theme="light"] .insumos-card {
+  background: #ffffff !important;
+}
+[data-theme="light"] .table-wrap {
+  background: #ffffff !important;
+}
+[data-theme="light"] .data-table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .data-table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}

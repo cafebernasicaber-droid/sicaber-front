@@ -1,0 +1,138 @@
+/* ── PedidoProgreso ──────────────────────────────────────────── */
+
+.pp-root--vertical {
+  display: flex;
+  flex-direction: column;
+}
+
+.pp-root--horizontal {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pp-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pp-root--horizontal .pp-item {
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 74px;
+  text-align: center;
+}
+
+.pp-item__marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pp-root--horizontal .pp-item__marker {
+  flex-direction: row;
+  width: 100%;
+  justify-content: center;
+}
+
+.pp-item__dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  background: #EEEEEE;
+  color: #9E9E9E;
+  border: 2px solid #E0E0E0;
+  transition: all .25s ease;
+}
+
+.pp-item--done .pp-item__dot {
+  background: #4CAF50;
+  color: #fff;
+  border-color: #4CAF50;
+}
+
+.pp-item--active .pp-item__dot {
+  background: #FFF8E1;
+  color: #F57F17;
+  border-color: #F57F17;
+  box-shadow: 0 0 0 4px rgba(245,127,23,0.15);
+}
+
+.pp-item__line {
+  background: #E0E0E0;
+}
+
+.pp-root--vertical .pp-item__line {
+  width: 2px;
+  flex: 1;
+  min-height: 22px;
+  margin: 2px 0;
+}
+
+.pp-root--horizontal .pp-item__line {
+  height: 2px;
+  flex: 1;
+  margin: 0 -2px;
+  align-self: center;
+  margin-top: 15px;
+}
+
+.pp-item--done .pp-item__line {
+  background: #4CAF50;
+}
+
+.pp-item__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lx-muted, #888);
+  padding-top: 4px;
+  padding-bottom: 14px;
+}
+
+.pp-root--horizontal .pp-item__label {
+  padding-top: 8px;
+  font-size: 11px;
+}
+
+.pp-item--active .pp-item__label {
+  color: #F57F17;
+  font-weight: 800;
+}
+
+.pp-item--done .pp-item__label {
+  color: var(--lx-text, #333);
+}
+
+.pp-cancelado {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(229,57,53,0.1);
+  color: #E53935;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.pp-cancelado__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #E53935;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
