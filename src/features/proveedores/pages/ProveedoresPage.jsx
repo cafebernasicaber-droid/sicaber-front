@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useAuth } from '../../../shared/contexts/AuthContext';
 import useProveedores from '../hooks/useProveedores';
 import proveedoresService from '../services/proveedoresService';
 import insumosService from '../../insumos/services/insumosService';
 import comprasService from '../../compras/services/comprasService';
+import { filtrarBusqueda } from '../../../shared/utils/busqueda';
 import ProveedorForm from '../components/ProveedorForm';
 import './ProveedoresPage.css';
 import Layout from '../../../shared/components/Layout';
@@ -27,18 +27,18 @@ const filtrarProveedores = (lista, term) => {
     p.nit?.toLowerCase().includes(q) ||
     p.numeroDocumento?.toLowerCase().includes(q) ||
     p.correo?.toLowerCase().includes(q) ||
-    p.ciudad?.toLowerCase().includes(q)
+    p.ciudad?.toLowerCase().includes(q) ||
+    p.telefono?.toLowerCase().includes(q)
   );
 };
 
 // ── Modal Ver Proveedor ───────────────────────────────────────────────────────
 function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle, tieneCompras }) {
-  const { hasPermiso } = useAuth();
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:660,
-        maxHeight:'88vh', overflowY:'auto',
+        maxHeight:'88vh', overflowY:'auto', overflowX:'hidden',
         boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
@@ -73,20 +73,16 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14 }}>
             {/* Contacto */}
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Información de Contacto</div>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Información de Contacto</div>
               {[
                 [proveedor.tipoPersona === 'Natural' ? proveedor.tipoDocumento : 'NIT', proveedor.tipoPersona === 'Natural' ? proveedor.numeroDocumento : proveedor.nit],
                 ['Teléfono',  proveedor.telefono],
                 ['Correo',    proveedor.correo],
                 ['Estado',
                   <div style={{ display:'flex',alignItems:'center',gap:8 }}>
-                    {hasPermiso('proveedores', 'editar') ? (
-                      <button className={`toggle-btn ${proveedor.estado==='Activo'?'toggle-on':'toggle-off'}`} onClick={onToggle} style={{ cursor:'pointer' }}>
-                        <span className="toggle-thumb"/>
-                      </button>
-                    ) : (
-                      <span className={`toggle-btn ${proveedor.estado==='Activo'?'toggle-on':'toggle-off'}`} style={{cursor:'default',opacity:0.6}}><span className="toggle-thumb"/></span>
-                    )}
+                    <button className={`toggle-btn ${proveedor.estado==='Activo'?'toggle-on':'toggle-off'}`} onClick={onToggle} style={{ cursor:'pointer' }}>
+                      <span className="toggle-thumb"/>
+                    </button>
                     <span style={{ fontSize:13,fontWeight:600,color:proveedor.estado==='Activo'?'#81C784':'#a09880' }}>
                       {proveedor.estado==='Activo'?'Activo':'Inactivo'}
                     </span>
@@ -101,7 +97,7 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
             </div>
             {/* Ubicación */}
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Ubicación</div>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Ubicación</div>
               {[
                 ['Ciudad',    proveedor.ciudad || '—'],
                 ['Dirección', proveedor.direccion || '—'],
@@ -117,7 +113,7 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
 
           {/* Observaciones */}
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:6 }}>Observaciones</div>
+            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:6 }}>Observaciones</div>
             <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0 }}>{proveedor.observaciones || 'Sin observaciones registradas.'}</p>
             <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(proveedor.fechaCreacion)}</div>
           </div>
@@ -125,16 +121,15 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
           {/* Acciones */}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            {hasPermiso('proveedores', 'eliminar') && (
-              <AnularButton onClick={onEliminar} disabled={tieneCompras} size={14} className=""
-                label={tieneCompras ? 'Tiene compras registradas — solo puede desactivarse' : 'Anular'}
-                style={{ padding:10,background: tieneCompras ? 'var(--bg-surface-3)' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color: tieneCompras ? 'var(--text-muted)' : 'white',cursor: tieneCompras ? 'not-allowed' : 'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
-            )}
-            {hasPermiso('proveedores', 'editar') && (
-              <Tooltip label="Editar proveedor">
-                <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
-              </Tooltip>
-            )}
+            {/* No se usa `disabled` HTML: debe verse gris/deshabilitado pero
+                seguir siendo clickeable para poder mostrar la alerta de
+                "no se puede eliminar" (ver modal más abajo). */}
+            <AnularButton onClick={onEliminar} size={14} className=""
+              label={tieneCompras ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
+              style={{ padding:10,background: tieneCompras ? 'var(--bg-surface-3)' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color: tieneCompras ? 'var(--text-muted)' : 'white',cursor: tieneCompras ? 'not-allowed' : 'pointer',opacity: tieneCompras ? 0.6 : 1,display:'flex',alignItems:'center',justifyContent:'center' }}/>
+            <Tooltip label="Editar proveedor">
+              <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -166,7 +161,6 @@ function ListaInsumosAfectados({ insumos, limite = 5 }) {
 }
 
 const ProveedoresPage = () => {
-  const { hasPermiso } = useAuth();
   const { proveedores, remove, toggleEstado, refresh } = useProveedores();
   const [query, setQuery]             = useState('');
   const [filtered, setFiltered]       = useState(null);
@@ -217,7 +211,7 @@ const ProveedoresPage = () => {
 
   // Búsqueda en tiempo real
   const handleSearch = (e) => {
-    const val = e.target.value;
+    const val = filtrarBusqueda(e.target.value);
     setQuery(val);
     if (val.trim() === '') { setFiltered(null); }
     else { setFiltered(filtrarProveedores(proveedores, val)); }
@@ -278,9 +272,11 @@ const ProveedoresPage = () => {
     const proveedor = proveedores.find(p => String(p.id) === String(id));
     const result = await toggleEstado(id);
     if (query.trim()) setFiltered(filtrarProveedores(proveedores, query));
-    // Actualizar modal ver si está abierto con este proveedor
-    if (modal?.ver?.id === id) {
-      setModal(prev => ({ ver: { ...prev.ver, estado: prev.ver.estado === 'Activo' ? 'Inactivo' : 'Activo' } }));
+    // Actualizar modal ver si está abierto con este proveedor — se usa el
+    // estado real que devolvió el servidor, no una suposición local, para
+    // que nunca quede desincronizado del listado.
+    if (modal?.ver?.id === id && result?.estado) {
+      setModal(prev => ({ ver: { ...prev.ver, estado: result.estado } }));
     }
     if (result?.insumosDesactivados > 0) {
       showSuccess(`Proveedor "${proveedor?.nombre}" desactivado. También se desactivaron ${result.insumosDesactivados} insumo(s): ${result.nombresInsumosDesactivados.join(', ')}`);
@@ -320,7 +316,49 @@ const ProveedoresPage = () => {
     // al servidor, y funciona incluso si el backend todavía no valida
     // esto por su cuenta.
     const dupErrsLocal = {};
-    if (data.tipoPersona === 'Natural' && data.numeroDocumento) {
+    if (data.nombre) {
+      const yaExisteNombre = proveedores.some(p =>
+        String(p.id) !== String(idActual) &&
+        p.nombre?.trim().toLowerCase() === data.nombre.trim().toLowerCase()
+      );
+      if (yaExisteNombre) dupErrsLocal.nombre = true;
+    }
+    if (data.correo) {
+      const yaExisteCorreo = proveedores.some(p =>
+        String(p.id) !== String(idActual) &&
+        p.correo?.trim().toLowerCase() === data.correo.trim().toLowerCase()
+      );
+      if (yaExisteCorreo) dupErrsLocal.correo = true;
+    }
+    if (data.telefono) {
+      const yaExisteTelefono = proveedores.some(p =>
+        String(p.id) !== String(idActual) &&
+        p.telefono === data.telefono
+      );
+      if (yaExisteTelefono) dupErrsLocal.telefono = true;
+    }
+    // El valor del documento de tipo "NIT" es un mismo espacio de
+    // identificación sin importar si viene de un proveedor Jurídico
+    // (campo nit) o de uno Natural que eligió "NIT" como tipo de
+    // documento (campo numeroDocumento) — un mismo NIT no puede repetirse
+    // cruzando de un lado al otro.
+    const nitDelRegistro = data.tipoPersona === 'Natural'
+      ? (data.tipoDocumento === 'NIT' ? data.numeroDocumento : null)
+      : data.nit;
+    const nitDe = (p) => p.tipoPersona === 'Natural'
+      ? (p.tipoDocumento === 'NIT' ? p.numeroDocumento : null)
+      : p.nit;
+
+    if (nitDelRegistro) {
+      const yaExisteNit = proveedores.some(p =>
+        String(p.id) !== String(idActual) && nitDe(p) === nitDelRegistro
+      );
+      if (yaExisteNit) dupErrsLocal[data.tipoPersona === 'Natural' ? 'numeroDocumento' : 'nit'] = true;
+    }
+    // El resto de tipos de documento (CC, TI, CE, Pasaporte) sí quedan
+    // separados por tipo — solo NIT comparte espacio entre Natural y
+    // Jurídica.
+    if (data.tipoPersona === 'Natural' && data.tipoDocumento !== 'NIT' && data.numeroDocumento) {
       const yaExiste = proveedores.some(p =>
         String(p.id) !== String(idActual) &&
         p.tipoPersona === 'Natural' &&
@@ -329,21 +367,16 @@ const ProveedoresPage = () => {
       );
       if (yaExiste) dupErrsLocal.numeroDocumento = true;
     }
-    if (data.tipoPersona !== 'Natural' && data.nit) {
-      const yaExiste = proveedores.some(p =>
-        String(p.id) !== String(idActual) &&
-        p.tipoPersona !== 'Natural' &&
-        p.nit === data.nit
-      );
-      if (yaExiste) dupErrsLocal.nit = true;
-    }
     if (Object.keys(dupErrsLocal).length > 0) {
       if (onDuplicateError) onDuplicateError(Object.keys(dupErrsLocal));
-      setServerError(
-        dupErrsLocal.nit
-          ? 'Ya existe un proveedor con este NIT.'
-          : 'Ya existe un proveedor con este número de documento.'
-      );
+      const mensajes = {
+        nombre: 'Ya existe un proveedor con este nombre/razón social.',
+        correo: 'Ya existe un proveedor con este correo electrónico.',
+        telefono: 'Ya existe un proveedor con este teléfono.',
+        nit: 'Ya existe un proveedor con este NIT.',
+        numeroDocumento: 'Ya existe un proveedor con este número de documento.',
+      };
+      setServerError(Object.keys(dupErrsLocal).map(f => mensajes[f]).join(' '));
       return;
     }
 
@@ -430,11 +463,12 @@ const ProveedoresPage = () => {
         {/* Modal Agregar / Editar */}
         {(modal === 'nuevo' || esEdicion) && (
           <div className="modal-overlay" onClick={closeModal}>
-            <div onClick={e => e.stopPropagation()} style={{
+            <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
               background:'var(--bg-surface)',borderRadius:16,width:'90%',maxWidth:680,
-              maxHeight:'90vh',overflowY:'auto',padding:'28px 32px',
+              maxHeight:'90vh',overflowY:'auto',overflowX:'hidden',
               boxShadow:'0 24px 64px rgba(0,0,0,0.22)',animation:'slideUp .2s ease',
             }}>
+              <div style={{ padding:'28px 32px' }}>
               <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20 }}>
                 <div style={{ display:'flex',alignItems:'center',gap:12 }}>
                   <div style={{ width:40,height:40,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',color:'white',
@@ -464,6 +498,7 @@ const ProveedoresPage = () => {
                 onSubmit={handleFormSubmit}
                 onCancel={closeModal}
               />
+              </div>
             </div>
           </div>
         )}
@@ -483,8 +518,11 @@ const ProveedoresPage = () => {
               <h3>¿Eliminar proveedor?</h3>
               {deleteInfo.tieneCompras ? (
                 <>
-                  <p style={{ color:'#B71C1C',fontWeight:600 }}>
-                    ⛔ No se puede eliminar: "{deleteTarget.nombre}" tiene compras registradas (activas o anuladas). Solo puedes desactivarlo.
+                  <p style={{ color:'#B71C1C',fontWeight:600,display:'flex',alignItems:'flex-start',gap:8 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink:0,marginTop:2 }}>
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <span>No se puede eliminar "{deleteTarget.nombre}": tiene compras registradas (activas o anuladas), desactívalo en su lugar.</span>
                   </p>
                   <div className="modal-actions">
                     <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>Entendido</button>
@@ -556,7 +594,7 @@ const ProveedoresPage = () => {
             </span>
             <input
               ref={searchRef} type="text"
-              placeholder="Buscar por nombre, NIT, correo o ciudad..."
+              placeholder="Buscar por nombre, documento, teléfono, correo o ciudad..." maxLength={70}
               value={query} onChange={handleSearch}
               className="search-input"
             />
@@ -568,20 +606,12 @@ const ProveedoresPage = () => {
               </button>
             )}
           </div>
-          {(query || tabFiltro !== 'todos') && (
-            <button className="btn-limpiar-filtros" title="Limpiar filtros"
-              onClick={() => { clearSearch(); setTabFiltro('todos'); }}>
-              ✕ Limpiar filtros
-            </button>
-          )}
-          {hasPermiso('proveedores', 'crear') && (
-            <button className="btn-add" onClick={openNuevo}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              Agregar proveedor
-            </button>
-          )}
+          <button className="btn-add" onClick={openNuevo}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Agregar proveedor
+          </button>
         </div>
 
         {/* Tabla */}
@@ -609,7 +639,7 @@ const ProveedoresPage = () => {
                     </svg>
                   </div>
                   <h3>No hay proveedores{tabFiltro !== 'todos' ? ` ${tabFiltro}` : ''} registrados</h3>
-                  {tabFiltro === 'todos' && hasPermiso('proveedores', 'crear') && (
+                  {tabFiltro === 'todos' && (
                     <button className="btn-add-first" onClick={openNuevo}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -647,38 +677,27 @@ const ProveedoresPage = () => {
                       <td>{p.telefono}</td>
                       <td>{p.ciudad}</td>
                       <td>
-                        {hasPermiso('proveedores', 'editar') ? (
-                          <button className={`toggle-btn ${p.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
-                            onClick={() => handleToggle(p.id)}>
-                            <span className="toggle-thumb"/>
-                          </button>
-                        ) : (
-                          <span className={`toggle-btn ${p.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`} style={{cursor:'default',opacity:0.6}}><span className="toggle-thumb"/></span>
-                        )}
+                        <button className={`toggle-btn ${p.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
+                          onClick={() => handleToggle(p.id)}>
+                          <span className="toggle-thumb"/>
+                        </button>
                       </td>
                       <td>
                         <div className="actions-group">
-                          {hasPermiso('proveedores', 'ver') && (
-                            <Tooltip label="Ver detalle">
-                              <button className="btn-accion btn-accion-ver" onClick={() => openVer(p)}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                              </button>
-                            </Tooltip>
-                          )}
-                          {hasPermiso('proveedores', 'editar') && (
-                            <Tooltip label="Editar">
-                              <button className="btn-accion btn-accion-editar" onClick={() => openEditar(p)}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                              </button>
-                            </Tooltip>
-                          )}
-                          {hasPermiso('proveedores', 'eliminar') && (
-                            <AnularButton onClick={() => openDeleteTarget(p)} size={14}
-                              disabled={proveedoresConCompras.has(p.id)}
-                              className="btn-accion btn-accion-eliminar"
-                              label={proveedoresConCompras.has(p.id) ? 'Tiene compras registradas — solo puede desactivarse' : 'Anular'}
-                              style={proveedoresConCompras.has(p.id) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>
-                          )}
+                          <Tooltip label="Ver detalle">
+                            <button className="btn-accion btn-accion-ver" onClick={() => openVer(p)}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                          </Tooltip>
+                          <Tooltip label="Editar">
+                            <button className="btn-accion btn-accion-editar" onClick={() => openEditar(p)}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </button>
+                          </Tooltip>
+                          <AnularButton onClick={() => openDeleteTarget(p)} size={14}
+                            className="btn-accion btn-accion-eliminar"
+                            label={proveedoresConCompras.has(p.id) ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
+                            style={proveedoresConCompras.has(p.id) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>
                         </div>
                       </td>
                     </tr>

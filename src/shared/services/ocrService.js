@@ -326,13 +326,23 @@ export const procesarComprobante = async (file, onProgress) => {
   const nitDetectado    = detectarNitComprobante(texto);
   const totalDetectado  = detectarTotalComprobante(texto);
 
+  // Confianza: arranca en 100 y se descuenta por cada dato que no se
+  // logró leer, o por señales de imagen de baja calidad — es una
+  // estimación simple, no una métrica exacta del motor de OCR.
+  let confianza = 100;
+  if (calidad.sospechosa) confianza -= 20;
+  if (!fechaDetectada)    confianza -= 15;
+  if (!nitDetectado)      confianza -= 15;
+  if (totalDetectado == null) confianza -= 40;
+  confianza = Math.max(0, Math.min(100, confianza));
+
   if (totalDetectado == null) {
     return {
       ok: false,
       error: 'No se pudo identificar el total en el comprobante. Verifica que la imagen muestre claramente el total de la compra.',
-      fechaDetectada, nitDetectado,
+      fechaDetectada, nitDetectado, confianza,
     };
   }
 
-  return { ok: true, texto, total: totalDetectado, fechaDetectada, nitDetectado };
+  return { ok: true, texto, total: totalDetectado, fechaDetectada, nitDetectado, confianza };
 };

@@ -4,7 +4,7 @@ import './ProveedorForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_FORM = {
-  tipoPersona: 'Juridica', // 'Natural' | 'Juridica' — decidido por el toggle, no es un campo seleccionable dentro del formulario
+  tipoPersona: 'Natural', // 'Natural' | 'Juridica' — decidido por el toggle, no es un campo seleccionable dentro del formulario
   nombre: '',        // Persona Jurídica: Razón social. Persona Natural: se recalcula como "Nombres Apellidos".
   nombres: '',        // solo Persona Natural
   apellidos: '',       // solo Persona Natural
@@ -243,14 +243,14 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         <div className="tipo-persona-toggle-wrap">
           <div className="tipo-persona-toggle">
             <button type="button"
-              className={`tp-btn ${!esNatural ? 'tp-btn-active' : ''}`}
-              onClick={() => cambiarTipoPersona('Juridica')}>
-              Persona Jurídica
-            </button>
-            <button type="button"
               className={`tp-btn ${esNatural ? 'tp-btn-active' : ''}`}
               onClick={() => cambiarTipoPersona('Natural')}>
               Persona Natural
+            </button>
+            <button type="button"
+              className={`tp-btn ${!esNatural ? 'tp-btn-active' : ''}`}
+              onClick={() => cambiarTipoPersona('Juridica')}>
+              Persona Jurídica
             </button>
           </div>
         </div>

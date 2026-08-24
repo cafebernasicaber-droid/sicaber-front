@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { useAuth } from '../../../shared/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import useCompras from '../hooks/useCompras';
 import CompraForm from '../components/CompraForm';
+import { filtrarBusqueda } from '../../../shared/utils/busqueda';
 import './ComprasPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
@@ -21,17 +21,18 @@ const formatDate = (iso) => {
 
 // ── Modal Ver Compra ──────────────────────────────────────────────────────────
 function ModalVerCompra({ compra, onClose, onAnular }) {
-  const { hasPermiso } = useAuth();
   const esAnulada = compra.estado === 'anulada';
   const [zoomComprobante, setZoomComprobante] = useState(false);
+  const [insumosExpandidos, setInsumosExpandidos] = useState(false);
+  const LIMITE_INSUMOS_VISIBLES = 5;
   const comprobanteUrl = compra.comprobante_url || compra.comprobanteUrl || '';
   const totalBruto = compra.total_bruto ?? compra.totalBruto;
   const descuento  = Number(compra.descuento) || 0;
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:680,
-        maxHeight:'90vh', overflowY:'auto',
+        maxHeight:'90vh', overflowY:'auto', overflowX:'hidden',
         boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
@@ -50,7 +51,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                 <span className="badge-cat">{formatoTitulo(compra.proveedorNombre)}</span>
                 {esAnulada
                   ? <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(183,28,28,.25)',color:'#EF9A9A',border:'1px solid rgba(239,83,80,.3)' }}>Anulada</span>
-                  : <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(46,125,50,.2)',color:'#81C784',border:'1px solid rgba(129,199,132,.3)' }}>Activa</span>
+                  : <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(46,125,50,.2)',color:'#81C784',border:'1px solid rgba(129,199,132,.3)' }}>Registrada</span>
                 }
               </div>
             </div>
@@ -64,17 +65,17 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
         <div style={{ padding:'20px 24px' }}>
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14 }}>
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Información General</div>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Información general</div>
               {[
                 ['ID', <span style={{ fontFamily:'monospace',fontSize:12,color:'#81C784',background:'rgba(76,175,80,.12)',padding:'2px 8px',borderRadius:6 }}>{compra.id}</span>],
                 ['Proveedor',    formatoTitulo(compra.proveedorNombre)],
                 ['Fecha',        compra.fecha],
-                ...(descuento > 0 && totalBruto != null ? [
-                  ['Subtotal',  formatCOP(totalBruto)],
-                  ['Descuento', <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP(totalBruto - compra.total)})</span>],
-                ] : []),
+                ...(descuento > 0 && totalBruto != null ? [['Subtotal', formatCOP(totalBruto)]] : []),
                 ['Total',        <span style={{ fontWeight:800,color:'#FFCC80' }}>{formatCOP(compra.total)}</span>],
-                ['Estado',       esAnulada ? 'Anulada' : 'Activa'],
+                ['Descuento',    descuento > 0
+                  ? <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP((totalBruto ?? compra.total) - compra.total)})</span>
+                  : <span style={{ color:'var(--text-secondary)' }}>Sin descuento</span>],
+                ['Estado',       esAnulada ? 'Anulada' : 'Registrada'],
                 ['Registrado',   formatDate(compra.fechaCreacion)],
               ].map(([label, val]) => (
                 <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13 }}>
@@ -84,7 +85,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
               ))}
             </div>
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Resumen</div>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Resumen</div>
               {[
                 ['Cantidad de ítems', compra.items?.length || 0],
                 ...(esAnulada ? [
@@ -107,31 +108,51 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
 
           {/* Tabla insumos */}
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de Insumos</div>
+            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de insumos</div>
             {compra.items && compra.items.length > 0 ? (
-              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13 }}>
+              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13,tableLayout:'fixed' }}>
+                {/* Anchos fijos por columna: antes, al no declarar un ancho
+                    para cada columna, el navegador le asignaba todo el
+                    espacio sobrante a "Subtotal" (la última), dejando una
+                    franja vacía a la derecha de sus valores — el espacio
+                    señalado en la imagen de referencia. */}
+                <colgroup>
+                  <col style={{ width:'40%' }} />
+                  <col style={{ width:'18%' }} />
+                  <col style={{ width:'18%' }} />
+                  <col style={{ width:'24%' }} />
+                </colgroup>
                 <thead>
                   <tr style={{ borderBottom:'2px solid rgba(255,255,255,.1)' }}>
-                    {['Insumo','Unidad','Cantidad','Precio unit.','Subtotal'].map(h => (
-                      <th key={h} style={{ padding:'6px 8px',textAlign:'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
+                    {['Insumo','Unidad','Cantidad','Subtotal'].map((h, i) => (
+                      <th key={h} style={{ padding:'6px 8px',textAlign: i===3 ? 'right' : 'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {compra.items.map((item, idx) => (
+                  {(insumosExpandidos ? compra.items : compra.items.slice(0, LIMITE_INSUMOS_VISIBLES)).map((item, idx) => (
                     <tr key={idx} style={{ borderBottom:'1px solid var(--border)' }}>
                       <td style={{ padding:'7px 8px',fontWeight:600,color:'var(--text-primary)' }}>{formatoTitulo(item.insumo)}</td>
                       <td style={{ padding:'7px 8px',color:'var(--text-secondary)' }}>{item.unidad || '—'}</td>
                       <td style={{ padding:'7px 8px',color:'var(--text-primary)' }}>{item.cantidad}</td>
-                      <td style={{ padding:'7px 8px',color:'var(--text-primary)' }}>{formatCOP(item.precioUnitario)}</td>
-                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
+                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80',textAlign:'right' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
                     </tr>
                   ))}
+                  {!insumosExpandidos && compra.items.length > LIMITE_INSUMOS_VISIBLES && (
+                    <tr>
+                      <td colSpan="4" style={{ padding:'10px 8px', textAlign:'center' }}>
+                        <button type="button" onClick={() => setInsumosExpandidos(true)}
+                          style={{ background:'#4CAF50', color:'white', border:'none', borderRadius:20, padding:'6px 16px', fontSize:12.5, fontWeight:700, cursor:'pointer' }}>
+                          +{compra.items.length - LIMITE_INSUMOS_VISIBLES} más — ver todos
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop:'2px solid var(--border)',background:'var(--bg-hover)' }}>
-                    <td colSpan="4" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
-                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15 }}>{formatCOP(compra.total)}</td>
+                    <td colSpan="3" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
+                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15,textAlign:'right' }}>{formatCOP(compra.total)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -141,27 +162,63 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
           </div>
 
           {/* Comprobante */}
-          {comprobanteUrl && (
-            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10 }}>Comprobante de compra</div>
-              <div style={{ position:'relative', width:'100%', maxHeight:260, borderRadius:8, overflow:'hidden', background:'var(--bg-surface-2)' }}>
-                <img src={comprobanteUrl} alt="Comprobante de compra" style={{ width:'100%', maxHeight:260, objectFit:'contain', display:'block', margin:'0 auto', cursor:'zoom-in' }} onClick={() => setZoomComprobante(true)} />
-                <button type="button" className="ilb-zoom-trigger" title="Ver completo / Zoom"
-                  onClick={() => setZoomComprobante(true)}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                </button>
+          {comprobanteUrl && (() => {
+            const ocr = compra.ocrResultado || {};
+            const totalOcr = compra.comprobante_total_ocr ?? compra.comprobanteTotalOcr;
+            const diferencia = (totalOcr != null) ? Number(compra.total) - Number(totalOcr) : null;
+            const hayAdvertencias = ocr.advertencias && ocr.advertencias.length > 0;
+            const estadoTexto = hayAdvertencias ? 'Válido con advertencias' : (totalOcr != null ? 'Válido' : 'Sin verificar');
+            const estadoColor = hayAdvertencias ? '#C9A227' : (totalOcr != null ? '#4CAF50' : 'var(--text-secondary)');
+            return (
+              <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14,display:'grid',gridTemplateColumns:'1fr auto',gap:20 }}>
+                <div>
+                  <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Resultado de validación OCR</div>
+                  {[
+                    ['Estado', <span style={{ color:estadoColor, fontWeight:700 }}>{hayAdvertencias ? '⚠ ' : ''}{estadoTexto}</span>],
+                    ['Confianza OCR', ocr.confianza != null ? `${ocr.confianza}% — ${ocr.confianza >= 70 ? 'Lectura confiable' : ocr.confianza >= 40 ? 'Lectura parcial' : 'Lectura poco confiable'}` : '—'],
+                    ['Total registrado', formatCOP(compra.total)],
+                    ['Total detectado', totalOcr != null ? formatCOP(totalOcr) : '—'],
+                    ['Diferencia', diferencia == null ? '—' : (diferencia === 0 ? 'Sin diferencia' : formatCOP(Math.abs(diferencia)))],
+                    ['Fecha detectada', ocr.fecha || '—'],
+                    ['NIT detectado', ocr.nit || '—'],
+                    ['Proveedor detectado', ocr.proveedorCoincide == null ? '—' : (ocr.proveedorCoincide ? 'Coincide con el proveedor registrado' : 'No coincide con el proveedor registrado')],
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13 }}>
+                      <span style={{ color:'var(--text-secondary)' }}>{label}</span>
+                      <span style={{ fontWeight:600,color:'var(--text-primary)',textAlign:'right' }}>{val}</span>
+                    </div>
+                  ))}
+                  {hayAdvertencias && (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ fontSize:12.5,fontWeight:700,color:'var(--text-secondary)',marginBottom:6 }}>Advertencias generadas durante el análisis</div>
+                      <ul style={{ margin:0,paddingLeft:18,display:'flex',flexDirection:'column',gap:4 }}>
+                        {ocr.advertencias.map((a, i) => <li key={i} style={{ fontSize:12.5,color:'#C9A227' }}>{a}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Comprobante original</div>
+                  <div style={{ position:'relative', width:130, height:130, borderRadius:8, overflow:'hidden', background:'var(--bg-surface-2)', border:'1px solid var(--border)' }}>
+                    <img src={comprobanteUrl} alt="Comprobante de compra" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', cursor:'zoom-in' }} onClick={() => setZoomComprobante(true)} />
+                    <button type="button" className="ilb-zoom-trigger" title="Ver completo / Zoom"
+                      onClick={() => setZoomComprobante(true)}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                    </button>
+                  </div>
+                </div>
+                {zoomComprobante && (
+                  <ImageLightbox src={comprobanteUrl} alt="Comprobante de compra" onClose={() => setZoomComprobante(false)} />
+                )}
               </div>
-              {zoomComprobante && (
-                <ImageLightbox src={comprobanteUrl} alt="Comprobante de compra" onClose={() => setZoomComprobante(false)} />
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           {/* Acciones */}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            {!esAnulada && hasPermiso('compras', 'anular') && (
-              <AnularButton size={14} className="" onClick={onAnular}
+            {!esAnulada && (
+              <AnularButton size={14} className="" label="Anular" variant="anular" onClick={onAnular}
                 style={{ padding:10,background:'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
             )}
           </div>
@@ -173,7 +230,6 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
 
 // ── Página principal ──────────────────────────────────────────────────────────
 const ComprasPage = () => {
-  const { hasPermiso } = useAuth();
   const navigate = useNavigate();
   const { compras, anular, create, refresh } = useCompras();
   const [query, setQuery]               = useState('');
@@ -208,7 +264,7 @@ const ComprasPage = () => {
 
   // Búsqueda en tiempo real
   const handleSearch = (e) => {
-    const val = e.target.value;
+    const val = filtrarBusqueda(e.target.value);
     setQuery(val);
     if (val.trim() === '') setFiltered(null);
     else setFiltered(buscarCompras(val));
@@ -306,11 +362,16 @@ const ComprasPage = () => {
                 </label>
                 <textarea
                   value={motivoAnulacion}
-                  onChange={e => { setMotivoAnulacion(e.target.value); if(motivoError) setMotivoError(''); }}
+                  onChange={e => {
+                    const v = e.target.value.replace(/^\s+/, '').slice(0, 500);
+                    setMotivoAnulacion(v);
+                    if (motivoError) setMotivoError('');
+                  }}
                   placeholder="Describe el motivo de la anulación..."
-                  rows={3}
+                  rows={3} maxLength={500}
                   style={{ width:'100%',boxSizing:'border-box',padding:'8px 12px',borderRadius:8,border:`1px solid ${motivoError?'#E53935':'#ddd'}`,fontSize:13,resize:'vertical' }}
                 />
+                <div style={{ fontSize:11,color: motivoAnulacion.length >= 500 ? '#E53935' : 'var(--text-muted)',textAlign:'right',marginTop:3 }}>{motivoAnulacion.length} / 500</div>
                 {motivoError && <span style={{ color:'#E53935',fontSize:12 }}>{motivoError}</span>}
               </div>
               <div className="modal-actions">
@@ -335,7 +396,7 @@ const ComprasPage = () => {
             </span>
             <input
               ref={searchRef} type="text"
-              placeholder="Buscar por proveedor o fecha..."
+              placeholder="Buscar por proveedor o fecha..." maxLength={70}
               value={query} onChange={handleSearch}
               className="search-input"
             />
@@ -348,13 +409,7 @@ const ComprasPage = () => {
             )}
           </div>
 
-          {query && (
-            <button className="btn-limpiar-filtros" title="Limpiar filtros" onClick={clearSearch}>
-              ✕ Limpiar filtros
-            </button>
-          )}
-
-          <div style={{ display:'flex',gap:8 }}>
+          <div style={{ display:'flex',gap:8,marginLeft:'auto' }}>
             <button
               style={{ padding:'10px 18px',borderRadius:10,border:'1px solid var(--border)',background:'var(--bg-surface-3)',color:'var(--text-secondary)',fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6 }}
               onClick={() => navigate('/compras/historial')}
@@ -364,14 +419,12 @@ const ComprasPage = () => {
               </svg>
               Historial
             </button>
-            {hasPermiso('compras', 'crear') && (
-              <button className="btn-add" onClick={() => setShowAddModal(true)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                Registrar compra
-              </button>
-            )}
+            <button className="btn-add" onClick={() => setShowAddModal(true)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Registrar compra
+            </button>
           </div>
         </div>
 
@@ -400,12 +453,12 @@ const ComprasPage = () => {
                   </div>
                   <h3>No hay compras activas</h3>
                   <p>Las compras de los últimos 30 días aparecerán aquí. Las más antiguas van al historial.</p>
-                  {hasPermiso('compras', 'crear') && <button className="btn-add-first" onClick={() => setShowAddModal(true)}>
+                  <button className="btn-add-first" onClick={() => setShowAddModal(true)}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                     </svg>
                     Registrar primera compra
-                  </button>}
+                  </button>
                 </>
               )}
             </div>
@@ -434,7 +487,17 @@ const ComprasPage = () => {
                       <td>
                         <div className="items-nombres">
                           {c.items && c.items.length > 0
-                            ? c.items.map((it, i) => <span key={i} className="badge-insumo">{formatoTitulo(it.insumo)}</span>)
+                            ? (
+                              <>
+                                {c.items.slice(0, 3).map((it, i) => <span key={i} className="badge-insumo">{formatoTitulo(it.insumo)}</span>)}
+                                {c.items.length > 3 && (
+                                  <button type="button" onClick={() => setVerTarget(c)}
+                                    className="badge-insumo" style={{ background:'#4CAF50', color:'white', border:'none', cursor:'pointer', fontWeight:700 }}>
+                                    +{c.items.length - 3}
+                                  </button>
+                                )}
+                              </>
+                            )
                             : <span className="badge-items">Sin insumos</span>
                           }
                         </div>
@@ -442,21 +505,17 @@ const ComprasPage = () => {
                       <td className="td-total">{formatCOP(c.total)}</td>
                       <td>
                         <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(58,158,66,0.15)',color:'var(--color-green)',border:'1px solid #A5D6A7' }}>
-                          Activa
+                          Registrada
                         </span>
                       </td>
                       <td>
                         <div className="actions-group">
-                          {hasPermiso('compras', 'ver') && (
-                            <Tooltip label="Ver detalle">
-                              <button className="btn-accion btn-accion-ver" onClick={() => setVerTarget(c)}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                              </button>
-                            </Tooltip>
-                          )}
-                          {hasPermiso('compras', 'anular') && (
-                            <AnularButton size={14} className="btn-accion btn-accion-eliminar" onClick={() => openAnular(c)}/>
-                          )}
+                          <Tooltip label="Ver detalle">
+                            <button className="btn-accion btn-accion-ver" onClick={() => setVerTarget(c)}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                          </Tooltip>
+                          <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Anular" variant="anular" onClick={() => openAnular(c)}/>
                         </div>
                       </td>
                     </tr>

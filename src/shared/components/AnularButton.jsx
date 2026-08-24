@@ -19,15 +19,32 @@ const IconPapelera = (props) => (
   </svg>
 );
 
+// Ícono de "anular" (círculo con X) — usado únicamente por la acción Anular
+// de Compras, para diferenciarla visualmente de "Eliminar" (papelera), que
+// sigue usando el ícono de siempre en el resto de los módulos.
+const IconAnularCirculo = (props) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="15" y1="9" x2="9" y2="15" />
+    <line x1="9" y1="9" x2="15" y2="15" />
+  </svg>
+);
+
 export default function AnularButton({
   onClick,
   disabled = false,
-  label = 'Anular',
+  label = 'Eliminar',
   className = 'btn-anular',
   size = 16,
   style,
   position,
+  // 'eliminar' (por defecto) = ícono de papelera, usado en Insumos,
+  // Proveedores y el resto de los módulos. 'anular' = ícono de círculo con
+  // X, usado solo por la acción "Anular" de Compras (ver referencia
+  // proporcionada en el ticket).
+  variant = 'eliminar',
 }) {
+  const Icon = variant === 'anular' ? IconAnularCirculo : IconPapelera;
   return (
     <Tooltip label={label} position={position}>
       <button
@@ -37,7 +54,7 @@ export default function AnularButton({
         disabled={disabled}
         style={style}
       >
-        <IconPapelera width={size} height={size} />
+        <Icon width={size} height={size} />
       </button>
     </Tooltip>
   );

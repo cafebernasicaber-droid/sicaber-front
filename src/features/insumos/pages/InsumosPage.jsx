@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useAuth } from '../../../shared/contexts/AuthContext';
 import useInsumos from '../hooks/useInsumos';
 import useCategoriasInsumos from '../hooks/useCategoriasInsumos';
 import comprasService from '../../compras/services/comprasService';
 import InsumoForm from '../components/InsumoForm';
+import { filtrarBusqueda } from '../../../shared/utils/busqueda';
+import { normalizarComparacion } from '../../../shared/utils/textFormat';
 import './InsumosPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
@@ -16,16 +17,15 @@ const formatDate = iso =>
 
 // ── Modal: Ver insumo ─────────────────────────────────────────────────────────
 function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, deshabilitarEliminar }) {
-  const { hasPermiso } = useAuth();
   const stockOk = insumo.stockActual >= insumo.stockMinimo;
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:640,
-        maxHeight:'88vh', overflowY:'auto',
+        maxHeight:'88vh', overflowY:'auto', overflowX:'hidden',
         boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px 16px', borderBottom:'1px solid rgba(255,255,255,.07)' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px 16px', borderBottom:'1px solid var(--border)' }}>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
             <div style={{ width:44,height:44,borderRadius:12,flexShrink:0,background:'linear-gradient(135deg,#4CAF50,#388E3C)',display:'flex',alignItems:'center',justifyContent:'center',color:'white' }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -47,8 +47,8 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
         </div>
         <div style={{ padding:'20px 24px' }}>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
-            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid rgba(255,255,255,.07)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Información General</div>
+            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Información General</div>
               {[
                 ['ID', <span style={{ fontFamily:'monospace',fontSize:12,color:'#81C784',background:'rgba(76,175,80,.12)',padding:'2px 8px',borderRadius:6 }}>{insumo.id}</span>],
                 ['Categoría', <span className="badge-cat">{insumo.categoria}</span>],
@@ -56,37 +56,33 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
                 ['Proveedor', insumo.proveedor || '—'],
                 ['Estado',
                   <div style={{ display:'flex',alignItems:'center',gap:8 }}>
-                    {hasPermiso('insumos', 'editar') ? (
-                      <button className={`toggle-btn ${insumo.estado==='Activo'?'toggle-on':'toggle-off'}`} onClick={onToggle} style={{ cursor:'pointer' }}><span className="toggle-thumb"/></button>
-                    ) : (
-                      <span className={`toggle-btn ${insumo.estado==='Activo'?'toggle-on':'toggle-off'}`} style={{cursor:'default',opacity:0.6}}><span className="toggle-thumb"/></span>
-                    )}
+                    <button className={`toggle-btn ${insumo.estado==='Activo'?'toggle-on':'toggle-off'}`} onClick={onToggle} style={{ cursor:'pointer' }}><span className="toggle-thumb"/></button>
                     <span style={{ fontSize:13,fontWeight:600,color:insumo.estado==='Activo'?'#81C784':'#888' }}>{insumo.estado==='Activo'?'Activo':'Inactivo'}</span>
                   </div>
                 ],
-              ].map(([label, val]) => (
-                <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid rgba(255,255,255,.05)',fontSize:13 }}>
+              ].map(([label, val], idx, arr) => (
+                <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom: idx === arr.length - 1 ? 'none' : '1px solid var(--border)',fontSize:13 }}>
                   <span style={{ color:'var(--text-secondary)',fontWeight:600 }}>{label}</span>
                   <span style={{ color:'var(--text-primary)',fontWeight:500 }}>{val}</span>
                 </div>
               ))}
             </div>
-            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid rgba(255,255,255,.07)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Stock & Precio</div>
+            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Stock & Precio</div>
               {[
                 ['Stock actual', <span style={{ fontWeight:800,fontSize:15,color:stockOk?'#81C784':'#EF5350' }}>{insumo.stockActual} {insumo.unidadMedida}</span>],
                 ['Stock mínimo', `${insumo.stockMinimo} ${insumo.unidadMedida}`],
                 ['Último precio pagado', insumo.precioUnitario ? <span style={{ fontWeight:700,color:'#FFCC80' }}>{formatCOP(insumo.precioUnitario)}</span> : <span style={{ color:'var(--text-secondary)' }}>Sin compras aún</span>],
-              ].map(([label, val]) => (
-                <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid rgba(255,255,255,.05)',fontSize:13 }}>
+              ].map(([label, val], idx, arr) => (
+                <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom: idx === arr.length - 1 ? 'none' : '1px solid var(--border)',fontSize:13 }}>
                   <span style={{ color:'var(--text-secondary)',fontWeight:600 }}>{label}</span>
                   <span style={{ color:'var(--text-primary)',fontWeight:500 }}>{val}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid rgba(255,255,255,.07)',marginBottom:14 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:6 }}>Descripción</div>
+          <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:6 }}>Descripción</div>
             <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0 }}>{insumo.descripcion || 'Sin descripción registrada.'}</p>
             <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(insumo.fechaCreacion)}</div>
           </div>
@@ -98,15 +94,15 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
           )}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            {hasPermiso('insumos', 'eliminar') && (
-              <AnularButton onClick={onEliminar} disabled={deshabilitarEliminar} size={14} className=""
-                style={{ padding:10,background: deshabilitarEliminar ? '#9E9E9E' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor: deshabilitarEliminar ? 'not-allowed' : 'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
-            )}
-            {hasPermiso('insumos', 'editar') && (
-              <Tooltip label="Editar insumo">
-                <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
-              </Tooltip>
-            )}
+            {/* No se usa `disabled` HTML: el botón debe verse gris/deshabilitado
+                pero seguir siendo clickeable para poder mostrar la alerta que
+                explica por qué no puede eliminarse (igual que en Proveedores). */}
+            <AnularButton onClick={onEliminar} size={14} className=""
+              label={deshabilitarEliminar ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
+              style={{ padding:10,background: deshabilitarEliminar ? '#9E9E9E' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor: deshabilitarEliminar ? 'not-allowed' : 'pointer',opacity: deshabilitarEliminar ? 0.6 : 1,display:'flex',alignItems:'center',justifyContent:'center' }}/>
+            <Tooltip label="Editar insumo">
+              <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -126,12 +122,12 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)',borderRadius:18,width:'100%',maxWidth:680,
         maxHeight:'90vh',overflowY:'auto',
         boxShadow:'0 24px 64px rgba(0,0,0,.5)',animation:'popIn .22s ease',
       }}>
-        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid rgba(255,255,255,.07)' }}>
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid var(--border)' }}>
           <div style={{ display:'flex',alignItems:'center',gap:12 }}>
             <div style={{ width:42,height:42,borderRadius:10,flexShrink:0,background:isEdit?'linear-gradient(135deg,#6D4C41,#4E342E)':'linear-gradient(135deg,#4CAF50,#388E3C)',display:'flex',alignItems:'center',justifyContent:'center',color:'white' }}>
               {isEdit
@@ -174,10 +170,25 @@ function ModalCategoriasInsumo({ onClose }) {
   const [editNombre, setEditNombre] = useState('');
   const [editLoading, setEditLoading] = useState(false);
 
+  // Considera duplicada una categoría cuyo nombre normalizado (sin
+  // mayúsculas/minúsculas ni tildes) coincida con el de otra ya
+  // registrada. `ignorarId` se usa al editar, para no comparar la
+  // categoría contra sí misma.
+  const existeCategoriaEquivalente = (valor, ignorarId = null) => {
+    const normalizado = normalizarComparacion(valor);
+    return categorias.some(c =>
+      String(c.id) !== String(ignorarId) && normalizarComparacion(c.nombre) === normalizado
+    );
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setError('');
     if (!nombre.trim()) { setError('El nombre de la categoría es obligatorio.'); return; }
+    if (existeCategoriaEquivalente(nombre)) {
+      setError(`Ya existe una categoría equivalente a "${nombre.trim()}".`);
+      return;
+    }
     setLoading(true);
     try {
       const r = await create({ nombre: nombre.trim(), estado: 'Activo' });
@@ -197,6 +208,10 @@ function ModalCategoriasInsumo({ onClose }) {
     setError('');
     if (!editNombre.trim()) { setError('El nombre de la categoría es obligatorio.'); return; }
     if (editNombre.trim() === c.nombre) { cancelEdit(); return; }
+    if (existeCategoriaEquivalente(editNombre, c.id)) {
+      setError(`Ya existe una categoría equivalente a "${editNombre.trim()}".`);
+      return;
+    }
     setEditLoading(true);
     try {
       const r = await update(c.id, { nombre: editNombre.trim(), estado: c.estado });
@@ -230,11 +245,11 @@ function ModalCategoriasInsumo({ onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
-        maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
+        maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid rgba(255,255,255,.07)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar categorías de insumos</div>
           <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -266,7 +281,7 @@ function ModalCategoriasInsumo({ onClose }) {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {categorias.map(c => (
-                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid rgba(255,255,255,.07)' }}>
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
                   {editId === c.id ? (
                     <>
                       <input
@@ -290,7 +305,7 @@ function ModalCategoriasInsumo({ onClose }) {
                       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.nombre}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <button onClick={() => startEdit(c)} title="Editar nombre"
-                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(255,255,255,.08)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                         </button>
                         <AnularButton size={14} className="" onClick={() => setDeleteTarget(c)}
@@ -302,6 +317,9 @@ function ModalCategoriasInsumo({ onClose }) {
               ))}
             </div>
           )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
+          </div>
         </div>
 
         {deleteTarget && (
@@ -435,7 +453,6 @@ function ModalRecategorizar({ target, categorias, onRecategorizar, onClose }) {
 
 // ── Página principal ──────────────────────────────────────────────────────────
 const InsumosPage = () => {
-  const { hasPermiso } = useAuth();
   const { insumos, create, update, remove, toggleEstado, refresh } = useInsumos();
   const [comprasTodas, setComprasTodas] = useState([]);
   useEffect(() => {
@@ -458,6 +475,11 @@ const InsumosPage = () => {
   const [modal, setModal]           = useState(null);
   const [targetInsumo, setTarget]   = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // Insumo que el usuario intentó eliminar pero tiene compras asociadas —
+  // mismo patrón que "deleteInfo.tieneCompras" en ProveedoresPage: en vez
+  // de abrir el modal normal de anulación, se muestra una alerta explicando
+  // por qué no puede eliminarse y recomendando desactivarlo.
+  const [deleteBlockedTarget, setDeleteBlockedTarget] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg]     = useState('');
   const searchRef = useRef();
@@ -518,7 +540,7 @@ const InsumosPage = () => {
   };
 
   const handleSearch = e => {
-    const val = e.target.value;
+    const val = filtrarBusqueda(e.target.value);
     setQuery(val);
     if (!val.trim()) setFiltered(null);
     else setFiltered(buscarInsumos(val));
@@ -555,6 +577,18 @@ const InsumosPage = () => {
     showOk(`Insumo "${deleteTarget.nombre}" anulado correctamente.`);
     setDeleteTarget(null);
     if (modal === 'ver') closeModal();
+  };
+
+  // Punto único por el que debe pasar cualquier intento de eliminar un
+  // insumo (tabla y modal "Ver insumo"). Si tiene compras registradas, no
+  // abre el modal de confirmación de eliminación: muestra la alerta
+  // explicativa (equivalente a la que ya existía en Proveedores).
+  const handleEliminarClick = (ins) => {
+    if (insumoTieneCompras(ins)) {
+      setDeleteBlockedTarget(ins);
+      return;
+    }
+    setDeleteTarget(ins);
   };
 
   const handleToggle = async id => {
@@ -603,7 +637,7 @@ const InsumosPage = () => {
             insumo={targetInsumo}
             onClose={closeModal}
             onEditar={() => setModal('editar')}
-            onEliminar={() => setDeleteTarget(targetInsumo)}
+            onEliminar={() => handleEliminarClick(targetInsumo)}
             onToggle={() => handleToggle(targetInsumo.id)}
             deshabilitarEliminar={insumoTieneCompras(targetInsumo)}
           />
@@ -643,6 +677,33 @@ const InsumosPage = () => {
           </div>
         )}
 
+        {/* Modal: no se puede eliminar (insumo con compras asociadas) —
+            mismo patrón/copy que el equivalente en ProveedoresPage. */}
+        {deleteBlockedTarget && (
+          <div className="modal-overlay" onClick={() => setDeleteBlockedTarget(null)}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
+              <div className="modal-icon modal-icon-danger">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+              </div>
+              <h3>¿Eliminar insumo?</h3>
+              <p style={{ color:'#B71C1C',fontWeight:600,display:'flex',alignItems:'flex-start',gap:8 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink:0,marginTop:2 }}>
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>No se puede eliminar "{deleteBlockedTarget.nombre}": tiene compras registradas, desactívalo en su lugar.</span>
+              </p>
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => setDeleteBlockedTarget(null)}>Entendido</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="page-header">
           <h1 className="page-title">Gestión de Insumos</h1>
@@ -659,17 +720,17 @@ const InsumosPage = () => {
             background: 'rgba(230,115,0,0.12)', border: '1.5px solid rgba(230,115,0,0.4)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: 14, fontWeight: 800, color: '#E65100' }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              ⚠ {stockBajoList.length} insumo{stockBajoList.length !== 1 ? 's' : ''} con stock bajo — revisa antes de que se agoten
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>{stockBajoList.length} insumo{stockBajoList.length !== 1 ? 's' : ''} con stock bajo — revisa antes de que se agoten</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {stockBajoList.map(i => (
                 <div key={i.id} style={{
-                  display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 12px', borderRadius: 10,
+                  display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 14px', borderRadius: 10,
                   background: 'var(--bg-surface)', border: '1px solid rgba(230,115,0,0.35)', fontSize: 12, color: '#E65100',
                 }}>
-                  <span style={{ fontWeight: 700 }}>⚠️ {i.nombre}</span>
-                  <span>Quedan: {i.stockActual} unidades (Stock mínimo: {i.stockMinimo})</span>
+                  <span style={{ fontWeight: 700 }}>{i.nombre}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>Quedan: <strong style={{ color:'#E65100' }}>{i.stockActual} {i.unidadMedida || ''}</strong> (mínimo: {i.stockMinimo})</span>
                 </div>
               ))}
             </div>
@@ -713,7 +774,7 @@ const InsumosPage = () => {
             </span>
             <input
               ref={searchRef} type="text"
-              placeholder="Buscar por nombre o categoría..."
+              placeholder="Buscar por nombre o categoría..." maxLength={70}
               value={query} onChange={handleSearch}
               className="search-input"
             />
@@ -725,25 +786,17 @@ const InsumosPage = () => {
               </button>
             )}
           </div>
-          {(query || tabFiltro !== 'todos' || soloStockBajo) && (
-            <button className="btn-limpiar-filtros" title="Limpiar filtros"
-              onClick={() => { clearSearch(); setTabFiltro('todos'); setSoloStockBajo(false); }}>
-              ✕ Limpiar filtros
-            </button>
-          )}
           <div style={{ display: 'flex', gap: 12, marginLeft: 'auto' }}>
             <button className="btn-add" style={{ margin: 0 }} onClick={() => setModal('categorias')}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v4H4z"/><path d="M4 10h10v4H4z"/><path d="M4 16h6v4H4z"/></svg>
               Gestionar categorías
             </button>
-            {hasPermiso('insumos', 'crear') && (
-              <button className="btn-add" style={{ margin: 0 }} onClick={() => { setTarget(null); setModal('nuevo'); }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                Agregar insumo
-              </button>
-            )}
+            <button className="btn-add" style={{ margin: 0 }} onClick={() => { setTarget(null); setModal('nuevo'); }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Agregar insumo
+            </button>
           </div>
         </div>
 
@@ -786,7 +839,7 @@ const InsumosPage = () => {
                       ? `Cambia el filtro para ver otros insumos`
                       : 'Comienza agregando el primer insumo al sistema'}
                   </p>
-                  {tabFiltro === 'todos' && hasPermiso('insumos', 'crear') && (
+                  {tabFiltro === 'todos' && (
                     <button className="btn-add-first" onClick={() => { setTarget(null); setModal('nuevo'); }}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -849,36 +902,29 @@ const InsumosPage = () => {
                           </div>
                         </td>
                         <td >
-                          {hasPermiso('insumos', 'editar') ? (
-                            <button className={`toggle-btn ${ins.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
-                              onClick={() => handleToggle(ins.id)}>
-                              <span className="toggle-thumb"/>
-                            </button>
-                          ) : (
-                            <span className={`toggle-btn ${ins.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`} style={{cursor:'default',opacity:0.6}}><span className="toggle-thumb"/></span>
-                          )}
+                          <button className={`toggle-btn ${ins.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
+                            onClick={() => handleToggle(ins.id)}>
+                            <span className="toggle-thumb"/>
+                          </button>
                         </td>
                         <td >
                           <div className="actions-group">
-                            {hasPermiso('insumos', 'ver') && (
-                              <Tooltip label="Ver detalle">
-                                <button className="btn-accion btn-accion-ver"
-                                  onClick={() => { setTarget(ins); setModal('ver'); }}>
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                </button>
-                              </Tooltip>
-                            )}
-                            {hasPermiso('insumos', 'editar') && (
-                              <Tooltip label="Editar">
-                                <button className="btn-accion btn-accion-editar"
-                                  onClick={() => { setTarget(ins); setModal('editar'); }}>
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                </button>
-                              </Tooltip>
-                            )}
-                            {hasPermiso('insumos', 'eliminar') && (
-                              <AnularButton onClick={() => setDeleteTarget(ins)} disabled={insumoTieneCompras(ins)} size={14} className="btn-accion btn-accion-eliminar"/>
-                            )}
+                            <Tooltip label="Ver detalle">
+                              <button className="btn-accion btn-accion-ver"
+                                onClick={() => { setTarget(ins); setModal('ver'); }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                              </button>
+                            </Tooltip>
+                            <Tooltip label="Editar">
+                              <button className="btn-accion btn-accion-editar"
+                                onClick={() => { setTarget(ins); setModal('editar'); }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                              </button>
+                            </Tooltip>
+                            <AnularButton onClick={() => handleEliminarClick(ins)} size={14}
+                              className="btn-accion btn-accion-eliminar"
+                              label={insumoTieneCompras(ins) ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
+                              style={insumoTieneCompras(ins) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>
                           </div>
                         </td>
                       </tr>
@@ -898,7 +944,7 @@ const InsumosPage = () => {
               <span style={{ fontSize:13, color:'var(--text-muted)' }}>Mostrando {(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, displayed.length)} de {displayed.length}</span>
               <div style={{ display:'flex', gap:6 }}>
                 <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1}
-                  style={{ padding:'6px 12px', borderRadius:8, border:'1.5px solid rgba(255,255,255,.12)', background:page===1?'#f5f5f5':'white', color:page===1?'#bbb':'#333', cursor:page===1?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>← Ant.</button>
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1.5px solid var(--border)', background:page===1?'#f5f5f5':'white', color:page===1?'#bbb':'#333', cursor:page===1?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>← Ant.</button>
                 {Array.from({length:totalPages},(_,i)=>i+1).map(n => (
                   <button key={n} onClick={() => setPage(n)}
                     style={{ padding:'6px 11px', borderRadius:8, border:`1.5px solid ${n===page?'#4CAF50':'#ddd'}`, background:n===page?'#4CAF50':'white', color:n===page?'white':'#333', cursor:'pointer', fontSize:13, fontWeight:700 }}>
@@ -906,7 +952,7 @@ const InsumosPage = () => {
                   </button>
                 ))}
                 <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
-                  style={{ padding:'6px 12px', borderRadius:8, border:'1.5px solid rgba(255,255,255,.12)', background:page===totalPages?'#f5f5f5':'white', color:page===totalPages?'#bbb':'#333', cursor:page===totalPages?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>Sig. →</button>
+                  style={{ padding:'6px 12px', borderRadius:8, border:'1.5px solid var(--border)', background:page===totalPages?'#f5f5f5':'white', color:page===totalPages?'#bbb':'#333', cursor:page===totalPages?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>Sig. →</button>
               </div>
             </div>
           )}

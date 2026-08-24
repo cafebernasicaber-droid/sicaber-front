@@ -193,10 +193,16 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             )}
           </label>
           {categoriasDisponibles.length === 0 ? (
-            <div style={{ padding: '10px 14px', background: 'rgba(245,176,0,0.12)', border: '1px solid rgba(245,176,0,0.3)', borderRadius: 8, fontSize: 13, color: '#E65100' }}>
-              ⚠ No hay categorías registradas. {onManageCategorias
-                ? <button type="button" onClick={onManageCategorias} style={{ background:'none',border:'none',padding:0,color:'#E65100',fontWeight:700,textDecoration:'underline',cursor:'pointer' }}>Crea una primero en "Gestionar categorías"</button>
-                : 'Crea una primero en "Gestionar categorías" antes de registrar un insumo.'}
+            <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 12, color: '#C9A227', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <span>
+                No hay categorías registradas. {onManageCategorias
+                  ? <button type="button" onClick={onManageCategorias} style={{ display:'inline', background:'none',border:'none',padding:0,margin:0,color:'#C9A227',fontWeight:700,textDecoration:'underline',cursor:'pointer',font:'inherit' }}>Crea una primero en "Gestionar categorías"</button>
+                  : 'Crea una primero en "Gestionar categorías" antes de registrar un insumo.'}
+              </span>
             </div>
           ) : (
             <select name="categoria" value={form.categoriaId} onChange={handleCategoriaChange}>
@@ -211,8 +217,12 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           <label>Unidad de medida <span className="req">*</span></label>
           {isEditing ? (
             <>
-              <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
-                🔒 {form.unidadMedida || '—'}
+              <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                {form.unidadMedida || '—'}
               </div>
               <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
                 La unidad de medida no se puede cambiar después de crear el insumo.
@@ -225,7 +235,10 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                 {unidades.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
               <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 12, color: '#C9A227', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                <span>⚠</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
                 <span>Elige con cuidado: una vez registrado el insumo, esta unidad queda fija y no se podrá cambiar.</span>
               </div>
             </>
@@ -268,8 +281,12 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         <div className={`fg ${errors.proveedor ? 'fg-error' : ''}`}>
           <label>Proveedor <span className="req">*</span></label>
           {noHayProveedores ? (
-            <div style={{ padding: '10px 14px', background: 'rgba(245,176,0,0.12)', border: '1px solid rgba(245,176,0,0.3)', borderRadius: 8, fontSize: 13, color: '#E65100' }}>
-              ⚠ No hay proveedores disponibles (no hay ninguno registrado, o todos están inactivos). Ve a Gestión de Proveedores para registrar o activar uno antes de continuar.
+            <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 12, color: '#C9A227', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <span>No hay proveedores disponibles (no hay ninguno registrado, o todos están inactivos). Ve a Gestión de Proveedores para registrar o activar uno antes de continuar.</span>
             </div>
           ) : (
             <select
@@ -292,7 +309,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               {form.stockActual} {form.unidadMedida}
             </div>
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-              El stock ya no se edita a mano — solo aumenta al registrar una compra, y disminuye al anularla.
+              El stock actual solo aumenta al registrar una compra y disminuye al anularla.
             </span>
           </div>
         )}

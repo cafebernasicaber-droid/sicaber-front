@@ -129,7 +129,7 @@
   transition: all 0.2s;
 }
 
-.btn-form-cancel:hover { background: #333; color: var(--text-primary); }
+.btn-form-cancel:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .btn-form-submit {
   display: flex;
@@ -225,12 +225,13 @@
    insumos, todos los campos quedaban en una sola tabla corrida y era fácil
    perder de vista a cuál insumo pertenecía cada dato. */
 .item-block {
-  margin: 12px;
+  margin: 16px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
   background: var(--bg-surface-2, var(--bg-surface));
   overflow: hidden;
 }
+.item-block + .item-block { margin-top: 22px; }
 .item-block + .item-block { margin-top: 12px; }
 
 .item-block-header {
@@ -313,7 +314,7 @@
 .item-subtotal {
   font-size: 13px;
   font-weight: 700;
-  color: #81C784;
+  color: #4CAF50;
   text-align: right;
 }
 
@@ -425,33 +426,49 @@
   width: 32px;
   height: 32px;
   border-radius: 7px;
-  background: rgba(229,57,53,.1);
-  color: #EF5350;
-  border: 1px solid #FFCDD2;
+  background: rgba(229,57,53,.16);
+  color: #E53935;
+  border: 1px solid #E53935;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s;
 }
-.btn-remove-item:hover:not(:disabled) { background: rgba(229,57,53,.2); }
+.btn-remove-item:hover:not(:disabled) { background: rgba(229,57,53,.28); }
 .btn-remove-item:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.compra-totales-wrap {
+  border: 1.5px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  margin-top: -1px;
+  overflow: visible;
+}
 
 .compra-total-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 14px 18px;
-  border-top: 2px solid #EEEEEE;
+  border-top: 2px solid var(--border);
   background: var(--bg-surface);
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
+.compra-total-row--sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 -6px 16px rgba(0,0,0,0.12);
+}
+
 .compra-total-value {
   font-size: 20px;
   font-weight: 800;
-  color: #81C784;
+  color: #4CAF50;
   font-family: 'Montserrat', sans-serif;
 }
 

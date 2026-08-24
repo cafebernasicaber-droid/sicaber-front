@@ -84,6 +84,9 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
 
 const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   const [form, setForm] = useState(EMPTY_FORM);
+  // Referencia a cada tarjeta "Insumo N" — permite llevar la vista hasta
+  // la tarjeta recién agregada en vez de dejar al usuario donde estaba.
+  const itemRefs = useRef([]);
   const [errors, setErrors] = useState({});
 
   // ── Comprobante de compra + validación OCR ──────────────────────────────
@@ -104,7 +107,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   const [confirmarPeseAdvertencia, setConfirmarPeseAdvertencia] = useState(false);
 
   // Descuento opcional (0-100%) sobre el total de la compra
-  const [descuento, setDescuento] = useState('');
+  const [descuento, setDescuento] = useState('0');
 
   const [proveedores, setProveedores] = useState([]);
   useEffect(() => {
@@ -130,6 +133,12 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       )
     : [];
 
+  // 5 — REVERTIDO a pedido explícito del usuario: el comprobante vuelve a
+  // ser obligatorio en TODOS los tipos de compra (directa y por
+  // presentación). Se deja la constante (en vez de borrar todas las
+  // referencias) para no tener que tocar de nuevo cada punto que la usa.
+  const comprobanteEsObligatorio = true;
+
   const validate = () => {
     const errs = {};
     if (!form.proveedorNombre.trim()) errs.proveedorNombre = 'Selecciona un proveedor';
@@ -153,14 +162,18 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
     if (descuento !== '' && (isNaN(descuento) || Number(descuento) < 0 || Number(descuento) > 100)) {
       errs.descuento = 'El descuento debe ser un porcentaje entre 0 y 100.';
     }
-    // El comprobante (archivo) es obligatorio; que el OCR haya "coincidido"
-    // ya NO lo es — es solo informativo. Si el OCR encontró diferencias (o
-    // no pudo verificar nada), se exige un check explícito de confirmación
-    // en vez de bloquear el registro de la compra.
-    if (!comprobanteFile) errs.comprobante = 'El comprobante de compra es obligatorio.';
-    else if (procesandoOCR) errs.comprobante = 'Espera a que termine el análisis del comprobante.';
-    else if (!comprobanteOk && !confirmarPeseAdvertencia) {
-      errs.comprobante = 'Marca la casilla de confirmación para continuar con el comprobante tal como está.';
+    // El comprobante (archivo) es obligatorio solo en compras "por
+    // presentación" (ver comprobanteEsObligatorio); en compras directas es
+    // opcional y, si no se adjunta, no aplica ninguna validación de OCR.
+    // Si el usuario sí adjunta uno (aunque sea opcional), se le sigue
+    // pidiendo la misma confirmación que antes cuando el OCR no valida.
+    if (comprobanteEsObligatorio && !comprobanteFile) {
+      errs.comprobante = 'El comprobante de compra es obligatorio en compras por presentación.';
+    } else if (comprobanteFile) {
+      if (procesandoOCR) errs.comprobante = 'Espera a que termine el análisis del comprobante.';
+      else if (!comprobanteOk && !confirmarPeseAdvertencia) {
+        errs.comprobante = 'Marca la casilla de confirmación para continuar con el comprobante tal como está.';
+      }
     }
     return errs;
   };
@@ -175,23 +188,47 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         proveedorNombre: prov ? prov.nombre : '',
         items:           [{ ...EMPTY_ITEM }]
       }));
+    } else if (name === 'fecha') {
+      setForm(prev => ({ ...prev, fecha: value > getTodayStr() ? getTodayStr() : value }));
     } else {
       setForm(prev => ({ ...prev, [name]: value }));
     }
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
+  // Filtra mientras se escribe: solo dígitos y un único punto decimal.
+  // maxDecimales=0 fuerza enteros (unidad "unidad"). Aplica también el
+  // tope máximo permitido para el campo.
+  const filtrarNumero = (valor, maxDecimales, tope) => {
+    let v = valor.replace(/[^0-9.]/g, '');
+    const partes = v.split('.');
+    if (partes.length > 2) v = partes[0] + '.' + partes.slice(1).join('');
+    if (maxDecimales === 0) {
+      v = v.split('.')[0];
+    } else {
+      const [entero, decimales] = v.split('.');
+      v = decimales !== undefined ? `${entero}.${decimales.slice(0, maxDecimales)}` : v;
+    }
+    if (v !== '' && v !== '.' && Number(v) > tope) v = String(tope);
+    return v;
+  };
+
   const handleItemChange = (idx, field, value) => {
     setForm(prev => {
       const items = [...prev.items];
       if (field === 'cantidad') {
-        // Solo enteros: eliminar decimales y caracteres no numéricos
-        const soloEntero = value.replace(/[^0-9]/g, '');
-        items[idx] = { ...items[idx], cantidad: soloEntero };
+        // Punto 1: unidad "unidad" -> solo enteros (tope 999.999).
+        // Cualquier otra unidad -> hasta 2 decimales (tope 999.999,99).
+        const esUnidadEntera = items[idx].unidad === 'unidad';
+        const limpio = filtrarNumero(value, esUnidadEntera ? 0 : 2, esUnidadEntera ? 999999 : 999999.99);
+        items[idx] = { ...items[idx], cantidad: limpio };
         // Si la cantidad queda inválida, limpiar precio
-        if (!soloEntero || Number(soloEntero) <= 0) {
+        if (!limpio || Number(limpio) <= 0) {
           items[idx].precioUnitario = '';
         }
+      } else if (field === 'precioUnitario') {
+        // Punto 2: precio admite máximo 1 decimal, tope 999.999.999,9
+        items[idx] = { ...items[idx], precioUnitario: filtrarNumero(value, 1, 999999999.9) };
       } else {
         items[idx] = { ...items[idx], [field]: value };
       }
@@ -241,11 +278,14 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       let v = value;
       if (field === 'presentacionCantidad') {
         // Cantidad de cajas/paquetes/etc.: siempre entero
-        v = value.replace(/[^0-9]/g, '');
+        v = filtrarNumero(value, 0, 999999);
       } else if (field === 'presentacionContenido') {
         // Contenido por presentación: entero si la unidad real es "unidad",
-        // decimal si es kg/g/lb/oz/L/mL.
-        v = items[idx].unidad === 'unidad' ? value.replace(/[^0-9]/g, '') : value.replace(/[^0-9.]/g, '');
+        // hasta 2 decimales si es kg/g/lb/oz/L/mL.
+        v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
+      } else if (field === 'presentacionPrecio') {
+        // Precio: máximo 1 decimal, mismo tope que el precio directo.
+        v = filtrarNumero(value, 1, 999999999.9);
       }
       items[idx] = { ...items[idx], [field]: v };
       return { ...prev, items };
@@ -255,6 +295,12 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
   const addItem = () => {
     setForm(prev => ({ ...prev, items: [...prev.items, { ...EMPTY_ITEM }] }));
+    // El nuevo ítem se renderiza en el siguiente ciclo — se espera un
+    // instante para que exista en el DOM antes de desplazarse hasta él.
+    setTimeout(() => {
+      const nuevoIdx = itemRefs.current.length - 1;
+      itemRefs.current[nuevoIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
   };
 
   const removeItem = (idx) => {
@@ -313,6 +359,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
             proveedorCoincide: null,
             total: null,
             totalCoincide: null,
+            confianza: resultado.confianza ?? null,
             advertencias: [],
           });
         }
@@ -359,11 +406,30 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         }
       }
 
+      // La confianza que devuelve ocrService (`resultado.confianza`) solo mide
+      // si se LOGRARON LEER fecha/NIT/total — no si esos datos coinciden con
+      // los reales de la compra. Antes eso hacía que un comprobante con el
+      // total, NIT o fecha equivocados (o el proveedor sin coincidir)
+      // igual mostrara "100% — Lectura confiable" en Ver compra, porque el
+      // OCR sí había logrado LEER algo, aunque estuviera mal. Aquí se
+      // descuenta puntos por cada dato que no coincide con lo real, para
+      // que el % mostrado refleje qué tan confiable es el comprobante en
+      // sí, no solo si el OCR pudo extraer texto.
+      let confianzaAjustada = resultado.confianza ?? null;
+      if (confianzaAjustada != null) {
+        if (totalCoincide === false)     confianzaAjustada -= 40;
+        if (nitCoincide === false)       confianzaAjustada -= 20;
+        if (fechaCoincide === false)     confianzaAjustada -= 15;
+        if (proveedorCoincide === false) confianzaAjustada -= 15;
+        confianzaAjustada = Math.max(0, Math.min(100, confianzaAjustada));
+      }
+
       setChequeoOCR({
         fecha: resultado.fechaDetectada || null, fechaCoincide,
         nit: resultado.nitDetectado || null, nitCoincide,
         proveedorCoincide,
         total: resultado.total, totalCoincide,
+        confianza: confianzaAjustada,
         advertencias: [...new Set(advertencias)],
       });
       setComprobanteOk(advertencias.length === 0);
@@ -422,7 +488,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   const enviarCompra = async () => {
     setSubiendoComprobante(true);
     try {
-      const comprobanteUrl = await uploadToCloudinary(comprobanteFile);
+      // El comprobante ahora es opcional en compras directas — solo se
+      // sube a Cloudinary si el usuario efectivamente adjuntó un archivo.
+      const comprobanteUrl = comprobanteFile ? await uploadToCloudinary(comprobanteFile) : null;
       onSubmit({
         ...form,
         items: form.items.map(prepararItemParaEnvio),
@@ -430,8 +498,14 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         total_bruto: totalBruto,
         descuento: descuentoNum,
         comprobante_url: comprobanteUrl,
-        comprobante_verificado: comprobanteOk,
-        comprobante_total_ocr: totalDetectadoOCR,
+        comprobante_verificado: comprobanteFile ? comprobanteOk : null,
+        comprobante_total_ocr: comprobanteFile ? totalDetectadoOCR : null,
+        ocr_resultado: chequeoOCR ? {
+          fecha: chequeoOCR.fecha, nit: chequeoOCR.nit,
+          confianza: chequeoOCR.confianza,
+          proveedorCoincide: chequeoOCR.proveedorCoincide,
+          advertencias: chequeoOCR.advertencias,
+        } : null,
       });
     } catch (err) {
       setErrors(prev => ({ ...prev, comprobante: 'No se pudo subir el comprobante. Intenta de nuevo.' }));
@@ -447,10 +521,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       setErrors(errs);
       return;
     }
-    // El OCR no validó el total automáticamente (no coincidió, o no se pudo
-    // leer) — se pide confirmar explícitamente antes de mandar la compra,
-    // en vez de enviarla directo.
-    if (!comprobanteOk) {
+    // El diálogo de "¿registrar sin validar el comprobante?" solo aplica
+    // cuando SÍ se adjuntó un comprobante y el OCR no pudo confirmarlo —
+    // si la compra es directa y no se adjuntó ninguno (comprobante
+    // opcional), no hay nada que validar y se registra directo.
+    if (comprobanteFile && !comprobanteOk) {
       setConfirmSinValidar(true);
       return;
     }
@@ -483,6 +558,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           <label>Fecha de compra <span className="req">*</span></label>
           <input
             type="date" name="fecha" value={form.fecha}
+            max={getTodayStr()}
             onChange={handleChange}
           />
           {errors.fecha && <span className="err-msg">{errors.fecha}</span>}
@@ -506,6 +582,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
             </svg>
             Insumos de la compra
+            {form.items.filter(it => it.insumo).length > 0 && (
+              <span style={{ background:'#4CAF50', color:'white', borderRadius:20, padding:'2px 10px', fontSize:11.5, fontWeight:700, marginLeft:8 }}>
+                {form.items.filter(it => it.insumo).length}
+              </span>
+            )}
           </span>
           <button type="button" className="btn-add-item" onClick={addItem} disabled={!form.proveedorId}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -529,7 +610,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           <span>Unidad</span>
           <span>Modo</span>
           <span>Cantidad</span>
-          <span>Precio unit. (pagado hoy)</span>
+          <span>Precio de la compra</span>
           <span>Subtotal</span>
           <span></span>
         </div>
@@ -538,17 +619,15 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           const enPresentacion = item.modo === 'presentacion';
           const contenidoEsEntero = item.unidad === 'unidad';
           return (
-          <div key={idx} className="item-block">
+          <div key={idx} ref={el => itemRefs.current[idx] = el} className="item-block">
             <div className="item-block-header">
-              <span className="item-block-title">
+              <div className="item-block-title">
                 <span className="item-block-index">Insumo {idx + 1}</span>
-                {item.insumo && <span className="item-block-name">{item.insumo}</span>}
+                <span className="item-block-name">{item.insumo || 'Sin seleccionar'}</span>
+              </div>
+              <span className={`item-block-modo-badge item-block-modo-badge--${enPresentacion ? 'presentacion' : 'directo'}`}>
+                {enPresentacion ? 'Por presentación' : 'Directo'}
               </span>
-              {item.insumo && (
-                <span className={`item-block-modo-badge ${enPresentacion ? 'item-block-modo-badge--presentacion' : 'item-block-modo-badge--directo'}`}>
-                  {enPresentacion ? '📦 Por presentación' : '🔢 Compra directa'}
-                </span>
-              )}
             </div>
             <div className="item-row">
               {form.proveedorId && insumosFiltrados.length > 0 ? (
@@ -650,7 +729,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
             {enPresentacion && (
               <div className="item-presentacion-panel">
-                <div className="item-presentacion-panel__title">Detalle de la presentación</div>
                 <div className="fg">
                   <label>Tipo de presentación</label>
                   <select value={item.presentacionTipo} onChange={e => handlePresentacionChange(idx, 'presentacionTipo', e.target.value)}>
@@ -696,27 +774,46 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           </div>
           );
         })}
+      </div>
 
+      <div className="compra-totales-wrap">
         {descuentoNum > 0 && (
           <div className="compra-total-row" style={{ fontWeight: 500, fontSize: 13 }}>
             <span>Subtotal (sin descuento)</span>
             <span>{formatCOP(totalBruto)}</span>
           </div>
         )}
-        <div className="compra-total-row">
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            Descuento (%)
-            <input
-              type="number" step="0.01" placeholder="0"
-              value={descuento}
-              onChange={e => { setDescuento(e.target.value); if (errors.descuento) setErrors(prev => ({ ...prev, descuento: '' })); }}
-              style={{ width: 70, padding: '5px 8px', borderRadius: 6, border: `1.5px solid ${errors.descuento ? '#EF5350' : 'var(--border-input)'}`, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-            />
-          </span>
-          {descuentoNum > 0 && <span style={{ color: '#C9A227', fontWeight: 600 }}>-{formatCOP(totalBruto - totalFinal)}</span>}
+        <div className="compra-total-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              Descuento (%)
+              <input
+                type="number" min="0" max="100" step="0.01" placeholder="0"
+                value={descuento}
+                onChange={e => {
+                  let v = e.target.value;
+                  if (v !== '') {
+                    const n = Number(v);
+                    if (n < 0) v = '0';
+                    else if (n > 100) v = '100';
+                  }
+                  setDescuento(v);
+                  if (errors.descuento) setErrors(prev => ({ ...prev, descuento: '' }));
+                }}
+                onKeyDown={e => { if (e.key === '-' || e.key === 'e' || e.key === '+') e.preventDefault(); }}
+                style={{ width: 70, padding: '5px 8px', borderRadius: 6, border: `1.5px solid ${errors.descuento ? '#EF5350' : 'var(--border-input)'}`, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              />
+            </span>
+            {descuentoNum > 0 && <span style={{ color: '#C9A227', fontWeight: 600 }}>-{formatCOP(totalBruto - totalFinal)}</span>}
+          </div>
+          <div style={{ fontSize: 12.5, color: descuentoNum > 0 ? '#C9A227' : 'var(--text-secondary)', fontWeight: descuentoNum > 0 ? 600 : 400 }}>
+            {descuentoNum > 0
+              ? `Se aplicó un descuento del ${descuentoNum}% — el total queda en ${formatCOP(totalFinal)}.`
+              : 'Sin descuento.'}
+          </div>
         </div>
         {errors.descuento && <div className="items-error-msg">{errors.descuento}</div>}
-        <div className="compra-total-row">
+        <div className="compra-total-row compra-total-row--sticky">
           <span>Total de la compra</span>
           <span className="compra-total-value">{formatCOP(totalFinal)}</span>
         </div>
@@ -890,7 +987,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           </svg>
           Cancelar
         </button>
-        <button type="submit" className="btn-form-submit" disabled={procesandoOCR || subiendoComprobante || !comprobanteFile || (!comprobanteOk && !confirmarPeseAdvertencia)}>
+        <button type="submit" className="btn-form-submit" disabled={procesandoOCR || subiendoComprobante || (comprobanteEsObligatorio && !comprobanteFile) || (comprobanteFile && !comprobanteOk && !confirmarPeseAdvertencia)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>

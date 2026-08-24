@@ -16,3 +16,18 @@ export const formatoTitulo = (str) => {
     .toLowerCase()
     .replace(/(^|\s|-)([a-záéíóúñ])/g, (_, sep, letra) => sep + letra.toUpperCase());
 };
+
+// ─────────────────────────────────────────────────────────────
+//  Normaliza un texto para *compararlo* (nunca para mostrarlo): quita
+//  espacios sobrantes, pasa a minúsculas y elimina tildes/acentos, para
+//  que "cafe", "Cafe", "CAFÉ" y "CaFe" se consideren el mismo valor al
+//  validar duplicados (ej. categorías de insumos).
+// ─────────────────────────────────────────────────────────────
+export const normalizarComparacion = (str) => {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // quita diacríticos (tildes, diéresis, etc.)
+};

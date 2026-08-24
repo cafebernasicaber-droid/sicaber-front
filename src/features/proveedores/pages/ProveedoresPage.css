@@ -439,7 +439,7 @@
   padding: 10px 24px; background: var(--bg-surface-3); border: 1.5px solid var(--border-input);
   border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--text-secondary); transition: all 0.2s;
 }
-.btn-cancel:hover { background: #333; color: var(--text-primary); }
+.btn-cancel:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn-confirm-danger {
   padding: 10px 24px; background: linear-gradient(135deg, #E53935, #B71C1C);
   border: none; border-radius: 8px; font-size: 14px; font-weight: 600;

@@ -122,10 +122,15 @@
 /* ── BADGE ───────────────────────────────────────────────────── */
 .badge-cat {
   display: inline-block; padding: 3px 10px;
-  background: rgba(109,76,65,0.1);        /* ← línea 43 */
-  color: #ff2f00;                          /* ← línea 43 */
-  border-radius: 20px; font-size: 12px; font-weight: 600;
-  border: 1px solid rgba(109,76,65,0.2);  /* ← línea 45 */
+  background: rgba(230,126,34,0.16);
+  color: #E67E22;
+  border-radius: 20px; font-size: 12px; font-weight: 700;
+  border: 1px solid rgba(230,126,34,0.4);
+}
+[data-theme="dark"] .badge-cat {
+  background: rgba(255,167,38,0.22);
+  color: #FFA726;
+  border: 1px solid rgba(255,167,38,0.5);
 }
 /* ── TOGGLE SWITCH ───────────────────────────────────────────── */
 .toggle-btn { position: relative; width: 42px; height: 24px; border-radius: 12px; border: none; cursor: pointer; transition: background .25s; flex-shrink: 0; }
@@ -191,7 +196,7 @@
   border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--text-secondary);
   transition: all .2s; cursor: pointer; font-family: 'Open Sans', sans-serif;
 }
-.btn-cancel:hover { background: #333; border-color: rgba(255,255,255,.2); color: var(--text-primary); }
+.btn-cancel:hover { background: var(--bg-hover); border-color: var(--border-input); color: var(--text-primary); }
 .btn-confirm-danger {
   padding: 10px 24px; background: linear-gradient(135deg,#E53935,#B71C1C);
   border: none; border-radius: 10px; font-size: 14px; font-weight: 700;

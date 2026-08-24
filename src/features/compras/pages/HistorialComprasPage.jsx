@@ -20,14 +20,16 @@ const formatDate = (iso) => {
 function ModalVerCompra({ compra, onClose }) {
   const esAnulada = compra.estado === 'anulada';
   const [zoomComprobante, setZoomComprobante] = useState(false);
+  const [insumosExpandidos, setInsumosExpandidos] = useState(false);
+  const LIMITE_INSUMOS_VISIBLES = 5;
   const comprobanteUrl = compra.comprobante_url || compra.comprobanteUrl || '';
   const totalBruto = compra.total_bruto ?? compra.totalBruto;
   const descuento  = Number(compra.descuento) || 0;
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:680,
-        maxHeight:'90vh', overflowY:'auto',
+        maxHeight:'90vh', overflowY:'auto', overflowX:'hidden',
         boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
@@ -64,15 +66,15 @@ function ModalVerCompra({ compra, onClose }) {
         <div style={{ padding:'20px 24px' }}>
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14 }}>
             <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Información General</div>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Información general</div>
               {[
                 ['Proveedor',  formatoTitulo(compra.proveedorNombre)],
                 ['Fecha',      compra.fecha],
-                ...(descuento > 0 && totalBruto != null ? [
-                  ['Subtotal',  formatCOP(totalBruto)],
-                  ['Descuento', <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP(totalBruto - compra.total)})</span>],
-                ] : []),
+                ...(descuento > 0 && totalBruto != null ? [['Subtotal', formatCOP(totalBruto)]] : []),
                 ['Total',      <span style={{ fontWeight:800,color:'#FFCC80' }}>{formatCOP(compra.total)}</span>],
+                ['Descuento',  descuento > 0
+                  ? <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP((totalBruto ?? compra.total) - compra.total)})</span>
+                  : <span style={{ color:'var(--text-muted)' }}>Sin descuento</span>],
                 ['Estado',     esAnulada ? 'Anulada' : 'Completada'],
                 ['Registrado', formatDate(compra.fechaCreacion)],
               ].map(([label, val]) => (
@@ -83,7 +85,7 @@ function ModalVerCompra({ compra, onClose }) {
               ))}
             </div>
             <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:12 }}>Resumen</div>
+              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Resumen</div>
               {[
                 ['Cantidad de ítems', compra.items?.length || 0],
                 ...(esAnulada ? [
@@ -106,31 +108,51 @@ function ModalVerCompra({ compra, onClose }) {
 
           {/* Tabla insumos */}
           <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de Insumos</div>
+            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de insumos</div>
             {compra.items && compra.items.length > 0 ? (
-              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13 }}>
+              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13,tableLayout:'fixed' }}>
+                {/* Anchos fijos por columna: antes, al no declarar un ancho
+                    para cada columna, el navegador le asignaba todo el
+                    espacio sobrante a "Subtotal" (la última), dejando una
+                    franja vacía a la derecha de sus valores — el espacio
+                    señalado en la imagen de referencia. */}
+                <colgroup>
+                  <col style={{ width:'40%' }} />
+                  <col style={{ width:'18%' }} />
+                  <col style={{ width:'18%' }} />
+                  <col style={{ width:'24%' }} />
+                </colgroup>
                 <thead>
                   <tr style={{ borderBottom:'2px solid rgba(255,255,255,.1)' }}>
-                    {['Insumo','Unidad','Cantidad','Precio unit.','Subtotal'].map(h => (
-                      <th key={h} style={{ padding:'6px 8px',textAlign:'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
+                    {['Insumo','Unidad','Cantidad','Subtotal'].map((h, i) => (
+                      <th key={h} style={{ padding:'6px 8px',textAlign: i===3 ? 'right' : 'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {compra.items.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom:'1px solid rgba(255,255,255,.07)' }}>
+                  {(insumosExpandidos ? compra.items : compra.items.slice(0, LIMITE_INSUMOS_VISIBLES)).map((item, idx) => (
+                    <tr key={idx} style={{ borderBottom:'1px solid var(--border)' }}>
                       <td style={{ padding:'7px 8px',fontWeight:600 }}>{formatoTitulo(item.insumo)}</td>
                       <td style={{ padding:'7px 8px',color:'var(--text-muted)' }}>{item.unidad || '—'}</td>
                       <td style={{ padding:'7px 8px' }}>{item.cantidad}</td>
-                      <td style={{ padding:'7px 8px' }}>{formatCOP(item.precioUnitario)}</td>
-                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
+                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80',textAlign:'right' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
                     </tr>
                   ))}
+                  {!insumosExpandidos && compra.items.length > LIMITE_INSUMOS_VISIBLES && (
+                    <tr>
+                      <td colSpan="4" style={{ padding:'10px 8px', textAlign:'center' }}>
+                        <button type="button" onClick={() => setInsumosExpandidos(true)}
+                          style={{ background:'#4CAF50', color:'white', border:'none', borderRadius:20, padding:'6px 16px', fontSize:12.5, fontWeight:700, cursor:'pointer' }}>
+                          +{compra.items.length - LIMITE_INSUMOS_VISIBLES} más — ver todos
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop:'2px solid var(--border)',background:'var(--bg-hover)' }}>
-                    <td colSpan="4" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
-                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15 }}>{formatCOP(compra.total)}</td>
+                    <td colSpan="3" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
+                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15,textAlign:'right' }}>{formatCOP(compra.total)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -139,22 +161,58 @@ function ModalVerCompra({ compra, onClose }) {
             )}
           </div>
 
-          {/* Comprobante */}
-          {comprobanteUrl && (
-            <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
-              <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10 }}>Comprobante de compra</div>
-              <div style={{ position:'relative', width:'100%', maxHeight:260, borderRadius:8, overflow:'hidden', background:'var(--bg-surface-3)' }}>
-                <img src={comprobanteUrl} alt="Comprobante de compra" style={{ width:'100%', maxHeight:260, objectFit:'contain', display:'block', margin:'0 auto', cursor:'zoom-in' }} onClick={() => setZoomComprobante(true)} />
-                <button type="button" className="ilb-zoom-trigger" title="Ver completo / Zoom"
-                  onClick={() => setZoomComprobante(true)}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-                </button>
+          {/* Comprobante + resultado OCR */}
+          {comprobanteUrl && (() => {
+            const ocr = compra.ocrResultado || {};
+            const totalOcr = compra.comprobante_total_ocr ?? compra.comprobanteTotalOcr;
+            const diferencia = (totalOcr != null) ? Number(compra.total) - Number(totalOcr) : null;
+            const hayAdvertencias = ocr.advertencias && ocr.advertencias.length > 0;
+            const estadoTexto = hayAdvertencias ? 'Válido con advertencias' : (totalOcr != null ? 'Válido' : 'Sin verificar');
+            const estadoColor = hayAdvertencias ? '#C9A227' : (totalOcr != null ? '#4CAF50' : 'var(--text-muted)');
+            return (
+              <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14,display:'grid',gridTemplateColumns:'1fr auto',gap:20 }}>
+                <div>
+                  <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Resultado de validación OCR</div>
+                  {[
+                    ['Estado', <span style={{ color:estadoColor, fontWeight:700 }}>{hayAdvertencias ? '⚠ ' : ''}{estadoTexto}</span>],
+                    ['Confianza OCR', ocr.confianza != null ? `${ocr.confianza}% — ${ocr.confianza >= 70 ? 'Lectura confiable' : ocr.confianza >= 40 ? 'Lectura parcial' : 'Lectura poco confiable'}` : '—'],
+                    ['Total registrado', formatCOP(compra.total)],
+                    ['Total detectado', totalOcr != null ? formatCOP(totalOcr) : '—'],
+                    ['Diferencia', diferencia == null ? '—' : (diferencia === 0 ? 'Sin diferencia' : formatCOP(Math.abs(diferencia)))],
+                    ['Fecha detectada', ocr.fecha || '—'],
+                    ['NIT detectado', ocr.nit || '—'],
+                    ['Proveedor detectado', ocr.proveedorCoincide == null ? '—' : (ocr.proveedorCoincide ? 'Coincide con el proveedor registrado' : 'No coincide con el proveedor registrado')],
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13 }}>
+                      <span style={{ color:'var(--text-muted)' }}>{label}</span>
+                      <span style={{ fontWeight:600,color:'var(--text-primary)',textAlign:'right' }}>{val}</span>
+                    </div>
+                  ))}
+                  {hayAdvertencias && (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ fontSize:12.5,fontWeight:700,color:'var(--text-muted)',marginBottom:6 }}>Advertencias generadas durante el análisis</div>
+                      <ul style={{ margin:0,paddingLeft:18,display:'flex',flexDirection:'column',gap:4 }}>
+                        {ocr.advertencias.map((a, i) => <li key={i} style={{ fontSize:12.5,color:'#C9A227' }}>{a}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Comprobante original</div>
+                  <div style={{ position:'relative', width:130, height:130, borderRadius:8, overflow:'hidden', background:'var(--bg-surface-3)', border:'1px solid var(--border)' }}>
+                    <img src={comprobanteUrl} alt="Comprobante de compra" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block', cursor:'zoom-in' }} onClick={() => setZoomComprobante(true)} />
+                    <button type="button" className="ilb-zoom-trigger" title="Ver completo / Zoom"
+                      onClick={() => setZoomComprobante(true)}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                    </button>
+                  </div>
+                </div>
+                {zoomComprobante && (
+                  <ImageLightbox src={comprobanteUrl} alt="Comprobante de compra" onClose={() => setZoomComprobante(false)} />
+                )}
               </div>
-              {zoomComprobante && (
-                <ImageLightbox src={comprobanteUrl} alt="Comprobante de compra" onClose={() => setZoomComprobante(false)} />
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           <div style={{ display:'flex',justifyContent:'flex-end' }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
@@ -206,21 +264,6 @@ const HistorialComprasPage = () => {
         {verCompra && (
           <ModalVerCompra compra={verCompra} onClose={() => setVerCompra(null)} />
         )}
-
-        <button
-          onClick={() => navigate('/compras')}
-          style={{
-            display:'inline-flex', alignItems:'center', gap:6, marginBottom:16,
-            background:'var(--bg-surface-3, #f0ede8)', border:'1.5px solid var(--border, #ddd)',
-            borderRadius:10, padding:'8px 16px', fontSize:13, fontWeight:600,
-            color:'var(--text-secondary, #388E3C)', cursor:'pointer', transition:'all 0.2s',
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-          Volver a Compras
-        </button>
 
         <div className="breadcrumb" style={{ marginBottom:16,display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--text-muted)' }}>
           <button onClick={() => navigate('/compras')} style={{ background:'none',border:'none',cursor:'pointer',color:'#388E3C',fontWeight:600,padding:0,fontSize:13 }}>
@@ -316,7 +359,10 @@ const HistorialComprasPage = () => {
                               <span key={i} className="badge-insumo">{formatoTitulo(it.insumo)}</span>
                             ))}
                             {(c.items || []).length > 3 && (
-                              <span className="badge-insumo">+{c.items.length - 3}</span>
+                              <button type="button" onClick={() => setVerCompra(c)}
+                                className="badge-insumo" style={{ background:'#4CAF50', color:'white', border:'none', cursor:'pointer', fontWeight:700 }}>
+                                +{c.items.length - 3}
+                              </button>
                             )}
                           </div>
                         </td>
@@ -329,7 +375,7 @@ const HistorialComprasPage = () => {
                             </span>
                           ) : (
                             <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(46,125,50,.2)',color:'#81C784',border:'1px solid rgba(129,199,132,.3)' }}>
-                              Completada
+                              Registrada
                             </span>
                           )}
                         </td>
