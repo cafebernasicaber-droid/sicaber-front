@@ -93,20 +93,60 @@
 .form-actions { display: flex; gap: 12px; margin-top: 8px; }
 
 /* COLORS */
-.colors-grid { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+/* Grid fijo (no flex-wrap): filas uniformes con el mismo espaciado sin
+   importar cuántos colores queden en la última fila. */
+.colors-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 32px);
+  gap: 12px;
+  margin-top: 6px;
+}
 .color-dot {
   width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
-  border: 3px solid transparent; transition: all 0.2s;
+  padding: 0; box-sizing: border-box;
+  border: 3px solid transparent; outline-offset: 2px;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.color-dot--selected { border-color: var(--text-primary); transform: scale(1.15); }
+.color-dot:hover { transform: scale(1.08); }
+/* Indicador claro del color activo: borde grueso de alto contraste +
+   check blanco superpuesto (además del halo, para no depender solo del
+   contraste del borde contra colores claros como el amarillo). */
+.color-dot--selected {
+  border-color: var(--bg-surface, #fff);
+  box-shadow: 0 0 0 2.5px var(--text-primary);
+  transform: scale(1.12);
+}
 
 /* PERMISOS */
 .permisos-section { margin-top: 4px; }
 .permisos-section > label { font-size: 13px; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 12px; }
-.modulo-block { background: #faf8f5; border: 1px solid #ede8e1; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-.modulo-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+/* Acordeón: colapsado por defecto, padding/márgenes solo cuando el
+   módulo está abierto (evita una tira de "cajitas vacías" apiladas). */
+.modulo-block { background: #faf8f5; border: 1px solid #ede8e1; border-radius: 12px; padding: 4px 16px; margin-bottom: 8px; transition: background 0.15s; }
+.modulo-block--abierto { padding: 12px 16px 16px; background: #f6f2ec; }
+.modulo-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; }
+.modulo-block--abierto .modulo-header { margin-bottom: 12px; }
+
+/* Nombre del módulo + flecha: es el disparador del acordeón — botón, no
+   span, para que sea accesible por teclado (Enter/Espacio) además de
+   clic. */
+.modulo-name-btn {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: none; padding: 6px 4px; margin: -6px -4px;
+  cursor: pointer; text-align: left; border-radius: 6px;
+}
+.modulo-name-btn:hover { background: rgba(58,125,68,0.08); }
+.modulo-chevron { flex-shrink: 0; color: #3A7D44; transition: transform 0.18s ease; }
+.modulo-block--abierto .modulo-chevron { transform: rotate(90deg); }
 .modulo-name { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
-.modulo-toggle { font-size: 12px; color: #3A7D44; cursor: pointer; font-weight: 600; background: none; border: none; }
+/* Contador "(2/4)" — visible siempre, colapsado o abierto, para ver el
+   avance de un módulo sin necesidad de desplegarlo. Se resalta en verde
+   solo cuando tiene algo marcado, para que los módulos en cero no
+   compitan visualmente con los que sí tienen permisos. */
+.modulo-contador { font-size: 12px; font-weight: 600; color: var(--text-muted, #9a958a); }
+.modulo-contador--activo { color: #3A7D44; }
+.modulo-toggle { font-size: 12px; color: #3A7D44; cursor: pointer; font-weight: 600; background: none; border: none; flex-shrink: 0; }
 .modulo-permisos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
 .permiso-item { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; }
 .permiso-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: #3A7D44; cursor: pointer; }

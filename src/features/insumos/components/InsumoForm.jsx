@@ -46,6 +46,11 @@ const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
 const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  // Qué campos ya tocó el usuario (onChange en selects/checkbox, onBlur en
+  // texto) — solo esos muestran el check de válido; el mensaje de error, en
+  // cambio, se muestra apenas exista (incluido al enviar, para campos que
+  // el usuario nunca llegó a tocar).
+  const [touched, setTouched] = useState({});
   const [tamanoOzEsOtro, setTamanoOzEsOtro] = useState(false);
 
   useEffect(() => {
@@ -88,17 +93,29 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       .catch(() => setProveedores([]));
   }, []);
 
-  const validate = () => {
+  // Acepta un snapshot de formulario explícito (f) para poder validar el
+  // valor que se ACABA de escribir/seleccionar antes de que termine de
+  // aplicarse el setForm — así la validación en tiempo real siempre mira
+  // el valor real, no el de un render atrás.
+  const validate = (f = form) => {
     const errs = {};
-    if (!form.nombre.trim())      errs.nombre       = 'El nombre es obligatorio';
-    if (!form.categoria)          errs.categoria    = 'Selecciona una categoría';
-    if (form.unidadMedida === 'oz' && (form.tamanoOz === '' || isNaN(form.tamanoOz) || Number(form.tamanoOz) <= 0)) {
+    if (!f.nombre.trim())      errs.nombre       = 'El nombre es obligatorio';
+    if (!f.categoria)          errs.categoria    = 'Selecciona una categoría';
+    if (f.unidadMedida === 'oz' && (f.tamanoOz === '' || isNaN(f.tamanoOz) || Number(f.tamanoOz) <= 0)) {
       errs.tamanoOz = 'Selecciona o escribe el tamaño del vaso';
     }
-    if (!form.unidadMedida)       errs.unidadMedida = 'Selecciona una unidad de medida';
-    if (form.stockMinimo === '' || isNaN(form.stockMinimo) || Number(form.stockMinimo) < 1) errs.stockMinimo = 'El stock mínimo debe ser 1 o mayor';
-    if (proveedoresActivos.length > 0 && !form.proveedor.trim()) errs.proveedor = 'Selecciona un proveedor';
+    if (!f.unidadMedida)       errs.unidadMedida = 'Selecciona una unidad de medida';
+    if (f.stockMinimo === '' || isNaN(f.stockMinimo) || Number(f.stockMinimo) < 1) errs.stockMinimo = 'El stock mínimo debe ser 1 o mayor';
+    if (proveedoresActivos.length > 0 && !f.proveedor.trim()) errs.proveedor = 'Selecciona un proveedor';
     return errs;
+  };
+
+  // Marca el campo como tocado y recalcula SOLO su propio error/validez en
+  // tiempo real — un campo nunca queda "en rojo" por culpa de otro que
+  // apenas se está editando.
+  const touchAndValidate = (name, f = form) => {
+    setTouched(prev => ({ ...prev, [name]: true }));
+    setErrors(prev => ({ ...prev, [name]: validate(f)[name] || '' }));
   };
 
   const handleChange = (e) => {
@@ -114,27 +131,37 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     } else if (name === 'descripcion') {
       v = sinEspacioAlInicio(v).slice(0, DESCRIPCION_INSUMO_MAX);
     }
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : v }));
-    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
+    const newForm = { ...form, [name]: type === 'checkbox' ? checked : v };
+    setForm(newForm);
+    // Selects/checkbox son una elección completa apenas cambian — se
+    // validan de inmediato. Los campos de texto (nombre, descripción)
+    // solo limpian su error mientras se escribe; se validan al perder el
+    // foco (ver handleBlur), para no marcar error a mitad de tecleo.
+    if (type === 'checkbox' || name === 'unidadMedida') {
+      touchAndValidate(name, newForm);
+    } else if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
   };
+
+  // onBlur genérico para los campos de texto validados (nombre, stockMinimo).
+  const handleBlur = (e) => touchAndValidate(e.target.name);
 
   const handleCategoriaChange = (e) => {
     const selectedId = e.target.value;
     const cat = categoriasDisponibles.find(c => String(c.id) === selectedId);
     const nombreCat = cat ? cat.nombre : '';
-    setForm(prev => ({ ...prev, categoriaId: selectedId, categoria: nombreCat }));
-    if (errors.categoria) setErrors(prev => ({ ...prev, categoria: '' }));
+    const newForm = { ...form, categoriaId: selectedId, categoria: nombreCat };
+    setForm(newForm);
+    touchAndValidate('categoria', newForm);
   };
 
   const handleProveedorChange = (e) => {
     const selectedId = e.target.value;
     const prov = proveedores.find(p => String(p.id) === selectedId);
-    setForm(prev => ({
-      ...prev,
-      proveedorId: selectedId,
-      proveedor: prov ? prov.nombre : ''
-    }));
-    if (errors.proveedor) setErrors(prev => ({ ...prev, proveedor: '' }));
+    const newForm = { ...form, proveedorId: selectedId, proveedor: prov ? prov.nombre : '' };
+    setForm(newForm);
+    touchAndValidate('proveedor', newForm);
   };
 
   const handleSubmit = (e) => {
@@ -177,9 +204,11 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       <div className="form-grid">
         <div className={`fg ${errors.nombre ? 'fg-error' : ''}`}>
           <label>Nombre del insumo <span className="req">*</span></label>
-          <input type="text" name="nombre" value={form.nombre} onChange={handleChange} placeholder="Ej: Café tostado fino" maxLength={CAMPO_MAX} />
+          <input type="text" name="nombre" value={form.nombre} onChange={handleChange} onBlur={handleBlur} placeholder="Ej: Café tostado fino" maxLength={CAMPO_MAX} />
           <div style={{fontSize:11,color:enElTope(form.nombre,CAMPO_MAX)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.nombre,CAMPO_MAX)}</div>
-          {errors.nombre && <span className="err-msg">{errors.nombre}</span>}
+          {errors.nombre
+            ? <span className="err-msg">{errors.nombre}</span>
+            : touched.nombre && form.nombre.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div className={`fg ${errors.categoria ? 'fg-error' : ''}`}>
@@ -210,7 +239,9 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               {categoriasDisponibles.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           )}
-          {errors.categoria && <span className="err-msg">{errors.categoria}</span>}
+          {errors.categoria
+            ? <span className="err-msg">{errors.categoria}</span>
+            : touched.categoria && form.categoria && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div className={`fg ${errors.unidadMedida ? 'fg-error' : ''}`}>
@@ -243,7 +274,9 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               </div>
             </>
           )}
-          {errors.unidadMedida && <span className="err-msg">{errors.unidadMedida}</span>}
+          {errors.unidadMedida
+            ? <span className="err-msg">{errors.unidadMedida}</span>
+            : touched.unidadMedida && form.unidadMedida && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         {form.unidadMedida === 'oz' && (
@@ -253,14 +286,16 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               value={tamanoOzEsOtro ? 'otro' : (form.tamanoOz !== '' ? String(form.tamanoOz) : '')}
               onChange={e => {
                 const v = e.target.value;
+                let newForm;
                 if (v === 'otro') {
                   setTamanoOzEsOtro(true);
-                  setForm(prev => ({ ...prev, tamanoOz: '' }));
+                  newForm = { ...form, tamanoOz: '' };
                 } else {
                   setTamanoOzEsOtro(false);
-                  setForm(prev => ({ ...prev, tamanoOz: v }));
+                  newForm = { ...form, tamanoOz: v };
                 }
-                if (errors.tamanoOz) setErrors(prev => ({ ...prev, tamanoOz: '' }));
+                setForm(newForm);
+                touchAndValidate('tamanoOz', newForm);
               }}
             >
               <option value="">-- Seleccionar --</option>
@@ -271,10 +306,13 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               <input
                 type="number" step="0.1" placeholder="Escribe el tamaño en oz" style={{ marginTop: 8 }}
                 value={form.tamanoOz}
-                onChange={e => { setForm(prev => ({ ...prev, tamanoOz: e.target.value })); if (errors.tamanoOz) setErrors(prev => ({ ...prev, tamanoOz: '' })); }}
+                onChange={e => { const newForm = { ...form, tamanoOz: e.target.value }; setForm(newForm); if (errors.tamanoOz) setErrors(prev => ({ ...prev, tamanoOz: '' })); }}
+                onBlur={() => touchAndValidate('tamanoOz')}
               />
             )}
-            {errors.tamanoOz && <span className="err-msg">{errors.tamanoOz}</span>}
+            {errors.tamanoOz
+              ? <span className="err-msg">{errors.tamanoOz}</span>
+              : touched.tamanoOz && form.tamanoOz !== '' && <span className="ok-msg">✓ Válido</span>}
           </div>
         )}
 
@@ -299,7 +337,9 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               ))}
             </select>
           )}
-          {errors.proveedor && <span className="err-msg">{errors.proveedor}</span>}
+          {errors.proveedor
+            ? <span className="err-msg">{errors.proveedor}</span>
+            : touched.proveedor && form.proveedor.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         {isEditing && (
@@ -323,12 +363,15 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               if (val !== '' && Number(val) < 1) return;
               handleChange(e);
             }}
+            onBlur={handleBlur}
             placeholder="1" step="1"
           />
           <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
             Se mostrará alerta cuando el stock caiga por debajo de este valor
           </span>
-          {errors.stockMinimo && <span className="err-msg">{errors.stockMinimo}</span>}
+          {errors.stockMinimo
+            ? <span className="err-msg">{errors.stockMinimo}</span>
+            : touched.stockMinimo && form.stockMinimo !== '' && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div className="fg fg-estado">
@@ -372,7 +415,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </svg>
           Cancelar
         </button>
-        <button type="submit" className="btn-form-submit" disabled={noHayProveedores || categoriasDisponibles.length === 0}>
+        <button type="submit" className="btn-form-submit" disabled={noHayProveedores || categoriasDisponibles.length === 0 || Object.values(errors).some(Boolean)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             {isEditing
               ? <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>

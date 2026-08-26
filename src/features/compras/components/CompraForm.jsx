@@ -51,13 +51,16 @@ const normalizarTexto = (s) =>
   (s || '').toString().toLowerCase().normalize('NFD').replace(/[^\x00-\x7F]/g, '').trim();
 
 // ── "Comprar por presentación" — helpers ────────────────────────────────────
-// Subtotal SIEMPRE en la unidad en la que el usuario compró: en modo
-// "directo" es cantidad×precio por unidad real; en modo "presentación" es
+// Subtotal SIEMPRE en la unidad en la que el usuario compró. En modo
+// "directo" NO hay ningún cálculo: el usuario ingresa la cantidad adquirida
+// y el precio que pagó por ELLA (el precio ya es el costo total de esa
+// cantidad, no un precio unitario a multiplicar), así que el subtotal es el
+// precio tal cual. En modo "presentación" sí se calcula:
 // cantidad_presentaciones×precio_presentacion — nunca se convierte a la
 // unidad real para este cálculo (así lo pidió el negocio).
 const subtotalItem = (it) => it.modo === 'presentacion'
   ? Number(it.presentacionCantidad || 0) * Number(it.presentacionPrecio || 0)
-  : Number(it.cantidad || 0) * Number(it.precioUnitario || 0);
+  : Number(it.precioUnitario || 0);
 
 // Stock real que se sumará al insumo — solo informativo, se muestra pero no
 // se usa para el valor de la compra.
@@ -88,6 +91,14 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   // la tarjeta recién agregada en vez de dejar al usuario donde estaba.
   const itemRefs = useRef([]);
   const [errors, setErrors] = useState({});
+  // Qué campos ya tocó el usuario (proveedor, insumos, descuento) — solo
+  // esos muestran el check de válido; el error, en cambio, se muestra
+  // apenas exista (incluido al enviar, para campos nunca tocados).
+  const [touched, setTouched] = useState({});
+  // Toast breve que confirma que, al elegir un insumo que ya estaba en
+  // otra línea de esta compra, su cantidad se fusionó ahí en vez de crear
+  // una línea duplicada — ver handleInsumoSelect.
+  const [avisoInsumoRepetido, setAvisoInsumoRepetido] = useState('');
 
   // ── Comprobante de compra + validación OCR ──────────────────────────────
   const [comprobanteFile, setComprobanteFile]   = useState(null);
@@ -139,12 +150,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   // referencias) para no tener que tocar de nuevo cada punto que la usa.
   const comprobanteEsObligatorio = true;
 
-  const validate = () => {
-    const errs = {};
-    if (!form.proveedorNombre.trim()) errs.proveedorNombre = 'Selecciona un proveedor';
-    if (!form.fecha) errs.fecha = 'La fecha es obligatoria';
-    else if (form.fecha > getTodayStr()) errs.fecha = 'La fecha no puede ser futura — una compra es un hecho ya ocurrido';
-    const itemInvalido = form.items.some(it => {
+  // Compartida entre validate() (al enviar) y los handlers de items (en
+  // tiempo real, cada vez que cambia una línea) — un solo lugar con la
+  // regla de qué hace válida a una línea de insumo.
+  const validateItems = (items) => {
+    const itemInvalido = items.some(it => {
       if (!it.insumo.trim()) return true;
       if (it.modo === 'presentacion') {
         const cantidadPresentOk = it.presentacionCantidad !== '' && !isNaN(it.presentacionCantidad) &&
@@ -158,7 +168,19 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       return it.cantidad === '' || isNaN(it.cantidad) || Number(it.cantidad) <= 0 ||
         it.precioUnitario === '' || isNaN(it.precioUnitario) || Number(it.precioUnitario) < 1000;
     });
-    if (itemInvalido) errs.items = 'Revisa los insumos: cada uno necesita nombre, cantidad y precio válidos (mínimo $1.000).';
+    return itemInvalido ? 'Revisa los insumos: cada uno necesita nombre, cantidad y precio válidos (mínimo $1.000).' : '';
+  };
+
+  const validate = () => {
+    const errs = {};
+    if (!form.proveedorNombre.trim()) errs.proveedorNombre = 'Selecciona un proveedor';
+    if (!form.fecha) errs.fecha = 'La fecha es obligatoria';
+    // El campo solo admite HOY (ni pasada ni futura) — min/max en el input
+    // ya lo restringen, esto es el respaldo en JS por si el navegador no lo
+    // aplica del todo (ej. escritura manual del valor).
+    else if (form.fecha !== getTodayStr()) errs.fecha = 'Solo puedes registrar la compra con la fecha de hoy.';
+    const itemsErr = validateItems(form.items);
+    if (itemsErr) errs.items = itemsErr;
     if (descuento !== '' && (isNaN(descuento) || Number(descuento) < 0 || Number(descuento) > 100)) {
       errs.descuento = 'El descuento debe ser un porcentaje entre 0 y 100.';
     }
@@ -188,8 +210,17 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         proveedorNombre: prov ? prov.nombre : '',
         items:           [{ ...EMPTY_ITEM }]
       }));
+      setAvisoInsumoRepetido('');
+      // Elegir proveedor es una acción completa (select) — se valida de
+      // inmediato, sin esperar al submit. Además reinicia los insumos, así
+      // que el error de "items" (si había) ya no aplica.
+      setTouched(prev => ({ ...prev, proveedorNombre: true }));
+      setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor', items: '' }));
+      return;
     } else if (name === 'fecha') {
-      setForm(prev => ({ ...prev, fecha: value > getTodayStr() ? getTodayStr() : value }));
+      // Solo se acepta la fecha de hoy — cualquier otro valor (pasado o
+      // futuro) se descarta y el campo vuelve a quedar en la fecha actual.
+      setForm(prev => ({ ...prev, fecha: value === getTodayStr() ? value : getTodayStr() }));
     } else {
       setForm(prev => ({ ...prev, [name]: value }));
     }
@@ -214,83 +245,111 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   };
 
   const handleItemChange = (idx, field, value) => {
-    setForm(prev => {
-      const items = [...prev.items];
-      if (field === 'cantidad') {
-        // Punto 1: unidad "unidad" -> solo enteros (tope 999.999).
-        // Cualquier otra unidad -> hasta 2 decimales (tope 999.999,99).
-        const esUnidadEntera = items[idx].unidad === 'unidad';
-        const limpio = filtrarNumero(value, esUnidadEntera ? 0 : 2, esUnidadEntera ? 999999 : 999999.99);
-        items[idx] = { ...items[idx], cantidad: limpio };
-        // Si la cantidad queda inválida, limpiar precio
-        if (!limpio || Number(limpio) <= 0) {
-          items[idx].precioUnitario = '';
-        }
-      } else if (field === 'precioUnitario') {
-        // Punto 2: precio admite máximo 1 decimal, tope 999.999.999,9
-        items[idx] = { ...items[idx], precioUnitario: filtrarNumero(value, 1, 999999999.9) };
-      } else {
-        items[idx] = { ...items[idx], [field]: value };
+    const items = [...form.items];
+    if (field === 'cantidad') {
+      // Punto 1: unidad "unidad" -> solo enteros (tope 999.999).
+      // Cualquier otra unidad -> hasta 2 decimales (tope 999.999,99).
+      const esUnidadEntera = items[idx].unidad === 'unidad';
+      const limpio = filtrarNumero(value, esUnidadEntera ? 0 : 2, esUnidadEntera ? 999999 : 999999.99);
+      items[idx] = { ...items[idx], cantidad: limpio };
+      // Si la cantidad queda inválida, limpiar precio
+      if (!limpio || Number(limpio) <= 0) {
+        items[idx].precioUnitario = '';
       }
-      return { ...prev, items };
-    });
-    if (errors.items) setErrors(prev => ({ ...prev, items: '' }));
+    } else if (field === 'precioUnitario') {
+      // Punto 2: precio admite máximo 1 decimal, tope 999.999.999,9
+      items[idx] = { ...items[idx], precioUnitario: filtrarNumero(value, 1, 999999999.9) };
+    } else {
+      items[idx] = { ...items[idx], [field]: value };
+    }
+    setForm(prev => ({ ...prev, items }));
+    // Validación en tiempo real: cada tecla en cantidad/precio revalida de
+    // una vez toda la lista de insumos, sin esperar al submit.
+    setTouched(prev => ({ ...prev, items: true }));
+    setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
   const handleInsumoSelect = (idx, nombreInsumo) => {
     const insumo = todosInsumos.find(i => i.nombre === nombreInsumo);
-    setForm(prev => {
-      const items = [...prev.items];
-      items[idx] = {
-        ...items[idx],
-        insumo:         nombreInsumo,
-        insumoId:       insumo ? insumo.id : '',
-        unidad:         insumo ? (insumo.unidadMedida || '') : items[idx].unidad,
-        cantidad:       '',         // usuario ingresa cantidad
-        precioUnitario: '',         // usuario ingresa precio del día
-        // Cambiar de insumo empieza el modo de compra desde cero: "libre en
-        // cada compra" — no se arrastra ni el modo ni los datos de la
-        // presentación anterior.
-        modo: 'directo',
-        presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '',
-      };
-      return { ...prev, items };
-    });
-    if (errors.items) setErrors(prev => ({ ...prev, items: '' }));
+
+    // No permitir el mismo insumo dos veces en la compra: si ya está en
+    // otra línea, NO se agrega como línea nueva — se fusiona sumando la
+    // cantidad que el usuario ya haya escrito en esta línea a la cantidad
+    // de la línea existente, se descarta esta línea duplicada y se avisa
+    // con un toast breve (no bloquea, solo evita la duplicación).
+    const idxExistente = insumo
+      ? form.items.findIndex((it, i) => i !== idx && it.insumoId && String(it.insumoId) === String(insumo.id))
+      : -1;
+    if (idxExistente !== -1) {
+      const existente = form.items[idxExistente];
+      const esUnidadEntera = existente.unidad === 'unidad';
+      const cantidadNueva = Number(form.items[idx].cantidad) || 0;
+      const cantidadPrevia = Number(existente.cantidad) || 0;
+      const cantidadSumada = filtrarNumero(
+        String(cantidadPrevia + cantidadNueva),
+        esUnidadEntera ? 0 : 2,
+        esUnidadEntera ? 999999 : 999999.99
+      );
+      const items = form.items
+        .map((it, i) => i === idxExistente ? { ...it, cantidad: cantidadSumada } : it)
+        .filter((_, i) => i !== idx);
+      setForm(prev => ({ ...prev, items }));
+      setAvisoInsumoRepetido('Se sumó la cantidad al insumo que ya tenías agregado.');
+      setTimeout(() => setAvisoInsumoRepetido(''), 3000);
+      setTouched(prev => ({ ...prev, items: true }));
+      setErrors(prev => ({ ...prev, items: validateItems(items) }));
+      return;
+    }
+
+    const items = [...form.items];
+    items[idx] = {
+      ...items[idx],
+      insumo:         nombreInsumo,
+      insumoId:       insumo ? insumo.id : '',
+      unidad:         insumo ? (insumo.unidadMedida || '') : items[idx].unidad,
+      cantidad:       '',         // usuario ingresa cantidad
+      precioUnitario: '',         // usuario ingresa precio del día
+      // Cambiar de insumo empieza el modo de compra desde cero: "libre en
+      // cada compra" — no se arrastra ni el modo ni los datos de la
+      // presentación anterior.
+      modo: 'directo',
+      presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '',
+    };
+    setForm(prev => ({ ...prev, items }));
+    setTouched(prev => ({ ...prev, items: true }));
+    setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
   // Alterna Directo <-> Por presentación para un ítem. Limpia los campos del
   // modo que se abandona para no arrastrar datos a medio llenar.
   const handleModoChange = (idx, modo) => {
-    setForm(prev => {
-      const items = [...prev.items];
-      items[idx] = modo === 'presentacion'
-        ? { ...items[idx], modo, cantidad: '', precioUnitario: '' }
-        : { ...items[idx], modo, presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '' };
-      return { ...prev, items };
-    });
-    if (errors.items) setErrors(prev => ({ ...prev, items: '' }));
+    const items = [...form.items];
+    items[idx] = modo === 'presentacion'
+      ? { ...items[idx], modo, cantidad: '', precioUnitario: '' }
+      : { ...items[idx], modo, presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '' };
+    setForm(prev => ({ ...prev, items }));
+    setTouched(prev => ({ ...prev, items: true }));
+    setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
   const handlePresentacionChange = (idx, field, value) => {
-    setForm(prev => {
-      const items = [...prev.items];
-      let v = value;
-      if (field === 'presentacionCantidad') {
-        // Cantidad de cajas/paquetes/etc.: siempre entero
-        v = filtrarNumero(value, 0, 999999);
-      } else if (field === 'presentacionContenido') {
-        // Contenido por presentación: entero si la unidad real es "unidad",
-        // hasta 2 decimales si es kg/g/lb/oz/L/mL.
-        v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
-      } else if (field === 'presentacionPrecio') {
-        // Precio: máximo 1 decimal, mismo tope que el precio directo.
-        v = filtrarNumero(value, 1, 999999999.9);
-      }
-      items[idx] = { ...items[idx], [field]: v };
-      return { ...prev, items };
-    });
-    if (errors.items) setErrors(prev => ({ ...prev, items: '' }));
+    const items = [...form.items];
+    let v = value;
+    if (field === 'presentacionCantidad') {
+      // Cantidad de cajas/paquetes/etc.: siempre entero
+      v = filtrarNumero(value, 0, 999999);
+    } else if (field === 'presentacionContenido') {
+      // Contenido por presentación: entero si la unidad real es "unidad",
+      // hasta 2 decimales si es kg/g/lb/oz/L/mL.
+      v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
+    } else if (field === 'presentacionPrecio') {
+      // Precio: máximo 1 decimal, mismo tope que el precio directo.
+      v = filtrarNumero(value, 1, 999999999.9);
+    }
+    items[idx] = { ...items[idx], [field]: v };
+    setForm(prev => ({ ...prev, items }));
+    setTouched(prev => ({ ...prev, items: true }));
+    setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
   const addItem = () => {
@@ -305,7 +364,10 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
   const removeItem = (idx) => {
     if (form.items.length === 1) return;
-    setForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
+    const items = form.items.filter((_, i) => i !== idx);
+    setForm(prev => ({ ...prev, items }));
+    setAvisoInsumoRepetido('');
+    if (touched.items) setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
   const totalBruto = (form.items || []).reduce((sum, it) => sum + subtotalItem(it), 0);
@@ -472,10 +534,19 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         },
       };
     }
+    // Modo directo: el precio ingresado es el costo TOTAL de la cantidad
+    // adquirida (no un precio por unidad), así que en el formulario no se
+    // multiplica (ver subtotalItem). Para que el resto del sistema
+    // (historial, listados) siga trabajando en "cantidad × precio por
+    // unidad" y muestre el mismo total sin perder el valor exacto pagado,
+    // aquí se deriva el precio unitario (precio total / cantidad) — mismo
+    // patrón que ya usa el modo "presentación" arriba.
+    const cantidadNum = parseInt(it.cantidad, 10) || 0;
+    const precioTotalDirecto = Number(it.precioUnitario) || 0;
     return {
       insumo: it.insumo, unidad: it.unidad,
-      cantidad: parseInt(it.cantidad, 10),
-      precioUnitario: Number(it.precioUnitario),
+      cantidad: cantidadNum,
+      precioUnitario: cantidadNum > 0 ? precioTotalDirecto / cantidadNum : 0,
     };
   };
 
@@ -534,6 +605,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
   return (
     <>
+    {avisoInsumoRepetido && <div className="toast toast-success">✓ {avisoInsumoRepetido}</div>}
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
       <div className="form-grid">
 
@@ -551,16 +623,21 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
               ⚠ No hay proveedores activos registrados.
             </div>
           )}
-          {errors.proveedorNombre && <span className="err-msg">{errors.proveedorNombre}</span>}
+          {errors.proveedorNombre
+            ? <span className="err-msg">{errors.proveedorNombre}</span>
+            : touched.proveedorNombre && form.proveedorNombre && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div className={`fg ${errors.fecha ? 'fg-error' : ''}`}>
           <label>Fecha de compra <span className="req">*</span></label>
           <input
             type="date" name="fecha" value={form.fecha}
-            max={getTodayStr()}
+            min={getTodayStr()} max={getTodayStr()}
             onChange={handleChange}
           />
+          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+            Solo puedes registrar la compra con la fecha de hoy.
+          </span>
           {errors.fecha && <span className="err-msg">{errors.fecha}</span>}
         </div>
 
@@ -603,7 +680,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           </div>
         )}
 
-        {errors.items && <div className="items-error-msg">{errors.items}</div>}
+        {errors.items
+          ? <div className="items-error-msg">{errors.items}</div>
+          : touched.items && <div className="ok-msg" style={{ padding: '4px 18px 0' }}>✓ Insumos válidos</div>}
 
         <div className="items-table-head">
           <span>Insumo</span>
@@ -685,7 +764,8 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                     const cantidadValida = item.cantidad !== '' && !isNaN(item.cantidad) && Number(item.cantidad) >= 1 && Number.isInteger(Number(item.cantidad));
                     return (
                       <input
-                        type="number" placeholder={cantidadValida ? 'Mín. $1.000' : 'Ingresa cantidad primero'} step="1"
+                        type="number" placeholder={cantidadValida ? 'Precio total pagado (mín. $1.000)' : 'Ingresa cantidad primero'} step="1"
+                        title="Costo total pagado por la cantidad ingresada — no un precio por unidad."
                         value={item.precioUnitario}
                         disabled={!cantidadValida}
                         onChange={e => handleItemChange(idx, 'precioUnitario', e.target.value)}
@@ -799,6 +879,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                   }
                   setDescuento(v);
                   if (errors.descuento) setErrors(prev => ({ ...prev, descuento: '' }));
+                }}
+                onBlur={() => {
+                  setTouched(prev => ({ ...prev, descuento: true }));
+                  const invalido = descuento !== '' && (isNaN(descuento) || Number(descuento) < 0 || Number(descuento) > 100);
+                  setErrors(prev => ({ ...prev, descuento: invalido ? 'El descuento debe ser un porcentaje entre 0 y 100.' : '' }));
                 }}
                 onKeyDown={e => { if (e.key === '-' || e.key === 'e' || e.key === '+') e.preventDefault(); }}
                 style={{ width: 70, padding: '5px 8px', borderRadius: 6, border: `1.5px solid ${errors.descuento ? '#EF5350' : 'var(--border-input)'}`, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
@@ -987,7 +1072,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           </svg>
           Cancelar
         </button>
-        <button type="submit" className="btn-form-submit" disabled={procesandoOCR || subiendoComprobante || (comprobanteEsObligatorio && !comprobanteFile) || (comprobanteFile && !comprobanteOk && !confirmarPeseAdvertencia)}>
+        <button type="submit" className="btn-form-submit" disabled={procesandoOCR || subiendoComprobante || (comprobanteEsObligatorio && !comprobanteFile) || (comprobanteFile && !comprobanteOk && !confirmarPeseAdvertencia) || Object.values(errors).some(Boolean)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>

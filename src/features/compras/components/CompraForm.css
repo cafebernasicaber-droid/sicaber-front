@@ -53,6 +53,12 @@
   font-weight: 500;
 }
 
+.ok-msg {
+  font-size: 12px;
+  color: #4CAF50;
+  font-weight: 500;
+}
+
 /* ESTADO TOGGLE */
 .fg-estado { justify-content: flex-start; }
 
