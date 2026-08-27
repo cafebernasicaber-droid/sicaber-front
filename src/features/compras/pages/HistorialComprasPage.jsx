@@ -110,32 +110,32 @@ function ModalVerCompra({ compra, onClose }) {
           <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de insumos</div>
             {compra.items && compra.items.length > 0 ? (
-              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13,tableLayout:'fixed' }}>
-                {/* Anchos fijos por columna: antes, al no declarar un ancho
-                    para cada columna, el navegador le asignaba todo el
-                    espacio sobrante a "Subtotal" (la última), dejando una
-                    franja vacía a la derecha de sus valores — el espacio
-                    señalado en la imagen de referencia. */}
-                <colgroup>
-                  <col style={{ width:'40%' }} />
-                  <col style={{ width:'18%' }} />
-                  <col style={{ width:'18%' }} />
-                  <col style={{ width:'24%' }} />
-                </colgroup>
+              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13 }}>
                 <thead>
                   <tr style={{ borderBottom:'2px solid rgba(255,255,255,.1)' }}>
-                    {['Insumo','Unidad','Cantidad','Subtotal'].map((h, i) => (
-                      <th key={h} style={{ padding:'6px 8px',textAlign: i===3 ? 'right' : 'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
+                    {['Insumo','Unidad','Cantidad','Subtotal'].map(h => (
+                      <th key={h} style={{ padding:'6px 8px',textAlign:'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {(insumosExpandidos ? compra.items : compra.items.slice(0, LIMITE_INSUMOS_VISIBLES)).map((item, idx) => (
                     <tr key={idx} style={{ borderBottom:'1px solid var(--border)' }}>
-                      <td style={{ padding:'7px 8px',fontWeight:600 }}>{formatoTitulo(item.insumo)}</td>
+                      <td style={{ padding:'7px 8px' }}>
+                        <div style={{ fontWeight:600 }}>{formatoTitulo(item.insumo)}</div>
+                        {item.presentacion && (
+                          <div style={{ fontSize:11,color:'var(--text-muted)',marginTop:2 }}>
+                            {item.presentacion.tipo === 'Unitario'
+                              ? `Unitario (sin presentación) — ${item.presentacion.contenidoPorPresentacion} ${item.unidad}`
+                              : item.presentacion.unidadesInternasPorPresentacion
+                                ? `${item.presentacion.cantidad} ${item.presentacion.tipo}(s) × ${item.presentacion.unidadesInternasPorPresentacion} × ${item.presentacion.contenidoPorUnidadInterna} ${item.unidad}`
+                                : `${item.presentacion.cantidad} ${item.presentacion.tipo}(s) × ${item.presentacion.contenidoPorPresentacion} ${item.unidad}`}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding:'7px 8px',color:'var(--text-muted)' }}>{item.unidad || '—'}</td>
                       <td style={{ padding:'7px 8px' }}>{item.cantidad}</td>
-                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80',textAlign:'right' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
+                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
                     </tr>
                   ))}
                   {!insumosExpandidos && compra.items.length > LIMITE_INSUMOS_VISIBLES && (
@@ -151,8 +151,8 @@ function ModalVerCompra({ compra, onClose }) {
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop:'2px solid var(--border)',background:'var(--bg-hover)' }}>
-                    <td colSpan="3" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
-                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15,textAlign:'right' }}>{formatCOP(compra.total)}</td>
+                    <td colSpan="4" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
+                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15 }}>{formatCOP(compra.total)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -175,7 +175,12 @@ function ModalVerCompra({ compra, onClose }) {
                   <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Resultado de validación OCR</div>
                   {[
                     ['Estado', <span style={{ color:estadoColor, fontWeight:700 }}>{hayAdvertencias ? '⚠ ' : ''}{estadoTexto}</span>],
-                    ['Confianza OCR', ocr.confianza != null ? `${ocr.confianza}% — ${ocr.confianza >= 70 ? 'Lectura confiable' : ocr.confianza >= 40 ? 'Lectura parcial' : 'Lectura poco confiable'}` : '—'],
+                    ['Confianza OCR', ocr.confianza != null ? `${ocr.confianza}% — ${(() => {
+                      const n = (ocr.advertencias || []).length;
+                      if (n === 0) return 'Lectura confiable';
+                      if (n === 1) return 'Lectura con una inconsistencia';
+                      return 'Lectura con varias inconsistencias';
+                    })()}` : '—'],
                     ['Total registrado', formatCOP(compra.total)],
                     ['Total detectado', totalOcr != null ? formatCOP(totalOcr) : '—'],
                     ['Diferencia', diferencia == null ? '—' : (diferencia === 0 ? 'Sin diferencia' : formatCOP(Math.abs(diferencia)))],

@@ -93,20 +93,60 @@
 .form-actions { display: flex; gap: 12px; margin-top: 8px; }
 
 /* COLORS */
-.colors-grid { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+/* Grid fijo (no flex-wrap): filas uniformes con el mismo espaciado sin
+   importar cuántos colores queden en la última fila. */
+.colors-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 32px);
+  gap: 12px;
+  margin-top: 6px;
+}
 .color-dot {
   width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
-  border: 3px solid transparent; transition: all 0.2s;
+  padding: 0; box-sizing: border-box;
+  border: 3px solid transparent; outline-offset: 2px;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.color-dot--selected { border-color: var(--text-primary); transform: scale(1.15); }
+.color-dot:hover { transform: scale(1.08); }
+/* Indicador claro del color activo: borde grueso de alto contraste +
+   check blanco superpuesto (además del halo, para no depender solo del
+   contraste del borde contra colores claros como el amarillo). */
+.color-dot--selected {
+  border-color: var(--bg-surface, #fff);
+  box-shadow: 0 0 0 2.5px var(--text-primary);
+  transform: scale(1.12);
+}
 
 /* PERMISOS */
 .permisos-section { margin-top: 4px; }
 .permisos-section > label { font-size: 13px; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 12px; }
-.modulo-block { background: #faf8f5; border: 1px solid #ede8e1; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-.modulo-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+/* Acordeón: colapsado por defecto, padding/márgenes solo cuando el
+   módulo está abierto (evita una tira de "cajitas vacías" apiladas). */
+.modulo-block { background: #faf8f5; border: 1px solid #ede8e1; border-radius: 12px; padding: 4px 16px; margin-bottom: 8px; transition: background 0.15s; }
+.modulo-block--abierto { padding: 12px 16px 16px; background: #f6f2ec; }
+.modulo-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; }
+.modulo-block--abierto .modulo-header { margin-bottom: 12px; }
+
+/* Nombre del módulo + flecha: es el disparador del acordeón — botón, no
+   span, para que sea accesible por teclado (Enter/Espacio) además de
+   clic. */
+.modulo-name-btn {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: none; padding: 6px 4px; margin: -6px -4px;
+  cursor: pointer; text-align: left; border-radius: 6px;
+}
+.modulo-name-btn:hover { background: rgba(58,125,68,0.08); }
+.modulo-chevron { flex-shrink: 0; color: #3A7D44; transition: transform 0.18s ease; }
+.modulo-block--abierto .modulo-chevron { transform: rotate(90deg); }
 .modulo-name { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
-.modulo-toggle { font-size: 12px; color: #3A7D44; cursor: pointer; font-weight: 600; background: none; border: none; }
+/* Contador "(2/4)" — visible siempre, colapsado o abierto, para ver el
+   avance de un módulo sin necesidad de desplegarlo. Se resalta en verde
+   solo cuando tiene algo marcado, para que los módulos en cero no
+   compitan visualmente con los que sí tienen permisos. */
+.modulo-contador { font-size: 12px; font-weight: 600; color: var(--text-muted, #9a958a); }
+.modulo-contador--activo { color: #3A7D44; }
+.modulo-toggle { font-size: 12px; color: #3A7D44; cursor: pointer; font-weight: 600; background: none; border: none; flex-shrink: 0; }
 .modulo-permisos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
 .permiso-item { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 0; }
 .permiso-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: #3A7D44; cursor: pointer; }
@@ -132,6 +172,55 @@
   cursor: pointer; transition: all 0.2s;
 }
 .btn-back:hover { background: var(--bg-surface-3); }
+
+/* VER ROL — rediseño en 2 columnas: resumen del rol a la izquierda,
+   módulos y permisos a la derecha, para aprovechar el ancho disponible
+   en vez de dejar espacio vacío junto a una tarjeta angosta. */
+.ver-rol-root { max-width: 1100px; }
+.ver-rol-grid { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
+
+.ver-card.ver-rol-summary {
+  max-width: none; display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 32px 26px;
+}
+.ver-icon--lg { width: 72px; height: 72px; font-size: 34px; border-radius: 18px; }
+.ver-rol-summary .ver-nombre { font-size: 22px; }
+.ver-rol-summary .ver-desc { max-width: 220px; }
+
+.ver-rol-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%;
+  margin-top: 22px; padding-top: 20px; border-top: 1px solid #f0ede8;
+}
+.ver-rol-stat { background: var(--bg-surface-2); border-radius: 12px; padding: 12px 8px; }
+.ver-rol-stat__num { font-size: 22px; font-weight: 800; line-height: 1.2; }
+.ver-rol-stat__label { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+.ver-rol-meta {
+  display: flex; align-items: center; gap: 6px; margin-top: 18px;
+  font-size: 12px; color: var(--text-muted);
+}
+
+.ver-card.ver-rol-modulos { max-width: none; }
+.ver-rol-modulos__title {
+  display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700;
+  color: var(--text-primary); margin-bottom: 18px; padding-bottom: 16px;
+  border-bottom: 1px solid #f0ede8;
+}
+.ver-rol-modulos__count {
+  background: var(--bg-surface-3); color: var(--text-secondary); font-size: 12px;
+  font-weight: 700; border-radius: 100px; padding: 2px 10px;
+}
+.ver-rol-empty { color: var(--text-muted); font-size: 13px; padding: 30px 0; text-align: center; }
+
+.ver-modulo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.ver-modulo-card {
+  background: var(--bg-surface-2); border: 1px solid var(--border-2);
+  border-radius: 14px; padding: 14px 16px;
+}
+
+@media (max-width: 900px) {
+  .ver-rol-grid { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 600px) {
   .form-row { grid-template-columns: 1fr; }

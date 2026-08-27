@@ -347,9 +347,11 @@ export default function ProductosPage() {
   const [query,     setQuery]     = useState('');
   const [catFilter, setCatFilter] = useState('Todas');
   // Filtro por precio (columna "Precio" ya visible en la tabla/tarjeta) —
-  // rango mín/máx además de la búsqueda por nombre.
-  const [precioMin, setPrecioMin] = useState('');
-  const [precioMax, setPrecioMax] = useState('');
+  // en vez de un rango mín/máx, el usuario escribe el inicio del precio
+  // (ej. "3" o "15") y se arma el rango de miles automáticamente (misma
+  // regla que ya aplica el Backend en el endpoint público /productos:
+  // "3" → $3.000-$3.999, "15" → $15.000-$15.999).
+  const [busquedaPrecio, setBusquedaPrecio] = useState('');
   // Filtro "solo con descuento activo" — reusa descuentoVigente (misma
   // columna "Descuento" ya visible en la tabla/tarjeta), así que un
   // descuento programado a futuro o ya vencido no cuenta como activo.
@@ -385,8 +387,13 @@ export default function ProductosPage() {
     : productos;
   if (catFilter !== 'Todas') shown = shown.filter(p => p.categoria === catFilter);
   if (estadoFiltro !== 'Todos') shown = shown.filter(p => (p.estado || 'Activo') === estadoFiltro);
-  if (precioMin !== '') shown = shown.filter(p => Number(p.precio) >= Number(precioMin));
-  if (precioMax !== '') shown = shown.filter(p => Number(p.precio) <= Number(precioMax));
+  // "3" -> 3000-3999, "15" -> 15000-15999: el número escrito se toma como
+  // el precio sin sus últimos 3 dígitos y se arma el rango completo.
+  const digitosPrecio = busquedaPrecio.trim();
+  if (digitosPrecio !== '' && /^\d+$/.test(digitosPrecio)) {
+    const base = Number(digitosPrecio) * 1000;
+    shown = shown.filter(p => Number(p.precio) >= base && Number(p.precio) <= base + 999);
+  }
   if (soloDescuento) shown = shown.filter(p => descuentoVigente(p) !== null);
   const sorted     = [...shown].sort((a, b) => Number(b.id) - Number(a.id));
   const totalPages = Math.ceil(sorted.length / PER_PAGE);
@@ -495,24 +502,21 @@ export default function ProductosPage() {
             <option value="Inactivo">Inactivos</option>
           </select>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="number" placeholder="Precio mín." value={precioMin}
-              onChange={e => { setPrecioMin(e.target.value); setPage(1); }}
-              style={{ width: 110, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
-            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>–</span>
-            <input type="number" placeholder="Precio máx." value={precioMax}
-              onChange={e => { setPrecioMax(e.target.value); setPage(1); }}
-              style={{ width: 110, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
-            {(precioMin !== '' || precioMax !== '') && (
-              <button className="search-clear" onClick={() => { setPrecioMin(''); setPrecioMax(''); setPage(1); }}>✕</button>
+            <input type="text" inputMode="numeric" placeholder="Buscar por inicio del precio (ej. 3, 15)" value={busquedaPrecio}
+              onChange={e => { setBusquedaPrecio(e.target.value.replace(/[^\d]/g, '')); setPage(1); }}
+              title="Escribe el inicio del precio: 3 muestra $3.000-$3.999, 15 muestra $15.000-$15.999"
+              style={{ width: 210, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
+            {busquedaPrecio !== '' && (
+              <button className="search-clear" onClick={() => { setBusquedaPrecio(''); setPage(1); }}>✕</button>
             )}
           </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             <input type="checkbox" checked={soloDescuento} onChange={e => { setSoloDescuento(e.target.checked); setPage(1); }}/>
             Solo con descuento activo
           </label>
-          {(query || catFilter !== 'Todas' || estadoFiltro !== 'Todos' || precioMin !== '' || precioMax !== '' || soloDescuento) && (
+          {(query || catFilter !== 'Todas' || estadoFiltro !== 'Todos' || busquedaPrecio !== '' || soloDescuento) && (
             <button className="btn-limpiar-filtros" title="Limpiar filtros"
-              onClick={() => { setQuery(''); setCatFilter('Todas'); setEstadoFiltro('Todos'); setPrecioMin(''); setPrecioMax(''); setSoloDescuento(false); setPage(1); }}>
+              onClick={() => { setQuery(''); setCatFilter('Todas'); setEstadoFiltro('Todos'); setBusquedaPrecio(''); setSoloDescuento(false); setPage(1); }}>
               ✕ Limpiar filtros
             </button>
           )}

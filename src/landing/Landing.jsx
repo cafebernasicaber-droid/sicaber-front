@@ -11,7 +11,6 @@ import adicionesService from '../features/adiciones/services/adicionesService';
 import pedidosService from '../features/pedidos/services/pedidosService';
 import localesService from '../shared/services/localesService';
 import categoriasService from '../features/categorias/services/categoriasService';
-import resenasService from '../features/resenas/services/resenasService';
 import combosService from '../features/adiciones/services/combosService';
 import ventasService from '../features/ventas/services/ventasService';
 import devolucionesService from '../features/devoluciones/services/devolucionesService';
@@ -39,6 +38,21 @@ const formatFecha = (iso) => {
   const [y, m, d] = f.split('-');
   if (!y || !m || !d) return null;
   return `${d}/${m}/${y}`;
+};
+
+// El Backend (GET /combos) ya filtra los combos por fecha_inicio/fecha_fin
+// antes de devolverlos, así que esto NO es lo que decide si un combo se
+// vende o no — es solo una segunda capa visual por si algún combo llegara
+// sin filtrar (ej. una respuesta cacheada). Comparando strings "YYYY-MM-DD"
+// en vez de objetos Date se evita cualquier corrimiento de un día por zona
+// horaria al comparar la fecha del combo contra "hoy".
+const comboDisponible = (combo) => {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const inicio = soloFecha(combo.fecha_inicio || combo.fechaInicio);
+  const fin    = soloFecha(combo.fecha_fin    || combo.fechaFin);
+  if (inicio && hoy < inicio) return false;
+  if (fin    && hoy > fin)    return false;
+  return true;
 };
 
 function CartThumb({ src, alt }) {
@@ -914,15 +928,6 @@ export default function Landing() {
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
   const [editLoading, setEditLoading] = useState(false);
-  const [resenas, setResenas] = useState([]);
-  const [reviewForm, setReviewForm] = useState({ texto: '', estrellas: 0 });
-  const [reviewHover, setReviewHover] = useState(0);
-  const [reviewError, setReviewError] = useState('');
-  const [reviewSuccess, setReviewSuccess] = useState('');
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const [showReviewForm, setShowReviewForm] = useState(false);
-  const [reviewPage, setReviewPage] = useState(1);
-  const REVIEWS_PER_PAGE = 3;
 
   // Solicitud de devolución del cliente
   const [devPedido, setDevPedido] = useState(null);       // pedido sobre el que se solicita devolución
@@ -978,7 +983,7 @@ export default function Landing() {
       .then(d => setProducts(Array.isArray(d) ? d : []))
       .catch(() => setProducts([]));
     combosService.getActivos()
-      .then(d => setCombos(Array.isArray(d) ? d : []))
+      .then(d => setCombos(Array.isArray(d) ? d.filter(comboDisponible) : []))
       .catch(() => setCombos([]));
     categoriasService.getAll()
       .then(d => setCategorias(Array.isArray(d) ? d.filter(c => c.estado === 'Activo') : []))
@@ -1021,10 +1026,6 @@ export default function Landing() {
     const fn = () => setScrollY(window.scrollY);
     window.addEventListener("scroll", fn, { passive:true });
     return () => window.removeEventListener("scroll", fn);
-  }, []);
-
-  useEffect(() => {
-    resenasService.getAprobadas().then(data => setResenas(Array.isArray(data) ? data : [])).catch(() => {});
   }, []);
 
   // Revisa si el admin o el cajero confirmaron/rechazaron una transferencia
@@ -1483,21 +1484,6 @@ const handleLogin = async e => {
   };
   const finalizarPedido = () => { if (!clienteSession) { setCartOpen(false); setModal("auth"); setAuthTab("login"); showToast("Inicia sesión para continuar"); return; } setCartOpen(false); playTransition(() => setShowPasarela(true)); };
   const onPedidoSuccess = (cerrar = true) => { if (cerrar) setShowPasarela(false); setCart([]); showToast("¡Pedido creado! Pronto nos comunicamos."); };
-
-  const handleSubmitReview = async e => {
-    e.preventDefault(); setReviewError(''); setReviewSuccess('');
-    if (!clienteSession) { setModal('auth'); setAuthTab('login'); return; }
-    if (!reviewForm.texto.trim()) { setReviewError('Escribe tu experiencia antes de enviar la reseña.'); return; }
-    if (!reviewForm.estrellas || reviewForm.estrellas < 1) { setReviewError('Selecciona una calificación en estrellas.'); return; }
-    setReviewLoading(true);
-    const r = await resenasService.create({ clienteId: clienteSession.id, nombre: clienteSession.nombre, rol: 'Cliente verificado', texto: reviewForm.texto, estrellas: reviewForm.estrellas });
-    setReviewLoading(false);
-    if (r.error) { setReviewError(r.error); return; }
-    resenasService.getAprobadas().then(data => setResenas(Array.isArray(data) ? data : []));
-    setReviewSuccess('¡Gracias por tu reseña!');
-    setReviewForm({ texto: '', estrellas: 0 });
-    setTimeout(() => { setShowReviewForm(false); setReviewSuccess(''); }, 2000);
-  };
 
   return (
     <div className="lx">
@@ -2020,90 +2006,6 @@ const handleLogin = async e => {
             <p style={{marginTop:16}}>Hoy somos el referente de cafetería artesanal en Medellín, con un menú que mezcla lo clásico y lo innovador.</p>
             <div className="lx-about__chips">{["Ingredientes naturales","Baristas certificados","Recetas propias","Comercio justo"].map(c => <span className="lx-about__chip" key={c}>✓ {c}</span>)}</div>
           </div>
-        </div>
-      </section>
-
-      {/* ── Reseñas ── */}
-      <section className="lx-section lx-reviews">
-        <div className="lx-section__in">
-          <div className="lx-reviews-header">
-            <div>
-              <div className="lx-section__tag">Testimonios</div>
-              <h2 className="lx-section__h2">Lo que dicen<br/><em>nuestros clientes</em></h2>
-            </div>
-            {clienteSession && !resenasService.yaReseño(clienteSession.id, resenas) && (
-              <button className="lx-review-add-btn" onClick={() => setShowReviewForm(v => !v)}>
-                {showReviewForm ? (
-                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Cancelar</>
-                ) : (
-                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Dejar mi reseña</>
-                )}
-              </button>
-            )}
-            {clienteSession && resenasService.yaReseño(clienteSession.id, resenas) && (
-              <div className="lx-review-done-badge">✓ Ya dejaste tu reseña</div>
-            )}
-          </div>
-          {showReviewForm && clienteSession && (
-            <form className="lx-review-form" onSubmit={handleSubmitReview}>
-              <div className="lx-review-form__top">
-                <div className="lx-review__av" style={{width:44,height:44,fontSize:18}}>{clienteSession.nombre.charAt(0).toUpperCase()}</div>
-                <div><div style={{fontWeight:700,fontSize:14,color:'var(--ink)'}}>{clienteSession.nombre}</div><div style={{fontSize:12,color:'var(--muted)'}}>Cliente verificado</div></div>
-              </div>
-              <div className="lx-review-stars-pick">
-                <span style={{fontSize:13,color:'var(--muted)',fontWeight:600}}>Tu calificación:</span>
-                <div className="lx-stars-row">
-                  {[1,2,3,4,5].map(n => (
-                    <button key={n} type="button" className={`lx-star-btn ${n <= (reviewHover || reviewForm.estrellas) ? 'lx-star-btn--on' : ''}`}
-                      onMouseEnter={() => setReviewHover(n)} onMouseLeave={() => setReviewHover(0)}
-                      onClick={() => setReviewForm(f => ({...f, estrellas: n}))}>★</button>
-                  ))}
-                </div>
-              </div>
-              <textarea className="lx-review-textarea" placeholder="Cuéntanos tu experiencia..." value={reviewForm.texto} onChange={e => setReviewForm(f => ({...f, texto: e.target.value.slice(0, 400)}))} rows={4}/>
-              <div style={{fontSize:11,color:'var(--muted)',textAlign:'right',marginTop:4}}>{reviewForm.texto.length}/400</div>
-              {reviewError   && <div className="lx-modal__err" style={{marginTop:8}}>{reviewError}</div>}
-              {reviewSuccess && <div className="lx-modal__ok"  style={{marginTop:8}}>{reviewSuccess}</div>}
-              <button type="submit" className="lx-btn" disabled={reviewLoading} style={{marginTop:12,alignSelf:'flex-end'}}>{reviewLoading ? 'Enviando...' : 'Publicar reseña →'}</button>
-            </form>
-          )}
-          {(() => {
-            const totalResenas = resenas.length;
-            const promedio     = totalResenas ? (resenas.reduce((s,r) => s+(r.calificacion??5),0)/totalResenas) : 0;
-            const totalPages   = Math.ceil(totalResenas / REVIEWS_PER_PAGE);
-            const paginadas    = resenas.slice((reviewPage-1)*REVIEWS_PER_PAGE, reviewPage*REVIEWS_PER_PAGE);
-            return (
-              <>
-                {totalResenas > 0 && (
-                  <div className="lx-rating-summary">
-                    <span className="lx-rating-summary__num">{promedio.toFixed(1)}</span>
-                    <div className="lx-rating-summary__stars">{[1,2,3,4,5].map(n => <span key={n} style={{color: n<=Math.round(promedio)?"#4CAF50":"rgba(255,255,255,0.1)"}}>★</span>)}</div>
-                    <span className="lx-rating-summary__total">({totalResenas} reseña{totalResenas!==1?"s":""})</span>
-                  </div>
-                )}
-                <div className="lx-reviews-grid">
-                  {paginadas.map((r, i) => (
-                    <div className="lx-review" key={r.id ?? i}>
-                      <div className="lx-review__stars">{'★'.repeat(r.calificacion ?? 5)}{'☆'.repeat(5-(r.calificacion??5))}</div>
-                      <p className="lx-review__txt">"{r.texto ?? r.txt}"</p>
-                      <div className="lx-review__author">
-                        <div className="lx-review__av">{(r.nombre ?? r.name).charAt(0)}</div>
-                        <div><div className="lx-review__name">{r.nombre ?? r.name}</div><div className="lx-review__role">{r.rol ?? r.role}</div></div>
-                        {r.cliente_id && <div className="lx-review__verified" title="Cliente verificado">✓</div>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {totalPages > 1 && (
-                  <div className="lx-review-pagination">
-                    <button className="lx-review-page-btn" disabled={reviewPage===1} onClick={() => setReviewPage(p=>p-1)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
-                    {Array.from({length:totalPages},(_,i)=>i+1).map(p => <button key={p} className={`lx-review-page-btn ${reviewPage===p?'lx-review-page-btn--on':''}`} onClick={() => setReviewPage(p)}>{p}</button>)}
-                    <button className="lx-review-page-btn" disabled={reviewPage===totalPages} onClick={() => setReviewPage(p=>p+1)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
-                  </div>
-                )}
-              </>
-            );
-          })()}
         </div>
       </section>
 

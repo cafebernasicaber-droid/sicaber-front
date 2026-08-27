@@ -94,9 +94,6 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
           )}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            {/* No se usa `disabled` HTML: el botón debe verse gris/deshabilitado
-                pero seguir siendo clickeable para poder mostrar la alerta que
-                explica por qué no puede eliminarse (igual que en Proveedores). */}
             <AnularButton onClick={onEliminar} size={14} className=""
               label={deshabilitarEliminar ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
               style={{ padding:10,background: deshabilitarEliminar ? '#9E9E9E' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor: deshabilitarEliminar ? 'not-allowed' : 'pointer',opacity: deshabilitarEliminar ? 0.6 : 1,display:'flex',alignItems:'center',justifyContent:'center' }}/>
@@ -161,7 +158,7 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
 
 // ── Modal: Gestionar categorías de insumos ───────────────────────────────────
 function ModalCategoriasInsumo({ onClose }) {
-  const { categorias, create, update, remove, recategorizar } = useCategoriasInsumos();
+  const { categorias, create, update, remove, toggleEstado, recategorizar } = useCategoriasInsumos();
   const [nombre, setNombre] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -169,11 +166,8 @@ function ModalCategoriasInsumo({ onClose }) {
   const [editId, setEditId] = useState(null);
   const [editNombre, setEditNombre] = useState('');
   const [editLoading, setEditLoading] = useState(false);
+  const [toggleLoadingId, setToggleLoadingId] = useState(null);
 
-  // Considera duplicada una categoría cuyo nombre normalizado (sin
-  // mayúsculas/minúsculas ni tildes) coincida con el de otra ya
-  // registrada. `ignorarId` se usa al editar, para no comparar la
-  // categoría contra sí misma.
   const existeCategoriaEquivalente = (valor, ignorarId = null) => {
     const normalizado = normalizarComparacion(valor);
     return categorias.some(c =>
@@ -224,7 +218,24 @@ function ModalCategoriasInsumo({ onClose }) {
     }
   };
 
-  const [recategorizarTarget, setRecategorizarTarget] = useState(null); // { id, nombre, insumos, insumosAsociados }
+  // Desactivar/activar una categoría: NO borra nada, NO afecta insumos ya
+  // creados con ella — solo controla si sigue apareciendo como opción
+  // sugerible al crear/editar un insumo nuevo (ver el filtro por
+  // estado==='Activo' en InsumoForm.jsx, que ya excluye las desactivadas).
+  const handleToggleEstado = async (c) => {
+    setError('');
+    setToggleLoadingId(c.id);
+    try {
+      const r = await toggleEstado(c.id);
+      if (r?.error) setError(r.error);
+    } catch (err) {
+      setError(err.message || 'No se pudo cambiar el estado de la categoría.');
+    } finally {
+      setToggleLoadingId(null);
+    }
+  };
+
+  const [recategorizarTarget, setRecategorizarTarget] = useState(null);
 
   const handleDelete = async () => {
     try {
@@ -232,8 +243,6 @@ function ModalCategoriasInsumo({ onClose }) {
       setDeleteTarget(null);
     } catch (err) {
       if (err.status === 409 && err.insumosAsociados) {
-        // La categoría tiene insumos: en vez de solo mostrar el error,
-        // abrimos el flujo de recategorización.
         setRecategorizarTarget({ id: deleteTarget.id, nombre: deleteTarget.nombre, insumos: err.insumos || [], insumosAsociados: err.insumosAsociados });
         setDeleteTarget(null);
         return;
@@ -302,8 +311,21 @@ function ModalCategoriasInsumo({ onClose }) {
                     </>
                   ) : (
                     <>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.nombre}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: c.estado === 'Activo' ? 'var(--text-primary)' : 'var(--text-muted)' }}>{c.nombre}</span>
+                        <span style={{ padding:'2px 8px',borderRadius:20,fontSize:10.5,fontWeight:700,background:c.estado==='Activo'?'rgba(76,175,80,.15)':'rgba(158,158,158,.18)',color:c.estado==='Activo'?'#4CAF50':'#9E9E9E' }}>
+                          {c.estado === 'Activo' ? 'Activa' : 'Inactiva'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button
+                          onClick={() => handleToggleEstado(c)}
+                          disabled={toggleLoadingId === c.id}
+                          title={c.estado === 'Activo' ? 'Desactivar categoría' : 'Activar categoría'}
+                          className={`toggle-btn ${c.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
+                          style={{ opacity: toggleLoadingId === c.id ? 0.5 : 1 }}>
+                          <span className="toggle-thumb"/>
+                        </button>
                         <button onClick={() => startEdit(c)} title="Editar nombre"
                           style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
@@ -329,7 +351,7 @@ function ModalCategoriasInsumo({ onClose }) {
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
               </div>
               <h3>¿Eliminar "{deleteTarget.nombre}"?</h3>
-              <p>Si tiene insumos asociados, te pediremos recategorizarlos primero.</p>
+              <p>Si tiene insumos asociados, te pediremos recategorizarlos primero. Si solo quieres dejar de usarla para insumos nuevos sin perder el historial, considera <strong>desactivarla</strong> en vez de eliminarla.</p>
               <div className="modal-actions">
                 <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>Cancelar</button>
                 <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
@@ -352,7 +374,7 @@ function ModalCategoriasInsumo({ onClose }) {
 
 // ── Modal: Recategorizar insumos antes de eliminar una categoría ───────────
 function ModalRecategorizar({ target, categorias, onRecategorizar, onClose }) {
-  const [modo, setModo] = useState('existente'); // 'existente' | 'nueva'
+  const [modo, setModo] = useState('existente');
   const [categoriaId, setCategoriaId] = useState('');
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [error, setError] = useState('');
@@ -465,20 +487,13 @@ const InsumosPage = () => {
   ));
   const [query, setQuery]           = useState('');
   const [filtered, setFiltered]     = useState(null);
-  const [tabFiltro, setTabFiltro]   = useState('todos'); // todos | activos | inactivos
-  // 2 — filtro rápido "Ver solo stock bajo", aparte del banner de resumen
-  // que ya existe (ese solo informa; esto además reduce la tabla).
+  const [tabFiltro, setTabFiltro]   = useState('todos');
   const [soloStockBajo, setSoloStockBajo] = useState(false);
-  // 2 — paginación del listado, mismo estilo que Productos/Fichas Técnicas.
   const [page, setPage]             = useState(1);
   const PER_PAGE = 7;
   const [modal, setModal]           = useState(null);
   const [targetInsumo, setTarget]   = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  // Insumo que el usuario intentó eliminar pero tiene compras asociadas —
-  // mismo patrón que "deleteInfo.tieneCompras" en ProveedoresPage: en vez
-  // de abrir el modal normal de anulación, se muestra una alerta explicando
-  // por qué no puede eliminarse y recomendando desactivarlo.
   const [deleteBlockedTarget, setDeleteBlockedTarget] = useState(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg]     = useState('');
@@ -487,12 +502,8 @@ const InsumosPage = () => {
   const base     = filtered !== null ? filtered : insumos;
   const searched = query.trim() !== '';
 
-  // Un insumo está en stock bajo cuando su stock actual ya llegó (o cayó
-  // por debajo) de su stock mínimo — mismo criterio que el badge/banner que
-  // ya existía en esta página, para no tener dos definiciones distintas.
   const esStockBajo = i => i.estado === 'Activo' && Number(i.stockActual) <= Number(i.stockMinimo);
 
-  // Aplicar filtro de pestaña + filtro rápido de stock bajo
   const displayedBase = (tabFiltro === 'activos'
     ? base.filter(i => i.estado === 'Activo')
     : tabFiltro === 'inactivos'
@@ -501,36 +512,19 @@ const InsumosPage = () => {
   ).filter(i => !soloStockBajo || esStockBajo(i));
   const displayed = [...displayedBase].sort((a, b) => Number(b.id) - Number(a.id));
 
-  // 2 — paginación: respeta cualquier filtro activo (búsqueda, pestaña de
-  // estado, "solo stock bajo") porque se calcula siempre a partir de
-  // `displayed`, que ya tiene todos esos filtros aplicados.
   const totalPages = Math.ceil(displayed.length / PER_PAGE);
   const paginated  = displayed.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  // Si un filtro deja la lista más corta que la página actual (ej. tras
-  // buscar, o anular un insumo), volvemos a una página válida en vez de
-  // dejar la tabla en blanco.
   useEffect(() => { if (page > 1 && page > totalPages) setPage(Math.max(1, totalPages)); }, [totalPages, page]);
 
   const totalActivos   = insumos.filter(i => i.estado === 'Activo').length;
   const totalInactivos = insumos.filter(i => i.estado !== 'Activo').length;
 
-  // Insumos con stock bajo — reutiliza el mismo `insumos` que ya carga esta
-  // página (useInsumos), sin llamar a un endpoint aparte, para no duplicar
-  // la lógica ni arriesgar inconsistencias con el resto del módulo.
   const stockBajoList = insumos.filter(esStockBajo);
 
   const showOk  = msg => { setSuccessMsg(msg); setErrorMsg('');  setTimeout(() => setSuccessMsg(''), 3500); };
   const showErr = msg => { setErrorMsg(msg);  setSuccessMsg(''); setTimeout(() => setErrorMsg(''), 4500); };
   const closeModal = () => { setModal(null); setTarget(null); };
 
-  // Búsqueda local sobre los insumos ya cargados por useInsumos. Antes esto
-  // llamaba a "insumosService.search(...)", un método que nunca existió en
-  // el servicio — cada vez que alguien escribía en el buscador, la página
-  // tiraba un error ("insumosService.search is not a function").
-  // Solo nombre y categoría: son las únicas columnas visibles en la tabla
-  // (el proveedor solo aparece dentro del modal "Ver detalle", no en la
-  // tabla, así que buscar por él no coincidía con nada que el usuario
-  // pudiera ver en pantalla).
   const buscarInsumos = (texto) => {
     const term = texto.toLowerCase();
     return insumos.filter(i =>
@@ -579,10 +573,6 @@ const InsumosPage = () => {
     if (modal === 'ver') closeModal();
   };
 
-  // Punto único por el que debe pasar cualquier intento de eliminar un
-  // insumo (tabla y modal "Ver insumo"). Si tiene compras registradas, no
-  // abre el modal de confirmación de eliminación: muestra la alerta
-  // explicativa (equivalente a la que ya existía en Proveedores).
   const handleEliminarClick = (ins) => {
     if (insumoTieneCompras(ins)) {
       setDeleteBlockedTarget(ins);
@@ -631,7 +621,6 @@ const InsumosPage = () => {
           </div>
         )}
 
-        {/* Modales */}
         {modal === 'ver' && targetInsumo && (
           <ModalVerInsumo
             insumo={targetInsumo}
@@ -677,8 +666,6 @@ const InsumosPage = () => {
           </div>
         )}
 
-        {/* Modal: no se puede eliminar (insumo con compras asociadas) —
-            mismo patrón/copy que el equivalente en ProveedoresPage. */}
         {deleteBlockedTarget && (
           <div className="modal-overlay" onClick={() => setDeleteBlockedTarget(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
@@ -704,16 +691,11 @@ const InsumosPage = () => {
           </div>
         )}
 
-        {/* Header */}
         <div className="page-header">
           <h1 className="page-title">Gestión de Insumos</h1>
           <p className="page-subtitle">Administra los insumos del sistema</p>
         </div>
 
-        {/* Banner stock bajo — 2: es lo primero visible al entrar (va justo
-            después del título, antes de pestañas/buscador/tabla), y ahora es
-            una caja de alerta propia (fondo + borde + ícono grande), no una
-            línea de texto plano que se pueda pasar por alto. */}
         {stockBajoList.length > 0 && (
           <div style={{
             marginBottom: 18, borderRadius: 12, padding: '14px 18px',
@@ -737,7 +719,6 @@ const InsumosPage = () => {
           </div>
         )}
 
-        {/* Filtro pestañas */}
         <div style={{ display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center' }}>
           <button style={tabStyle('todos')} onClick={() => { setTabFiltro('todos'); setPage(1); }}>
             Todos ({insumos.length})
@@ -748,8 +729,6 @@ const InsumosPage = () => {
           <button style={tabStyle('inactivos')} onClick={() => { setTabFiltro('inactivos'); setPage(1); }}>
             Inactivos ({totalInactivos})
           </button>
-          {/* 2 — filtro rápido aparte del banner de arriba: reduce la tabla
-              a solo los insumos en stock bajo, en vez de solo informar. */}
           <button
             onClick={() => { setSoloStockBajo(v => !v); setPage(1); }}
             title={soloStockBajo ? 'Quitar filtro de stock bajo' : 'Mostrar solo insumos con stock bajo'}
@@ -764,7 +743,6 @@ const InsumosPage = () => {
           </button>
         </div>
 
-        {/* Toolbar */}
         <div className="insumos-toolbar">
           <div className="search-wrap" style={{ flex:1,maxWidth:480 }}>
             <span className="search-icon">
@@ -800,7 +778,6 @@ const InsumosPage = () => {
           </div>
         </div>
 
-        {/* Tabla */}
         <div className="insumos-card">
           {displayed.length === 0 ? (
             <div className="empty-state">
@@ -871,12 +848,6 @@ const InsumosPage = () => {
                   {paginated.map(ins => {
                     const stockReal = Math.max(0, ins.stockActual);
                     const sinStock  = stockReal === 0;
-                    // 1 — mismo criterio que el badge del detalle y el banner
-                    // de resumen (stockActual <= stockMinimo). Resalta TODA la
-                    // fila (no solo el badge chiquito de la columna Stock):
-                    // fondo de alerta en las 5 celdas + borde izquierdo grueso
-                    // en la primera, para que se note de un vistazo al barrer
-                    // la tabla con la mirada, sin tener que leer texto.
                     const stockBajo = esStockBajo(ins);
                     return (
                       <tr key={ins.id}>
@@ -935,10 +906,6 @@ const InsumosPage = () => {
             </div>
           )}
 
-          {/* 2 — paginación: 7 insumos por página, respeta los filtros
-              activos (búsqueda, pestaña, "solo stock bajo") porque
-              totalPages/paginated ya se calculan sobre `displayed`. Mismo
-              estilo que ya usan Productos y Fichas Técnicas. */}
           {totalPages > 1 && (
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderTop:'1px solid #f0f0f0', marginTop:4 }}>
               <span style={{ fontSize:13, color:'var(--text-muted)' }}>Mostrando {(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, displayed.length)} de {displayed.length}</span>
@@ -947,7 +914,7 @@ const InsumosPage = () => {
                   style={{ padding:'6px 12px', borderRadius:8, border:'1.5px solid var(--border)', background:page===1?'#f5f5f5':'white', color:page===1?'#bbb':'#333', cursor:page===1?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>← Ant.</button>
                 {Array.from({length:totalPages},(_,i)=>i+1).map(n => (
                   <button key={n} onClick={() => setPage(n)}
-                    style={{ padding:'6px 11px', borderRadius:8, border:`1.5px solid ${n===page?'#4CAF50':'#ddd'}`, background:n===page?'#4CAF50':'white', color:n===page?'white':'#333', cursor:'pointer', fontSize:13, fontWeight:700 }}>
+                    style={{ padding:'6px 11px', borderRadius:8, border:`1.5px solid ${n===page?'#4CAF50':'#ddd'}`, background:n===page?'#4CAF50':'white', color:n===page?'white':'#333', cursor:'pointer', fontSize:13, fontWeight:600 }}>
                     {n}
                   </button>
                 ))}

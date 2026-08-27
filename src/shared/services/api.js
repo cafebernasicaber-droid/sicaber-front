@@ -230,6 +230,23 @@ export const categoriasInsumosApi = {
   recategorizar:(id, d)  => post  (`/categorias-insumos/${id}/recategorizar`, d),
 };
 
+// ── TIPOS DE PRESENTACIÓN (Compras) ─────────────────────────────
+// Antes una lista fija en el código del formulario de compra (Caja,
+// Paquete, Bolsa) — ahora un catálogo gestionable, mismo patrón que
+// categoriasInsumosApi de arriba. Deliberadamente sin `remove` ni
+// `recategorizar`: un tipo de presentación no queda "pegado" a una
+// entidad persistente como sí ocurre con la relación insumo-categoría,
+// así que no necesita ese flujo — "desactivar" (toggleEstado) es
+// suficiente. "Unitario" NO pasa por este servicio: sigue siendo una
+// opción fija y especial del sistema, manejada aparte por el propio
+// formulario de compra.
+export const tiposPresentacionApi = {
+  getAll:       ()       => get   ('/tipos-presentacion'),
+  create:       (data)   => post  ('/tipos-presentacion', data),
+  update:       (id, d)  => put   (`/tipos-presentacion/${id}`, d),
+  toggleEstado: (id)     => patch (`/tipos-presentacion/${id}/estado`),
+};
+
 // ── COMPRAS ──────────────────────────────────────────────────
 export const comprasApi = {
   getActivas:  ()         => get ('/compras'),

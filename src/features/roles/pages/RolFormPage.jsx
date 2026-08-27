@@ -15,6 +15,12 @@ const RolFormPage = ({ mode }) => {
   const [form, setForm] = useState({ nombre: '', descripcion: '', color: colores[0], permisos: [] });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Acordeón de módulos: todos colapsados por defecto, y como mucho uno
+  // abierto a la vez — guarda el nombre del módulo abierto, o null si
+  // ninguno lo está. Colapsar/expandir es solo visual: no toca
+  // form.permisos, así que los permisos marcados se conservan siempre.
+  const [moduloAbierto, setModuloAbierto] = useState(null);
+  const toggleAbierto = (nombreModulo) => setModuloAbierto(prev => prev === nombreModulo ? null : nombreModulo);
 
   useEffect(() => {
     if (mode === 'edit' && id) {
@@ -134,13 +140,24 @@ const RolFormPage = ({ mode }) => {
                   <div className="form-group">
                     <label>Color identificador</label>
                     <div className="colors-grid">
-                      {colores.map(c => (
-                        <div key={c}
-                          className={`color-dot ${form.color === c ? 'color-dot--selected' : ''}`}
-                          style={{ background: c }}
-                          onClick={() => setForm({ ...form, color: c })}
-                        />
-                      ))}
+                      {colores.map(c => {
+                        const seleccionado = form.color === c;
+                        return (
+                          <button key={c} type="button"
+                            className={`color-dot ${seleccionado ? 'color-dot--selected' : ''}`}
+                            style={{ background: c }}
+                            aria-label={`Color ${c}${seleccionado ? ' (seleccionado)' : ''}`}
+                            aria-pressed={seleccionado}
+                            onClick={() => setForm({ ...form, color: c })}
+                          >
+                            {seleccionado && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -155,25 +172,37 @@ const RolFormPage = ({ mode }) => {
                   <label>Permisos del rol ({form.permisos.length} seleccionados)</label>
                   {modulos.map(mod => {
                     const ids = mod.permisos.map(p => p.id);
-                    const allOn = ids.every(pid => form.permisos.includes(pid));
+                    const marcados = ids.filter(pid => form.permisos.includes(pid)).length;
+                    const allOn = marcados === ids.length;
+                    const abierto = moduloAbierto === mod.modulo;
                     return (
-                      <div className="modulo-block" key={mod.modulo}>
+                      <div className={`modulo-block ${abierto ? 'modulo-block--abierto' : ''}`} key={mod.modulo}>
                         <div className="modulo-header">
-                          <span className="modulo-name">{mod.modulo}</span>
+                          <button type="button" className="modulo-name-btn"
+                            aria-expanded={abierto}
+                            onClick={() => toggleAbierto(mod.modulo)}>
+                            <svg className="modulo-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                            <span className="modulo-name">{mod.modulo}</span>
+                            <span className={`modulo-contador ${marcados > 0 ? 'modulo-contador--activo' : ''}`}>({marcados}/{ids.length})</span>
+                          </button>
                           <button type="button" className="modulo-toggle" onClick={() => toggleModulo(mod)}>
                             {allOn ? 'Desmarcar todos' : 'Marcar todos'}
                           </button>
                         </div>
-                        <div className="modulo-permisos">
-                          {mod.permisos.map(p => (
-                            <label className="permiso-item" key={p.id}>
-                              <input type="checkbox"
-                                checked={form.permisos.includes(p.id)}
-                                onChange={() => togglePermiso(p.id)} />
-                              <span>{p.label}</span>
-                            </label>
-                          ))}
-                        </div>
+                        {abierto && (
+                          <div className="modulo-permisos">
+                            {mod.permisos.map(p => (
+                              <label className="permiso-item" key={p.id}>
+                                <input type="checkbox"
+                                  checked={form.permisos.includes(p.id)}
+                                  onChange={() => togglePermiso(p.id)} />
+                                <span>{p.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

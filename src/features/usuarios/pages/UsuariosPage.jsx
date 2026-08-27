@@ -1144,7 +1144,7 @@ const UsuariosPage = () => {
               <table className="insumos-table">
                 <thead>
                   <tr>
-                    <th>Usuario</th><th>Correo</th><th>Tipo</th><th>Estado</th><th>Registro</th><th>Acciones</th>
+                    <th>Usuario</th><th>Correo</th><th>Tipo</th><th>Estado</th><th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1158,7 +1158,7 @@ const UsuariosPage = () => {
                           </div>
                           <div>
                             <div className="user-cell__name">{u.nombre}</div>
-                            <div className="user-cell__user">{u.username ? `@${u.username}` : (u.correo || '—')}</div>
+                            <div className="user-cell__user">Creado: {fmt(u.fecha)}</div>
                           </div>
                         </div>
                       </td>
@@ -1186,7 +1186,6 @@ const UsuariosPage = () => {
                           </span>
                         )}
                       </td>
-                      <td className="td-muted">{fmt(u.fecha)}</td>
                       <td>
                         <div className="actions-group">
                           {hasPermiso(moduloDe(u), 'ver') && (
