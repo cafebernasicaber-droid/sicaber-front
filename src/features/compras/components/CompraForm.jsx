@@ -778,7 +778,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
 
                 {!esUnitario && item.presentacionMultiNivel ? (
                   <>
-                    <div className="fg">
+                    <div className="fg" style={{ gridColumn: 'span 2' }}>
                       <label>{`¿Cuántas unidades trae cada ${(item.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
                       <input
                         type="number" step="1"
@@ -788,7 +788,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                         onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                       />
                     </div>
-                    <div className="fg">
+                    <div className="fg" style={{ gridColumn: 'span 2' }}>
                       <label>{`¿Cuánto contiene cada unidad interna${item.unidad ? ` (${item.unidad})` : ''}?`}</label>
                       <input
                         type="number" step={contenidoEsEntero ? '1' : '0.01'}
