@@ -761,24 +761,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                   </div>
                 )}
 
-                {/* Mini-presentación: opcional, desactivada por defecto —
-                    exclusiva de Caja/Paquete/Bolsa. "Unitario" no la usa. */}
-                {!esUnitario && (
-                  <div className="fg" style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!item.presentacionMultiNivel}
-                        onChange={() => handleTogglePresentacionMulti(idx)}
-                      />
-                      No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
-                    </label>
-                  </div>
-                )}
-
                 {!esUnitario && item.presentacionMultiNivel ? (
                   <>
-                    <div className="fg" style={{ gridColumn: 'span 2' }}>
+                    <div className="fg">
                       <label>{`¿Cuántas unidades trae cada ${(item.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
                       <input
                         type="number" step="1"
@@ -788,7 +773,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                         onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                       />
                     </div>
-                    <div className="fg" style={{ gridColumn: 'span 2' }}>
+                    <div className="fg">
                       <label>{`¿Cuánto contiene cada unidad interna${item.unidad ? ` (${item.unidad})` : ''}?`}</label>
                       <input
                         type="number" step={contenidoEsEntero ? '1' : '0.01'}
@@ -822,6 +807,25 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                     onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                   />
                 </div>
+
+                {/* Mini-presentación: opcional, desactivada por defecto —
+                    exclusiva de Caja/Paquete/Bolsa. "Unitario" no la usa.
+                    Va al final de todos los campos numéricos, no en medio,
+                    para que Tipo/Cantidad/Contenido/Precio queden en una
+                    sola fila alineada cuando está desmarcada (el caso por
+                    defecto). */}
+                {!esUnitario && (
+                  <div className="fg" style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!item.presentacionMultiNivel}
+                        onChange={() => handleTogglePresentacionMulti(idx)}
+                      />
+                      No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
+                    </label>
+                  </div>
+                )}
                 {stockRealItem(item) > 0 && (
                   <div className="item-presentacion-info">
                     ℹ Se sumarán <strong>{stockRealItem(item)} {item.unidad}</strong> al stock{item.insumo ? ` de "${item.insumo}"` : ''} — este número es informativo, no se usa para el valor de la compra.

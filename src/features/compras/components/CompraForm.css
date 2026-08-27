@@ -393,8 +393,12 @@
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-secondary);
+  line-height: 1.3;
+  min-height: 30px;
+  display: flex;
+  align-items: flex-end;
 }
-.item-presentacion-panel input,
+.item-presentacion-panel input:not([type="checkbox"]),
 .item-presentacion-panel select {
   padding: 8px 10px;
   border: 1.5px solid #DDDDDD;
@@ -406,8 +410,14 @@
   width: 100%;
   box-sizing: border-box;
 }
-.item-presentacion-panel input:focus,
+.item-presentacion-panel input:not([type="checkbox"]):focus,
 .item-presentacion-panel select:focus { border-color: #4CAF50; }
+.item-presentacion-panel input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: #4CAF50;
+}
 .item-presentacion-info {
   grid-column: 1 / -1;
   margin-top: 2px;
