@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useCompras from '../hooks/useCompras';
+import useTiposPresentacion from '../hooks/useTiposPresentacion';
 import CompraForm from '../components/CompraForm';
 import { filtrarBusqueda } from '../../../shared/utils/busqueda';
 import './ComprasPage.css';
@@ -110,32 +111,32 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de insumos</div>
             {compra.items && compra.items.length > 0 ? (
-              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13,tableLayout:'fixed' }}>
-                {/* Anchos fijos por columna: antes, al no declarar un ancho
-                    para cada columna, el navegador le asignaba todo el
-                    espacio sobrante a "Subtotal" (la última), dejando una
-                    franja vacía a la derecha de sus valores — el espacio
-                    señalado en la imagen de referencia. */}
-                <colgroup>
-                  <col style={{ width:'40%' }} />
-                  <col style={{ width:'18%' }} />
-                  <col style={{ width:'18%' }} />
-                  <col style={{ width:'24%' }} />
-                </colgroup>
+              <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13 }}>
                 <thead>
                   <tr style={{ borderBottom:'2px solid rgba(255,255,255,.1)' }}>
-                    {['Insumo','Unidad','Cantidad','Subtotal'].map((h, i) => (
-                      <th key={h} style={{ padding:'6px 8px',textAlign: i===3 ? 'right' : 'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
+                    {['Insumo','Unidad','Cantidad','Subtotal'].map(h => (
+                      <th key={h} style={{ padding:'6px 8px',textAlign:'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {(insumosExpandidos ? compra.items : compra.items.slice(0, LIMITE_INSUMOS_VISIBLES)).map((item, idx) => (
                     <tr key={idx} style={{ borderBottom:'1px solid var(--border)' }}>
-                      <td style={{ padding:'7px 8px',fontWeight:600,color:'var(--text-primary)' }}>{formatoTitulo(item.insumo)}</td>
+                      <td style={{ padding:'7px 8px' }}>
+                        <div style={{ fontWeight:600,color:'var(--text-primary)' }}>{formatoTitulo(item.insumo)}</div>
+                        {item.presentacion && (
+                          <div style={{ fontSize:11,color:'var(--text-muted)',marginTop:2 }}>
+                            {item.presentacion.tipo === 'Unitario'
+                              ? `Unitario (sin presentación) — ${item.presentacion.contenidoPorPresentacion} ${item.unidad}`
+                              : item.presentacion.unidadesInternasPorPresentacion
+                                ? `${item.presentacion.cantidad} ${item.presentacion.tipo}(s) × ${item.presentacion.unidadesInternasPorPresentacion} × ${item.presentacion.contenidoPorUnidadInterna} ${item.unidad}`
+                                : `${item.presentacion.cantidad} ${item.presentacion.tipo}(s) × ${item.presentacion.contenidoPorPresentacion} ${item.unidad}`}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding:'7px 8px',color:'var(--text-secondary)' }}>{item.unidad || '—'}</td>
                       <td style={{ padding:'7px 8px',color:'var(--text-primary)' }}>{item.cantidad}</td>
-                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80',textAlign:'right' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
+                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
                     </tr>
                   ))}
                   {!insumosExpandidos && compra.items.length > LIMITE_INSUMOS_VISIBLES && (
@@ -151,8 +152,8 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop:'2px solid var(--border)',background:'var(--bg-hover)' }}>
-                    <td colSpan="3" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
-                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15,textAlign:'right' }}>{formatCOP(compra.total)}</td>
+                    <td colSpan="4" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
+                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15 }}>{formatCOP(compra.total)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -175,7 +176,12 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                   <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Resultado de validación OCR</div>
                   {[
                     ['Estado', <span style={{ color:estadoColor, fontWeight:700 }}>{hayAdvertencias ? '⚠ ' : ''}{estadoTexto}</span>],
-                    ['Confianza OCR', ocr.confianza != null ? `${ocr.confianza}% — ${ocr.confianza >= 70 ? 'Lectura confiable' : ocr.confianza >= 40 ? 'Lectura parcial' : 'Lectura poco confiable'}` : '—'],
+                    ['Confianza OCR', ocr.confianza != null ? `${ocr.confianza}% — ${(() => {
+                      const n = (ocr.advertencias || []).length;
+                      if (n === 0) return 'Lectura confiable';
+                      if (n === 1) return 'Lectura con una inconsistencia';
+                      return 'Lectura con varias inconsistencias';
+                    })()}` : '—'],
                     ['Total registrado', formatCOP(compra.total)],
                     ['Total detectado', totalOcr != null ? formatCOP(totalOcr) : '—'],
                     ['Diferencia', diferencia == null ? '—' : (diferencia === 0 ? 'Sin diferencia' : formatCOP(Math.abs(diferencia)))],
@@ -218,9 +224,170 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
             {!esAnulada && (
-              <AnularButton size={14} className="" label="Anular" variant="anular" onClick={onAnular}
+              <AnularButton size={14} className="" label="Anular" onClick={onAnular}
                 style={{ padding:10,background:'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal: Gestionar tipos de presentación ─────────────────────────────────
+function ModalTiposPresentacion({ onClose }) {
+  const { tipos, create, update, toggleEstado } = useTiposPresentacion();
+  const [nombre, setNombre] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editNombre, setEditNombre] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [toggleLoadingId, setToggleLoadingId] = useState(null);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!nombre.trim()) { setError('El nombre del tipo de presentación es obligatorio.'); return; }
+    setLoading(true);
+    try {
+      const r = await create({ nombre: nombre.trim() });
+      if (r?.error) { setError(r.error); return; }
+      setNombre('');
+    } catch (err) {
+      setError(err.message || 'No se pudo crear el tipo de presentación.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEdit = (t) => { setError(''); setEditId(t.id); setEditNombre(t.nombre); };
+  const cancelEdit = () => { setEditId(null); setEditNombre(''); };
+
+  const saveEdit = async (t) => {
+    setError('');
+    if (!editNombre.trim()) { setError('El nombre del tipo de presentación es obligatorio.'); return; }
+    if (editNombre.trim() === t.nombre) { cancelEdit(); return; }
+    setEditLoading(true);
+    try {
+      const r = await update(t.id, { nombre: editNombre.trim() });
+      if (r?.error) { setError(r.error); return; }
+      cancelEdit();
+    } catch (err) {
+      setError(err.message || 'No se pudo guardar el cambio.');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // Desactivar/activar: no borra nada. Un tipo de presentación no queda
+  // "pegado" a ninguna compra ya registrada (esa conserva el nombre del
+  // tipo en su propio registro) — solo deja de aparecer como opción para
+  // compras futuras. Sin bloqueo por compras históricas asociadas, a
+  // diferencia de proveedores o categorías de insumo.
+  const handleToggleEstado = async (t) => {
+    setError('');
+    setToggleLoadingId(t.id);
+    try {
+      const r = await toggleEstado(t.id);
+      if (r?.error) setError(r.error);
+    } catch (err) {
+      setError(err.message || 'No se pudo cambiar el estado del tipo de presentación.');
+    } finally {
+      setToggleLoadingId(null);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
+        background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
+        maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar tipos de presentación</div>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+
+        <div style={{ padding: '20px 24px' }}>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+            "Unitario" es una opción fija del sistema y no aparece aquí — no se puede editar, desactivar ni eliminar.
+          </p>
+          {error && (
+            <div style={{ background: 'rgba(229,57,53,0.12)', color: '#EF5350', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
+              ⚠ {error}
+            </div>
+          )}
+
+          <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+            <input
+              type="text" value={nombre} onChange={e => setNombre(e.target.value)}
+              placeholder="Nuevo tipo (ej: Botella, Galón)"
+              style={{ flex: 1, padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+            />
+            <button type="submit" disabled={loading} className="btn-add" style={{ padding: '0 16px' }}>
+              {loading ? 'Creando...' : '+ Crear'}
+            </button>
+          </form>
+
+          {tipos.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+              Aún no hay tipos de presentación registrados.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {tipos.map(t => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
+                  {editId === t.id ? (
+                    <>
+                      <input
+                        type="text" autoFocus value={editNombre} onChange={e => setEditNombre(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(t); if (e.key === 'Escape') cancelEdit(); }}
+                        style={{ flex: 1, marginRight: 10, padding: '6px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button onClick={() => saveEdit(t)} disabled={editLoading} title="Guardar"
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(76,175,80,0.15)', color: '#4CAF50', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                        </button>
+                        <button onClick={cancelEdit} title="Cancelar"
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: t.estado === 'Activo' ? 'var(--text-primary)' : 'var(--text-muted)' }}>{t.nombre}</span>
+                        <span style={{ padding:'2px 8px',borderRadius:20,fontSize:10.5,fontWeight:700,background:t.estado==='Activo'?'rgba(76,175,80,.15)':'rgba(158,158,158,.18)',color:t.estado==='Activo'?'#4CAF50':'#9E9E9E' }}>
+                          {t.estado === 'Activo' ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button
+                          onClick={() => handleToggleEstado(t)}
+                          disabled={toggleLoadingId === t.id}
+                          title={t.estado === 'Activo' ? 'Desactivar tipo' : 'Activar tipo'}
+                          className={`toggle-btn ${t.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
+                          style={{ opacity: toggleLoadingId === t.id ? 0.5 : 1 }}>
+                          <span className="toggle-thumb"/>
+                        </button>
+                        <button onClick={() => startEdit(t)} title="Editar nombre"
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
           </div>
         </div>
       </div>
@@ -235,6 +402,7 @@ const ComprasPage = () => {
   const [query, setQuery]               = useState('');
   const [filtered, setFiltered]         = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showTiposModal, setShowTiposModal] = useState(false);
   const [verTarget, setVerTarget]       = useState(null);
   const [anularTarget, setAnularTarget] = useState(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState('');
@@ -515,7 +683,7 @@ const ComprasPage = () => {
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             </button>
                           </Tooltip>
-                          <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Anular" variant="anular" onClick={() => openAnular(c)}/>
+                          <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Anular" onClick={() => openAnular(c)}/>
                         </div>
                       </td>
                     </tr>
@@ -549,10 +717,14 @@ const ComprasPage = () => {
                 </button>
               </div>
               <div className="modal-compra-body">
-                <CompraForm onSubmit={handleAddSubmit} onCancel={() => setShowAddModal(false)} />
+                <CompraForm onSubmit={handleAddSubmit} onCancel={() => setShowAddModal(false)} onManagePresentaciones={() => setShowTiposModal(true)} />
               </div>
             </div>
           </div>
+        )}
+
+        {showTiposModal && (
+          <ModalTiposPresentacion onClose={() => setShowTiposModal(false)} />
         )}
       </div>
     </Layout>

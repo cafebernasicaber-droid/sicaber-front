@@ -133,18 +133,19 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     }
     const newForm = { ...form, [name]: type === 'checkbox' ? checked : v };
     setForm(newForm);
-    // Selects/checkbox son una elección completa apenas cambian — se
-    // validan de inmediato. Los campos de texto (nombre, descripción)
-    // solo limpian su error mientras se escribe; se validan al perder el
-    // foco (ver handleBlur), para no marcar error a mitad de tecleo.
-    if (type === 'checkbox' || name === 'unidadMedida') {
+    // Validación en tiempo real: antes "nombre" y "stockMinimo" solo se
+    // validaban al perder el foco (onBlur) — cualquier campo con una
+    // regla en validate() ahora se revisa en cada tecla, igual que ya
+    // hacían los selects (categoría/unidad/proveedor) y el checkbox.
+    if (type === 'checkbox' || name === 'unidadMedida' || name === 'nombre' || name === 'stockMinimo') {
       touchAndValidate(name, newForm);
     } else if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
     }
   };
 
-  // onBlur genérico para los campos de texto validados (nombre, stockMinimo).
+  // onBlur genérico — ya no es el único momento en que se valida (ver
+  // handleChange arriba), pero se deja como respaldo silencioso.
   const handleBlur = (e) => touchAndValidate(e.target.name);
 
   const handleCategoriaChange = (e) => {
@@ -265,13 +266,9 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                 <option value="">-- Seleccionar --</option>
                 {unidades.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
-              <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 12, color: '#C9A227', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
-                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                <span>Elige con cuidado: una vez registrado el insumo, esta unidad queda fija y no se podrá cambiar.</span>
-              </div>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                Elige con cuidado: una vez registrado el insumo, esta unidad queda fija y no se podrá cambiar.
+              </span>
             </>
           )}
           {errors.unidadMedida
@@ -306,7 +303,13 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               <input
                 type="number" step="0.1" placeholder="Escribe el tamaño en oz" style={{ marginTop: 8 }}
                 value={form.tamanoOz}
-                onChange={e => { const newForm = { ...form, tamanoOz: e.target.value }; setForm(newForm); if (errors.tamanoOz) setErrors(prev => ({ ...prev, tamanoOz: '' })); }}
+                onChange={e => {
+                  const newForm = { ...form, tamanoOz: e.target.value };
+                  setForm(newForm);
+                  // Validación en tiempo real — antes solo se validaba al
+                  // salir del campo (onBlur).
+                  touchAndValidate('tamanoOz', newForm);
+                }}
                 onBlur={() => touchAndValidate('tamanoOz')}
               />
             )}

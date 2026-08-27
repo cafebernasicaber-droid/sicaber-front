@@ -76,6 +76,7 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Información de Contacto</div>
               {[
                 [proveedor.tipoPersona === 'Natural' ? proveedor.tipoDocumento : 'NIT', proveedor.tipoPersona === 'Natural' ? proveedor.numeroDocumento : proveedor.nit],
+                ...(proveedor.tipoPersona !== 'Natural' && proveedor.personaContacto ? [['Persona de contacto', proveedor.personaContacto]] : []),
                 ['Teléfono',  proveedor.telefono],
                 ['Correo',    proveedor.correo],
                 ['Estado',
@@ -121,12 +122,9 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
           {/* Acciones */}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            {/* No se usa `disabled` HTML: debe verse gris/deshabilitado pero
-                seguir siendo clickeable para poder mostrar la alerta de
-                "no se puede eliminar" (ver modal más abajo). */}
-            <AnularButton onClick={onEliminar} size={14} className=""
+            <AnularButton onClick={onEliminar} disabled={tieneCompras} size={14} className=""
               label={tieneCompras ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
-              style={{ padding:10,background: tieneCompras ? 'var(--bg-surface-3)' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color: tieneCompras ? 'var(--text-muted)' : 'white',cursor: tieneCompras ? 'not-allowed' : 'pointer',opacity: tieneCompras ? 0.6 : 1,display:'flex',alignItems:'center',justifyContent:'center' }}/>
+              style={{ padding:10,background: tieneCompras ? 'var(--bg-surface-3)' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color: tieneCompras ? 'var(--text-muted)' : 'white',cursor: tieneCompras ? 'not-allowed' : 'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
             <Tooltip label="Editar proveedor">
               <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
             </Tooltip>
@@ -518,11 +516,8 @@ const ProveedoresPage = () => {
               <h3>¿Eliminar proveedor?</h3>
               {deleteInfo.tieneCompras ? (
                 <>
-                  <p style={{ color:'#B71C1C',fontWeight:600,display:'flex',alignItems:'flex-start',gap:8 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink:0,marginTop:2 }}>
-                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                    </svg>
-                    <span>No se puede eliminar "{deleteTarget.nombre}": tiene compras registradas (activas o anuladas), desactívalo en su lugar.</span>
+                  <p style={{ color:'#B71C1C',fontWeight:600 }}>
+                    ⛔ No se puede eliminar: "{deleteTarget.nombre}" tiene compras registradas (activas o anuladas). Solo puedes desactivarlo.
                   </p>
                   <div className="modal-actions">
                     <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>Entendido</button>
@@ -695,6 +690,7 @@ const ProveedoresPage = () => {
                             </button>
                           </Tooltip>
                           <AnularButton onClick={() => openDeleteTarget(p)} size={14}
+                            disabled={proveedoresConCompras.has(p.id)}
                             className="btn-accion btn-accion-eliminar"
                             label={proveedoresConCompras.has(p.id) ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
                             style={proveedoresConCompras.has(p.id) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>

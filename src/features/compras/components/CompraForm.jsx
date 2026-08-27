@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import comprasService from '../services/comprasService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import insumosService from '../../insumos/services/insumosService';
+import useTiposPresentacion from '../hooks/useTiposPresentacion';
 import { uploadToCloudinary } from '../../../shared/services/cloudinaryService';
 import { validarArchivoComprobante, procesarComprobante, normalizarFechaComprobante } from '../../../shared/services/ocrService';
 import ImageLightbox from '../../../shared/components/ImageLightbox';
@@ -10,19 +11,25 @@ import './CompraForm.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
 const EMPTY_ITEM = {
-  insumo: '', insumoId: '', cantidad: '', precioUnitario: '', unidad: '',
-  // "Comprar por presentación": modo libre por ítem, no se guarda como
-  // preferencia del insumo ni se recuerda entre compras — siempre arranca
-  // en 'directo'. Los campos presentacion* solo se usan cuando modo es
-  // 'presentacion'; ver handleModoChange/handlePresentacionChange.
-  modo: 'directo',
+  insumo: '', insumoId: '', unidad: '',
+  // "Por presentación" es ahora el único modo de compra que existe — no
+  // hay campo "modo" en el estado del ítem, todo se registra a través de
+  // los campos presentacion*.
   presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '',
+  // Mini-presentación (opcional, desactivada por defecto): cuando el
+  // cliente no conoce el contenido TOTAL de la presentación pero sí sabe
+  // cuántas unidades internas trae y cuánto contiene cada una — el
+  // sistema hace esa multiplicación en vez de pedírsela ya calculada.
+  // Exclusivo de Caja/Paquete/Bolsa — no aplica a "Unitario".
+  presentacionMultiNivel: false,
+  presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '',
 };
 
-// Tipos de presentación de compra — NO son unidades de medida del insumo,
-// son cómo lo empaca el proveedor. "Caja"/"Bolsa"/"Docena" son femeninos,
-// "Paquete" es masculino; se usa para las preguntas "¿Cuántas/os...?".
-const TIPOS_PRESENTACION = ['Caja', 'Paquete', 'Bolsa', 'Docena'];
+// "Unitario" NO es un tipo gestionable — sigue siendo una opción fija y
+// especial del sistema (Cantidad de presentaciones fija en 1, sin
+// checkbox de nivel 3), separada del catálogo dinámico. Los demás tipos
+// (Caja, Paquete, Bolsa, y cualquiera que se agregue) vienen del
+// catálogo real vía useTiposPresentacion — ver dentro de CompraForm.
 const presentacionEsMasculina = (tipo) => tipo === 'Paquete';
 const pluralPresentacion = (tipo) => (tipo ? `${tipo}s` : 'presentaciones');
 
@@ -45,39 +52,35 @@ const EMPTY_FORM = {
 const formatCOP = (val) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Number(val) || 0);
 
-// Quita tildes/mayúsculas para comparaciones de texto tolerantes (usado al
-// contrastar el texto leído por OCR con el nombre del proveedor).
 const normalizarTexto = (s) =>
   (s || '').toString().toLowerCase().normalize('NFD').replace(/[^\x00-\x7F]/g, '').trim();
 
-// ── "Comprar por presentación" — helpers ────────────────────────────────────
-// Subtotal SIEMPRE en la unidad en la que el usuario compró. En modo
-// "directo" NO hay ningún cálculo: el usuario ingresa la cantidad adquirida
-// y el precio que pagó por ELLA (el precio ya es el costo total de esa
-// cantidad, no un precio unitario a multiplicar), así que el subtotal es el
-// precio tal cual. En modo "presentación" sí se calcula:
-// cantidad_presentaciones×precio_presentacion — nunca se convierte a la
-// unidad real para este cálculo (así lo pidió el negocio).
-const subtotalItem = (it) => it.modo === 'presentacion'
-  ? Number(it.presentacionCantidad || 0) * Number(it.presentacionPrecio || 0)
-  : Number(it.precioUnitario || 0);
+const subtotalItem = (it) =>
+  Number(it.presentacionCantidad || 0) * Number(it.presentacionPrecio || 0);
 
 // Stock real que se sumará al insumo — solo informativo, se muestra pero no
-// se usa para el valor de la compra.
-const stockRealItem = (it) => it.modo === 'presentacion'
-  ? Number(it.presentacionCantidad || 0) * Number(it.presentacionContenido || 0)
-  : Number(it.cantidad || 0);
+// se usa para el valor de la compra. Con tipo "Unitario", presentacionCantidad
+// es siempre 1 (fijado al elegir el tipo), así que la fórmula se reduce
+// naturalmente a "= Contenido por presentación", sin necesitar una rama
+// aparte. Modo mini-presentación (opcional, solo Caja/Paquete/Bolsa): agrega
+// un nivel más de multiplicación cuando el usuario no conoce el contenido
+// total, solo sus partes.
+const stockRealItem = (it) => {
+  const cantidadPresentaciones = Number(it.presentacionCantidad || 0);
+  if (it.presentacionMultiNivel) {
+    return cantidadPresentaciones * Number(it.presentacionUnidadesInternas || 0) * Number(it.presentacionContenidoUnidadInterna || 0);
+  }
+  return cantidadPresentaciones * Number(it.presentacionContenido || 0);
+};
 
 const cuantosCuantas = (tipo, unidad) => {
   if (unidad != null) return unidad === 'unidad' ? 'Cuántas' : 'Cuántos';
   return presentacionEsMasculina(tipo) ? 'Cuántos' : 'Cuántas';
 };
 
-// "¿Cuántas cajas compraste?"
 const preguntaCantidadPresentacion = (tipo) =>
   `¿${cuantosCuantas(tipo)} ${pluralPresentacion(tipo).toLowerCase()} compraste?`;
 
-// "¿Cuántos kg trae cada caja?" / "¿Cuántas unidades trae cada paquete?"
 const preguntaContenidoPresentacion = (unidad, tipo) => {
   const tipoLabel = (tipo || 'presentación').toLowerCase();
   if (!unidad) return `¿Cuánto trae cada ${tipoLabel}?`;
@@ -85,39 +88,30 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
   return `¿${cuantosCuantas(null, unidad)} ${cantidadLabel} trae cada ${tipoLabel}?`;
 };
 
-const CompraForm = ({ onSubmit, onCancel, serverError }) => {
+const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones }) => {
   const [form, setForm] = useState(EMPTY_FORM);
-  // Referencia a cada tarjeta "Insumo N" — permite llevar la vista hasta
-  // la tarjeta recién agregada en vez de dejar al usuario donde estaba.
   const itemRefs = useRef([]);
+  const proveedorRef = useRef();
+  const fechaRef = useRef();
+  const descuentoRef = useRef();
+  const comprobanteRef = useRef();
   const [errors, setErrors] = useState({});
-  // Qué campos ya tocó el usuario (proveedor, insumos, descuento) — solo
-  // esos muestran el check de válido; el error, en cambio, se muestra
-  // apenas exista (incluido al enviar, para campos nunca tocados).
   const [touched, setTouched] = useState({});
-  // Toast breve que confirma que, al elegir un insumo que ya estaba en
-  // otra línea de esta compra, su cantidad se fusionó ahí en vez de crear
-  // una línea duplicada — ver handleInsumoSelect.
   const [avisoInsumoRepetido, setAvisoInsumoRepetido] = useState('');
 
-  // ── Comprobante de compra + validación OCR ──────────────────────────────
   const [comprobanteFile, setComprobanteFile]   = useState(null);
   const [comprobanteError, setComprobanteError] = useState('');
   const [procesandoOCR, setProcesandoOCR]       = useState(false);
   const [progresoOCR, setProgresoOCR]           = useState(0);
-  const [comprobanteOk, setComprobanteOk]       = useState(false); // true solo si el OCR no encontró ninguna diferencia
+  const [comprobanteOk, setComprobanteOk]       = useState(false);
   const [totalDetectadoOCR, setTotalDetectadoOCR] = useState(null);
   const [comprobantePreview, setComprobantePreview] = useState('');
   const [zoomComprobante, setZoomComprobante] = useState(false);
   const comprobanteInputRef = useRef();
   const [arrastrandoComprobante, setArrastrandoComprobante] = useState(false);
-  // Resumen de lo que el OCR detectó (fecha/NIT/proveedor/total) + las
-  // advertencias derivadas de contrastarlo con la compra. El OCR ya no
-  // bloquea el registro — solo informa; ver validate()/handleSubmit.
   const [chequeoOCR, setChequeoOCR] = useState(null);
   const [confirmarPeseAdvertencia, setConfirmarPeseAdvertencia] = useState(false);
 
-  // Descuento opcional (0-100%) sobre el total de la compra
   const [descuento, setDescuento] = useState('0');
 
   const [proveedores, setProveedores] = useState([]);
@@ -126,13 +120,16 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       .then(d => setProveedores(Array.isArray(d) ? d.filter(p => p.estado === 'Activo') : []))
       .catch(() => setProveedores([]));
   }, []);
+  // Catálogo real de Tipos de Presentación (Caja, Paquete, Bolsa, y
+  // cualquiera que se haya agregado) — solo se muestran los activos.
+  // "Unitario" es una excepción fija, siempre presente, que nunca viene
+  // de este catálogo.
+  const { tipos: tiposPresentacionCatalogo } = useTiposPresentacion();
+  const tiposPresentacionActivos = tiposPresentacionCatalogo.filter(t => t.estado === 'Activo').map(t => t.nombre);
+  const TIPOS_PRESENTACION = ['Unitario', ...tiposPresentacionActivos];
   const [todosInsumos, setTodosInsumos] = useState([]);
   useEffect(() => {
     insumosService.getAll()
-      // BUG CORREGIDO: `estado` en la base de datos es un string
-      // ('Activo'/'Inactivo'), no un booleano — comparar con `!== false`
-      // nunca excluía nada, así que insumos inactivos seguían apareciendo
-      // como opción al registrar una compra.
       .then(d => setTodosInsumos(Array.isArray(d) ? d.filter(i => i.estado === 'Activo') : []))
       .catch(() => setTodosInsumos([]));
   }, []);
@@ -144,51 +141,59 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       )
     : [];
 
-  // 5 — REVERTIDO a pedido explícito del usuario: el comprobante vuelve a
-  // ser obligatorio en TODOS los tipos de compra (directa y por
-  // presentación). Se deja la constante (en vez de borrar todas las
-  // referencias) para no tener que tocar de nuevo cada punto que la usa.
-  const comprobanteEsObligatorio = true;
+  // El comprobante es obligatorio salvo que todos los ítems sean de tipo
+  // "Unitario" (comportamiento heredado del extinto modo "Directo") — si
+  // hay al menos un ítem con Caja/Paquete/Bolsa, o sin tipo elegido aún,
+  // el comprobante se exige igual que siempre.
+  const comprobanteEsObligatorio = form.items.some(it => it.presentacionTipo !== 'Unitario');
 
-  // Compartida entre validate() (al enviar) y los handlers de items (en
-  // tiempo real, cada vez que cambia una línea) — un solo lugar con la
-  // regla de qué hace válida a una línea de insumo.
-  const validateItems = (items) => {
-    const itemInvalido = items.some(it => {
-      if (!it.insumo.trim()) return true;
-      if (it.modo === 'presentacion') {
-        const cantidadPresentOk = it.presentacionCantidad !== '' && !isNaN(it.presentacionCantidad) &&
-          Number(it.presentacionCantidad) > 0 && Number.isInteger(Number(it.presentacionCantidad));
-        const contenidoOk = it.presentacionContenido !== '' && !isNaN(it.presentacionContenido) &&
-          Number(it.presentacionContenido) > 0 &&
-          (it.unidad === 'unidad' ? Number.isInteger(Number(it.presentacionContenido)) : true);
-        const precioOk = it.presentacionPrecio !== '' && !isNaN(it.presentacionPrecio) && Number(it.presentacionPrecio) >= 1000;
-        return !it.presentacionTipo || !cantidadPresentOk || !contenidoOk || !precioOk;
-      }
-      return it.cantidad === '' || isNaN(it.cantidad) || Number(it.cantidad) <= 0 ||
-        it.precioUnitario === '' || isNaN(it.precioUnitario) || Number(it.precioUnitario) < 1000;
-    });
-    return itemInvalido ? 'Revisa los insumos: cada uno necesita nombre, cantidad y precio válidos (mínimo $1.000).' : '';
+  const esItemValido = (it) => {
+    if (!it.insumo.trim()) return false;
+    if (!it.presentacionTipo) return false;
+    const esUnitario = it.presentacionTipo === 'Unitario';
+    // "Unitario" fija Cantidad de presentaciones en 1 internamente — no
+    // hay nada que el usuario deba llenar ni validar ahí.
+    const cantidadPresentOk = esUnitario || (
+      it.presentacionCantidad !== '' && !isNaN(it.presentacionCantidad) &&
+      Number(it.presentacionCantidad) > 0 && Number.isInteger(Number(it.presentacionCantidad))
+    );
+    let contenidoOk;
+    if (!esUnitario && it.presentacionMultiNivel) {
+      const unidadesOk = it.presentacionUnidadesInternas !== '' && !isNaN(it.presentacionUnidadesInternas) &&
+        Number(it.presentacionUnidadesInternas) > 0 && Number.isInteger(Number(it.presentacionUnidadesInternas));
+      const contUnidadOk = it.presentacionContenidoUnidadInterna !== '' && !isNaN(it.presentacionContenidoUnidadInterna) &&
+        Number(it.presentacionContenidoUnidadInterna) > 0 &&
+        (it.unidad === 'unidad' ? Number.isInteger(Number(it.presentacionContenidoUnidadInterna)) : true);
+      contenidoOk = unidadesOk && contUnidadOk;
+    } else {
+      contenidoOk = it.presentacionContenido !== '' && !isNaN(it.presentacionContenido) &&
+        Number(it.presentacionContenido) > 0 &&
+        (it.unidad === 'unidad' ? Number.isInteger(Number(it.presentacionContenido)) : true);
+    }
+    const precioOk = it.presentacionPrecio !== '' && !isNaN(it.presentacionPrecio) && Number(it.presentacionPrecio) >= 1000;
+    return cantidadPresentOk && contenidoOk && precioOk;
   };
+
+  const validateItems = (items) => {
+    const itemInvalido = items.some(it => !esItemValido(it));
+    return itemInvalido ? 'Revisa los insumos: cada uno necesita tipo, contenido y precio válidos (mínimo $1.000).' : '';
+  };
+
+  // Índice del primer ítem con error (en el orden en que aparecen en
+  // pantalla) — usado para llevar el scroll exactamente ahí, no solo
+  // avisar que "algo" está mal.
+  const primerIndiceItemInvalido = (items) => items.findIndex(it => !esItemValido(it));
 
   const validate = () => {
     const errs = {};
     if (!form.proveedorNombre.trim()) errs.proveedorNombre = 'Selecciona un proveedor';
     if (!form.fecha) errs.fecha = 'La fecha es obligatoria';
-    // El campo solo admite HOY (ni pasada ni futura) — min/max en el input
-    // ya lo restringen, esto es el respaldo en JS por si el navegador no lo
-    // aplica del todo (ej. escritura manual del valor).
     else if (form.fecha !== getTodayStr()) errs.fecha = 'Solo puedes registrar la compra con la fecha de hoy.';
     const itemsErr = validateItems(form.items);
     if (itemsErr) errs.items = itemsErr;
     if (descuento !== '' && (isNaN(descuento) || Number(descuento) < 0 || Number(descuento) > 100)) {
       errs.descuento = 'El descuento debe ser un porcentaje entre 0 y 100.';
     }
-    // El comprobante (archivo) es obligatorio solo en compras "por
-    // presentación" (ver comprobanteEsObligatorio); en compras directas es
-    // opcional y, si no se adjunta, no aplica ninguna validación de OCR.
-    // Si el usuario sí adjunta uno (aunque sea opcional), se le sigue
-    // pidiendo la misma confirmación que antes cuando el OCR no valida.
     if (comprobanteEsObligatorio && !comprobanteFile) {
       errs.comprobante = 'El comprobante de compra es obligatorio en compras por presentación.';
     } else if (comprobanteFile) {
@@ -211,15 +216,10 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         items:           [{ ...EMPTY_ITEM }]
       }));
       setAvisoInsumoRepetido('');
-      // Elegir proveedor es una acción completa (select) — se valida de
-      // inmediato, sin esperar al submit. Además reinicia los insumos, así
-      // que el error de "items" (si había) ya no aplica.
       setTouched(prev => ({ ...prev, proveedorNombre: true }));
       setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor', items: '' }));
       return;
     } else if (name === 'fecha') {
-      // Solo se acepta la fecha de hoy — cualquier otro valor (pasado o
-      // futuro) se descarta y el campo vuelve a quedar en la fecha actual.
       setForm(prev => ({ ...prev, fecha: value === getTodayStr() ? value : getTodayStr() }));
     } else {
       setForm(prev => ({ ...prev, [name]: value }));
@@ -227,16 +227,17 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
-  // Filtra mientras se escribe: solo dígitos y un único punto decimal.
-  // maxDecimales=0 fuerza enteros (unidad "unidad"). Aplica también el
-  // tope máximo permitido para el campo.
   const filtrarNumero = (valor, maxDecimales, tope) => {
     let v = valor.replace(/[^0-9.]/g, '');
-    const partes = v.split('.');
-    if (partes.length > 2) v = partes[0] + '.' + partes.slice(1).join('');
     if (maxDecimales === 0) {
-      v = v.split('.')[0];
+      // Pesos enteros: cualquier punto se trata como separador visual de
+      // miles (así se escribe en Colombia) y se elimina por completo —
+      // nunca se malinterpreta como decimal, sea que se escriba tecla por
+      // tecla o se pegue de golpe (ej. "1.000.000" -> "1000000").
+      v = v.replace(/\./g, '');
     } else {
+      const partes = v.split('.');
+      if (partes.length > 2) v = partes[0] + '.' + partes.slice(1).join('');
       const [entero, decimales] = v.split('.');
       v = decimales !== undefined ? `${entero}.${decimales.slice(0, maxDecimales)}` : v;
     }
@@ -244,61 +245,18 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
     return v;
   };
 
-  const handleItemChange = (idx, field, value) => {
-    const items = [...form.items];
-    if (field === 'cantidad') {
-      // Punto 1: unidad "unidad" -> solo enteros (tope 999.999).
-      // Cualquier otra unidad -> hasta 2 decimales (tope 999.999,99).
-      const esUnidadEntera = items[idx].unidad === 'unidad';
-      const limpio = filtrarNumero(value, esUnidadEntera ? 0 : 2, esUnidadEntera ? 999999 : 999999.99);
-      items[idx] = { ...items[idx], cantidad: limpio };
-      // Si la cantidad queda inválida, limpiar precio
-      if (!limpio || Number(limpio) <= 0) {
-        items[idx].precioUnitario = '';
-      }
-    } else if (field === 'precioUnitario') {
-      // Punto 2: precio admite máximo 1 decimal, tope 999.999.999,9
-      items[idx] = { ...items[idx], precioUnitario: filtrarNumero(value, 1, 999999999.9) };
-    } else {
-      items[idx] = { ...items[idx], [field]: value };
-    }
-    setForm(prev => ({ ...prev, items }));
-    // Validación en tiempo real: cada tecla en cantidad/precio revalida de
-    // una vez toda la lista de insumos, sin esperar al submit.
-    setTouched(prev => ({ ...prev, items: true }));
-    setErrors(prev => ({ ...prev, items: validateItems(items) }));
-  };
-
   const handleInsumoSelect = (idx, nombreInsumo) => {
     const insumo = todosInsumos.find(i => i.nombre === nombreInsumo);
 
-    // No permitir el mismo insumo dos veces en la compra: si ya está en
-    // otra línea, NO se agrega como línea nueva — se fusiona sumando la
-    // cantidad que el usuario ya haya escrito en esta línea a la cantidad
-    // de la línea existente, se descarta esta línea duplicada y se avisa
-    // con un toast breve (no bloquea, solo evita la duplicación).
-    const idxExistente = insumo
-      ? form.items.findIndex((it, i) => i !== idx && it.insumoId && String(it.insumoId) === String(insumo.id))
-      : -1;
-    if (idxExistente !== -1) {
-      const existente = form.items[idxExistente];
-      const esUnidadEntera = existente.unidad === 'unidad';
-      const cantidadNueva = Number(form.items[idx].cantidad) || 0;
-      const cantidadPrevia = Number(existente.cantidad) || 0;
-      const cantidadSumada = filtrarNumero(
-        String(cantidadPrevia + cantidadNueva),
-        esUnidadEntera ? 0 : 2,
-        esUnidadEntera ? 999999 : 999999.99
-      );
-      const items = form.items
-        .map((it, i) => i === idxExistente ? { ...it, cantidad: cantidadSumada } : it)
-        .filter((_, i) => i !== idx);
-      setForm(prev => ({ ...prev, items }));
-      setAvisoInsumoRepetido('Se sumó la cantidad al insumo que ya tenías agregado.');
+    // Alerta de duplicado: si el insumo elegido ya está en otra línea de
+    // ESTA compra, se avisa con el mismo patrón de toast que el
+    // formulario ya usa — no se fusiona ni se bloquea, solo se advierte.
+    const yaEstaEnOtraLinea = insumo
+      ? form.items.some((it, i) => i !== idx && it.insumoId && String(it.insumoId) === String(insumo.id))
+      : false;
+    if (yaEstaEnOtraLinea) {
+      setAvisoInsumoRepetido('Ya has seleccionado este insumo en esta compra.');
       setTimeout(() => setAvisoInsumoRepetido(''), 3000);
-      setTouched(prev => ({ ...prev, items: true }));
-      setErrors(prev => ({ ...prev, items: validateItems(items) }));
-      return;
     }
 
     const items = [...form.items];
@@ -307,26 +265,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       insumo:         nombreInsumo,
       insumoId:       insumo ? insumo.id : '',
       unidad:         insumo ? (insumo.unidadMedida || '') : items[idx].unidad,
-      cantidad:       '',         // usuario ingresa cantidad
-      precioUnitario: '',         // usuario ingresa precio del día
-      // Cambiar de insumo empieza el modo de compra desde cero: "libre en
-      // cada compra" — no se arrastra ni el modo ni los datos de la
-      // presentación anterior.
-      modo: 'directo',
       presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '',
+      presentacionMultiNivel: false, presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '',
     };
-    setForm(prev => ({ ...prev, items }));
-    setTouched(prev => ({ ...prev, items: true }));
-    setErrors(prev => ({ ...prev, items: validateItems(items) }));
-  };
-
-  // Alterna Directo <-> Por presentación para un ítem. Limpia los campos del
-  // modo que se abandona para no arrastrar datos a medio llenar.
-  const handleModoChange = (idx, modo) => {
-    const items = [...form.items];
-    items[idx] = modo === 'presentacion'
-      ? { ...items[idx], modo, cantidad: '', precioUnitario: '' }
-      : { ...items[idx], modo, presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '' };
     setForm(prev => ({ ...prev, items }));
     setTouched(prev => ({ ...prev, items: true }));
     setErrors(prev => ({ ...prev, items: validateItems(items) }));
@@ -335,16 +276,38 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
   const handlePresentacionChange = (idx, field, value) => {
     const items = [...form.items];
     let v = value;
+    if (field === 'presentacionTipo') {
+      const eraUnitario = items[idx].presentacionTipo === 'Unitario';
+      const esUnitario = value === 'Unitario';
+      items[idx] = {
+        ...items[idx],
+        presentacionTipo: value,
+        // "Unitario" fija la cantidad en 1 (oculta) y no admite el
+        // checkbox de nivel 3; al salir de "Unitario" hacia otro tipo, se
+        // limpia para que el usuario la vuelva a llenar — nunca se
+        // auto-convierte un valor entre tipos.
+        presentacionCantidad: esUnitario ? '1' : (eraUnitario ? '' : items[idx].presentacionCantidad),
+        presentacionMultiNivel: esUnitario ? false : items[idx].presentacionMultiNivel,
+        presentacionUnidadesInternas: esUnitario ? '' : items[idx].presentacionUnidadesInternas,
+        presentacionContenidoUnidadInterna: esUnitario ? '' : items[idx].presentacionContenidoUnidadInterna,
+      };
+      setForm(prev => ({ ...prev, items }));
+      setTouched(prev => ({ ...prev, items: true }));
+      setErrors(prev => ({ ...prev, items: validateItems(items) }));
+      return;
+    }
     if (field === 'presentacionCantidad') {
-      // Cantidad de cajas/paquetes/etc.: siempre entero
       v = filtrarNumero(value, 0, 999999);
     } else if (field === 'presentacionContenido') {
-      // Contenido por presentación: entero si la unidad real es "unidad",
-      // hasta 2 decimales si es kg/g/lb/oz/L/mL.
       v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
     } else if (field === 'presentacionPrecio') {
-      // Precio: máximo 1 decimal, mismo tope que el precio directo.
-      v = filtrarNumero(value, 1, 999999999.9);
+      v = filtrarNumero(value, 0, 999999999);
+    } else if (field === 'presentacionUnidadesInternas') {
+      // Unidades internas por presentación (ej. bolsas dentro de la caja): entero.
+      v = filtrarNumero(value, 0, 999999);
+    } else if (field === 'presentacionContenidoUnidadInterna') {
+      // Contenido por unidad interna (ej. kg por bolsa): decimal según unidad.
+      v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
     }
     items[idx] = { ...items[idx], [field]: v };
     setForm(prev => ({ ...prev, items }));
@@ -352,10 +315,23 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
     setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
+  // Activa/desactiva el modo de mini-presentación para un ítem. Al
+  // activar, limpia "Contenido por presentación" (deja de estar en uso).
+  // Al desactivar, limpia los 2 campos nuevos y deja el campo simple
+  // vacío otra vez — nunca se intenta auto-convertir un valor entre modos.
+  const handleTogglePresentacionMulti = (idx) => {
+    const items = [...form.items];
+    const activar = !items[idx].presentacionMultiNivel;
+    items[idx] = activar
+      ? { ...items[idx], presentacionMultiNivel: true, presentacionContenido: '' }
+      : { ...items[idx], presentacionMultiNivel: false, presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '' };
+    setForm(prev => ({ ...prev, items }));
+    setTouched(prev => ({ ...prev, items: true }));
+    setErrors(prev => ({ ...prev, items: validateItems(items) }));
+  };
+
   const addItem = () => {
     setForm(prev => ({ ...prev, items: [...prev.items, { ...EMPTY_ITEM }] }));
-    // El nuevo ítem se renderiza en el siguiente ciclo — se espera un
-    // instante para que exista en el DOM antes de desplazarse hasta él.
     setTimeout(() => {
       const nuevoIdx = itemRefs.current.length - 1;
       itemRefs.current[nuevoIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -389,9 +365,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
     if (file.type.startsWith('image/')) setComprobantePreview(URL.createObjectURL(file));
 
     if (check.requiereConversion) {
-      // PDF: esta versión no convierte PDF a imagen para el análisis OCR,
-      // así que no se puede verificar automáticamente el total. El
-      // comprobante se adjunta igual — el usuario solo debe confirmarlo.
       setComprobanteError('El análisis automático de esta versión no procesa archivos PDF, así que no se pudo comparar el total ni otros datos automáticamente. El comprobante se adjuntará igual: revísalo y confirma abajo para continuar.');
       return;
     }
@@ -410,8 +383,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
       if (!resultado.ok) {
         setComprobanteError(resultado.error);
-        // Aunque el OCR no haya podido validar el total, la fecha/NIT sí
-        // pueden haberse leído — se muestran igual en el recuadro de datos.
         if (resultado.fechaDetectada || resultado.nitDetectado) {
           setChequeoOCR({
             fecha: resultado.fechaDetectada || null,
@@ -430,8 +401,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
       setTotalDetectadoOCR(resultado.total);
 
-      // El OCR es informativo: nunca bloquea el registro de la compra, solo
-      // reúne advertencias para que el usuario las revise y confirme.
       const advertencias = [];
 
       const totalCoincide = resultado.total === totalFinal;
@@ -440,10 +409,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       }
 
       let nitCoincide = null;
-      // El documento a comparar depende del tipo de persona: Jurídica usa
-      // "nit"; Natural solo tiene un NIT real para comparar cuando eligió
-      // "NIT" como tipo de documento (con CC/TI/CE/Pasaporte no hay nada
-      // que comparar contra un NIT detectado, así que se omite el aviso).
       const documentoNitProveedor = proveedorSel?.tipoPersona === 'Natural'
         ? (proveedorSel?.tipoDocumento === 'NIT' ? proveedorSel?.numeroDocumento : null)
         : proveedorSel?.nit;
@@ -468,15 +433,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         }
       }
 
-      // La confianza que devuelve ocrService (`resultado.confianza`) solo mide
-      // si se LOGRARON LEER fecha/NIT/total — no si esos datos coinciden con
-      // los reales de la compra. Antes eso hacía que un comprobante con el
-      // total, NIT o fecha equivocados (o el proveedor sin coincidir)
-      // igual mostrara "100% — Lectura confiable" en Ver compra, porque el
-      // OCR sí había logrado LEER algo, aunque estuviera mal. Aquí se
-      // descuenta puntos por cada dato que no coincide con lo real, para
-      // que el % mostrado refleje qué tan confiable es el comprobante en
-      // sí, no solo si el OCR pudo extraer texto.
       let confianzaAjustada = resultado.confianza ?? null;
       if (confianzaAjustada != null) {
         if (totalCoincide === false)     confianzaAjustada -= 40;
@@ -504,63 +460,52 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
   const [subiendoComprobante, setSubiendoComprobante] = useState(false);
 
-  // El resto del sistema (stock, total, historial) trabaja en "cantidad de
-  // la unidad real × precio por unidad real" — igual que el modo "directo"
-  // de siempre. En modo "presentación" derivamos esos mismos dos números a
-  // partir de lo que el usuario contestó (cajas/paquetes, contenido y
-  // precio por presentación), preservando el valor exacto de la compra
-  // (nunca se "pierde" plata al convertir). Los datos de la presentación
-  // también viajan aparte, por si el backend los quiere guardar para
-  // trazabilidad, pero cantidad/precioUnitario ya quedan listos para que
-  // el resto del sistema los use sin saber que existió un modo especial.
   const prepararItemParaEnvio = (it) => {
-    if (it.modo === 'presentacion') {
-      const cantidadPresentaciones = Number(it.presentacionCantidad) || 0;
-      const contenidoPorPresentacion = Number(it.presentacionContenido) || 0;
-      const precioPresentacion = Number(it.presentacionPrecio) || 0;
-      const cantidadReal = cantidadPresentaciones * contenidoPorPresentacion;
-      const precioUnitarioEfectivo = cantidadReal > 0
-        ? (precioPresentacion * cantidadPresentaciones) / cantidadReal
-        : 0;
-      return {
-        insumo: it.insumo, unidad: it.unidad,
-        cantidad: cantidadReal,
-        precioUnitario: precioUnitarioEfectivo,
-        presentacion: {
-          tipo: it.presentacionTipo,
-          cantidad: cantidadPresentaciones,
-          contenidoPorPresentacion,
-          precioPresentacion,
-        },
-      };
+    const cantidadPresentaciones = Number(it.presentacionCantidad) || 0;
+    const precioPresentacion = Number(it.presentacionPrecio) || 0;
+
+    // "contenidoPorPresentacion" siempre queda calculado y guardado — en
+    // modo simple (incluido "Unitario", donde cantidadPresentaciones ya
+    // es 1) es lo que el usuario escribió directamente; en modo
+    // mini-presentación se DERIVA (unidades internas × contenido por
+    // unidad), para que cualquier código que ya lea este campo (ej.
+    // anular, historial) siga funcionando sin saber que existió un
+    // sub-modo especial.
+    let contenidoPorPresentacion;
+    const datosExtra = {};
+    if (it.presentacionMultiNivel) {
+      const unidadesInternas = Number(it.presentacionUnidadesInternas) || 0;
+      const contenidoPorUnidadInterna = Number(it.presentacionContenidoUnidadInterna) || 0;
+      contenidoPorPresentacion = unidadesInternas * contenidoPorUnidadInterna;
+      datosExtra.unidadesInternasPorPresentacion = unidadesInternas;
+      datosExtra.contenidoPorUnidadInterna = contenidoPorUnidadInterna;
+    } else {
+      contenidoPorPresentacion = Number(it.presentacionContenido) || 0;
     }
-    // Modo directo: el precio ingresado es el costo TOTAL de la cantidad
-    // adquirida (no un precio por unidad), así que en el formulario no se
-    // multiplica (ver subtotalItem). Para que el resto del sistema
-    // (historial, listados) siga trabajando en "cantidad × precio por
-    // unidad" y muestre el mismo total sin perder el valor exacto pagado,
-    // aquí se deriva el precio unitario (precio total / cantidad) — mismo
-    // patrón que ya usa el modo "presentación" arriba.
-    const cantidadNum = parseInt(it.cantidad, 10) || 0;
-    const precioTotalDirecto = Number(it.precioUnitario) || 0;
+
+    const cantidadReal = cantidadPresentaciones * contenidoPorPresentacion;
+    const precioUnitarioEfectivo = cantidadReal > 0
+      ? (precioPresentacion * cantidadPresentaciones) / cantidadReal
+      : 0;
     return {
       insumo: it.insumo, unidad: it.unidad,
-      cantidad: cantidadNum,
-      precioUnitario: cantidadNum > 0 ? precioTotalDirecto / cantidadNum : 0,
+      cantidad: cantidadReal,
+      precioUnitario: precioUnitarioEfectivo,
+      presentacion: {
+        tipo: it.presentacionTipo,
+        cantidad: cantidadPresentaciones,
+        contenidoPorPresentacion,
+        precioPresentacion,
+        ...datosExtra,
+      },
     };
   };
 
-  // 3 — aparte del checkbox de "revisé el comprobante" (que ya bloquea el
-  // botón hasta marcarse), se pide una confirmación explícita en un diálogo
-  // cuando el OCR no pudo validar el comprobante automáticamente — recién
-  // ahí, si el admin confirma, se sube el archivo y se manda la compra.
   const [confirmSinValidar, setConfirmSinValidar] = useState(false);
 
   const enviarCompra = async () => {
     setSubiendoComprobante(true);
     try {
-      // El comprobante ahora es opcional en compras directas — solo se
-      // sube a Cloudinary si el usuario efectivamente adjuntó un archivo.
       const comprobanteUrl = comprobanteFile ? await uploadToCloudinary(comprobanteFile) : null;
       onSubmit({
         ...form,
@@ -590,12 +535,26 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
+      // Llevar la vista hasta el primer error, en el mismo orden en que
+      // aparece en el formulario — así el usuario nunca se queda sin
+      // saber por qué no lo dejó registrar la compra.
+      setTimeout(() => {
+        if (errs.proveedorNombre) {
+          proveedorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (errs.fecha) {
+          fechaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (errs.items) {
+          const idx = primerIndiceItemInvalido(form.items);
+          const el = idx !== -1 ? itemRefs.current[idx] : null;
+          (el || itemRefs.current[0])?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (errs.descuento) {
+          descuentoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (errs.comprobante) {
+          comprobanteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
       return;
     }
-    // El diálogo de "¿registrar sin validar el comprobante?" solo aplica
-    // cuando SÍ se adjuntó un comprobante y el OCR no pudo confirmarlo —
-    // si la compra es directa y no se adjuntó ninguno (comprobante
-    // opcional), no hay nada que validar y se registra directo.
     if (comprobanteFile && !comprobanteOk) {
       setConfirmSinValidar(true);
       return;
@@ -605,11 +564,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
 
   return (
     <>
-    {avisoInsumoRepetido && <div className="toast toast-success">✓ {avisoInsumoRepetido}</div>}
+    {avisoInsumoRepetido && <div className="toast toast-warning">⚠ {avisoInsumoRepetido}</div>}
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
       <div className="form-grid">
 
-        <div className={`fg ${errors.proveedorNombre ? 'fg-error' : ''}`}>
+        <div ref={proveedorRef} className={`fg ${errors.proveedorNombre ? 'fg-error' : ''}`}>
           <label>Proveedor <span className="req">*</span></label>
           {proveedores.length > 0 ? (
             <select name="proveedorId" value={form.proveedorId} onChange={handleChange}>
@@ -628,7 +587,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
             : touched.proveedorNombre && form.proveedorNombre && <span className="ok-msg">✓ Válido</span>}
         </div>
 
-        <div className={`fg ${errors.fecha ? 'fg-error' : ''}`}>
+        <div ref={fechaRef} className={`fg ${errors.fecha ? 'fg-error' : ''}`}>
           <label>Fecha de compra <span className="req">*</span></label>
           <input
             type="date" name="fecha" value={form.fecha}
@@ -684,101 +643,66 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           ? <div className="items-error-msg">{errors.items}</div>
           : touched.items && <div className="ok-msg" style={{ padding: '4px 18px 0' }}>✓ Insumos válidos</div>}
 
-        <div className="items-table-head">
-          <span>Insumo</span>
-          <span>Unidad</span>
-          <span>Modo</span>
-          <span>Cantidad</span>
-          <span>Precio de la compra</span>
-          <span>Subtotal</span>
-          <span></span>
-        </div>
-
         {form.items.map((item, idx) => {
-          const enPresentacion = item.modo === 'presentacion';
           const contenidoEsEntero = item.unidad === 'unidad';
           return (
-          <div key={idx} ref={el => itemRefs.current[idx] = el} className="item-block">
+          <div key={idx} ref={el => itemRefs.current[idx] = el} className={`item-block ${touched.items && !esItemValido(item) ? 'item-block--error' : ''}`}>
             <div className="item-block-header">
               <div className="item-block-title">
                 <span className="item-block-index">Insumo {idx + 1}</span>
                 <span className="item-block-name">{item.insumo || 'Sin seleccionar'}</span>
               </div>
-              <span className={`item-block-modo-badge item-block-modo-badge--${enPresentacion ? 'presentacion' : 'directo'}`}>
-                {enPresentacion ? 'Por presentación' : 'Directo'}
+              <span className="item-block-modo-badge item-block-modo-badge--presentacion">
+                {item.presentacionTipo || 'Por presentación'}
               </span>
             </div>
             <div className="item-row">
-              {form.proveedorId && insumosFiltrados.length > 0 ? (
-                <select value={item.insumo} onChange={e => handleInsumoSelect(idx, e.target.value)}>
-                  <option value="">-- Seleccionar insumo --</option>
-                  {insumosFiltrados.map(i => (
-                    <option key={i.id} value={i.nombre}>{i.nombre}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  placeholder={form.proveedorId ? 'Sin insumos para este proveedor' : 'Selecciona un proveedor primero'}
-                  value={item.insumo}
-                  readOnly
-                  style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}
-                />
-              )}
-              <input
-                type="text"
-                value={item.unidad}
-                readOnly
-                placeholder="—"
-                style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}
-              />
-
-              {/* Modo de compra: libre por ítem, no se recuerda entre compras */}
-              <div className="item-modo-toggle">
-                <button type="button" className={!enPresentacion ? 'active' : ''} onClick={() => handleModoChange(idx, 'directo')}>
-                  Directo
-                </button>
-                <button type="button" className={enPresentacion ? 'active' : ''} disabled={!item.insumo}
-                  onClick={() => handleModoChange(idx, 'presentacion')} title={!item.insumo ? 'Selecciona un insumo primero' : ''}>
-                  Presentación
-                </button>
+              <div className="item-field">
+                <label className="item-field-label">Insumo</label>
+                {form.proveedorId && insumosFiltrados.length > 0 ? (
+                  <select value={item.insumo} onChange={e => handleInsumoSelect(idx, e.target.value)}>
+                    <option value="">-- Seleccionar insumo --</option>
+                    {insumosFiltrados.map(i => (
+                      <option key={i.id} value={i.nombre}>{i.nombre}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder={form.proveedorId ? 'Sin insumos para este proveedor' : 'Selecciona un proveedor primero'}
+                    value={item.insumo}
+                    readOnly
+                    style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}
+                  />
+                )}
               </div>
 
-              {enPresentacion ? (
-                <>
-                  <div className="item-presentacion-hint">Detalle abajo ↓</div>
-                  <div className="item-presentacion-hint" aria-hidden="true"></div>
-                </>
-              ) : (
-                <>
-                  <input
-                    type="number" placeholder="0" step="1"
-                    value={item.cantidad}
-                    onChange={e => handleItemChange(idx, 'cantidad', e.target.value)}
-                    onKeyDown={e => {
-                      // Bloquear punto, coma y e (notación científica)
-                      if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
-                    }}
-                  />
-                  {(() => {
-                    const cantidadValida = item.cantidad !== '' && !isNaN(item.cantidad) && Number(item.cantidad) >= 1 && Number.isInteger(Number(item.cantidad));
-                    return (
-                      <input
-                        type="number" placeholder={cantidadValida ? 'Precio total pagado (mín. $1.000)' : 'Ingresa cantidad primero'} step="1"
-                        title="Costo total pagado por la cantidad ingresada — no un precio por unidad."
-                        value={item.precioUnitario}
-                        disabled={!cantidadValida}
-                        onChange={e => handleItemChange(idx, 'precioUnitario', e.target.value)}
-                        style={!cantidadValida ? { background: 'var(--bg-surface-2)', color: 'var(--text-muted)', cursor: 'not-allowed' } : {}}
-                      />
-                    );
-                  })()}
-                </>
-              )}
+              <div className="item-field">
+                <label className="item-field-label">Unidad</label>
+                <input
+                  type="text"
+                  value={item.unidad}
+                  readOnly
+                  placeholder="—"
+                  style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}
+                />
+              </div>
 
-              <span className="item-subtotal">
-                {formatCOP(subtotalItem(item))}
-              </span>
+              <div className="item-field">
+                <label className="item-field-label">Cantidad</label>
+                <div className="item-presentacion-hint">Detalle abajo ↓</div>
+              </div>
+              <div className="item-field">
+                <label className="item-field-label">Precio de la compra</label>
+                <div className="item-presentacion-hint" aria-hidden="true"></div>
+              </div>
+
+              <div className="item-field">
+                <label className="item-field-label">Subtotal</label>
+                <span className="item-subtotal">
+                  {formatCOP(subtotalItem(item))}
+                </span>
+              </div>
               <button
                 type="button" className="btn-remove-item"
                 onClick={() => removeItem(idx)}
@@ -788,13 +712,10 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                   <line x1="18" y1="6" x2="6" y2="18"/>
                   <line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
+
               </button>
             </div>
 
-            {/* 4 — recordatorio de "conviene comprarlo": mismo criterio de
-                stock bajo que usa Insumos (stockActual <= stockMinimo),
-                visible apenas se elige el insumo, sin importar el modo
-                (directo o por presentación). */}
             {(() => {
               const insumoSel = todosInsumos.find(i => i.nombre === item.insumo);
               const stockBajo = insumoSel && Number(insumoSel.stockActual) <= Number(insumoSel.stockMinimo);
@@ -807,41 +728,98 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
               );
             })()}
 
-            {enPresentacion && (
+            {(() => {
+              const esUnitario = item.presentacionTipo === 'Unitario';
+              return (
               <div className="item-presentacion-panel">
                 <div className="fg">
-                  <label>Tipo de presentación</label>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span>Tipo de presentación</span>
+                    {onManagePresentaciones && (
+                      <button type="button" onClick={onManagePresentaciones}
+                        style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+                        Gestionar tipos
+                      </button>
+                    )}
+                  </label>
                   <select value={item.presentacionTipo} onChange={e => handlePresentacionChange(idx, 'presentacionTipo', e.target.value)}>
                     <option value="">-- Seleccionar --</option>
                     {TIPOS_PRESENTACION.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
-                <div className="fg">
-                  <label>{item.presentacionTipo ? `Cantidad de ${pluralPresentacion(item.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
-                  <input
-                    type="number" step="1"
-                    placeholder={preguntaCantidadPresentacion(item.presentacionTipo)}
-                    value={item.presentacionCantidad}
-                    onChange={e => handlePresentacionChange(idx, 'presentacionCantidad', e.target.value)}
-                    onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                  />
-                </div>
-                <div className="fg">
-                  <label>{preguntaContenidoPresentacion(item.unidad, item.presentacionTipo)}</label>
-                  <input
-                    type="number" step={contenidoEsEntero ? '1' : '0.01'}
-                    placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
-                    value={item.presentacionContenido}
-                    onChange={e => handlePresentacionChange(idx, 'presentacionContenido', e.target.value)}
-                    onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                  />
-                </div>
+
+                {!esUnitario && (
+                  <div className="fg">
+                    <label>{item.presentacionTipo ? `Cantidad de ${pluralPresentacion(item.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
+                    <input
+                      type="number" step="1"
+                      placeholder={preguntaCantidadPresentacion(item.presentacionTipo)}
+                      value={item.presentacionCantidad}
+                      onChange={e => handlePresentacionChange(idx, 'presentacionCantidad', e.target.value)}
+                      onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
+                    />
+                  </div>
+                )}
+
+                {/* Mini-presentación: opcional, desactivada por defecto —
+                    exclusiva de Caja/Paquete/Bolsa. "Unitario" no la usa. */}
+                {!esUnitario && (
+                  <div className="fg" style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!item.presentacionMultiNivel}
+                        onChange={() => handleTogglePresentacionMulti(idx)}
+                      />
+                      No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
+                    </label>
+                  </div>
+                )}
+
+                {!esUnitario && item.presentacionMultiNivel ? (
+                  <>
+                    <div className="fg">
+                      <label>{`¿Cuántas unidades trae cada ${(item.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
+                      <input
+                        type="number" step="1"
+                        placeholder="Ej: 10"
+                        value={item.presentacionUnidadesInternas}
+                        onChange={e => handlePresentacionChange(idx, 'presentacionUnidadesInternas', e.target.value)}
+                        onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
+                      />
+                    </div>
+                    <div className="fg">
+                      <label>{`¿Cuánto contiene cada unidad interna${item.unidad ? ` (${item.unidad})` : ''}?`}</label>
+                      <input
+                        type="number" step={contenidoEsEntero ? '1' : '0.01'}
+                        placeholder={contenidoEsEntero ? 'Ej: 1' : 'Ej: 5'}
+                        value={item.presentacionContenidoUnidadInterna}
+                        onChange={e => handlePresentacionChange(idx, 'presentacionContenidoUnidadInterna', e.target.value)}
+                        onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="fg">
+                    <label>{esUnitario ? 'Cantidad recibida' : preguntaContenidoPresentacion(item.unidad, item.presentacionTipo)}</label>
+                    <input
+                      type="number" step={contenidoEsEntero ? '1' : '0.01'}
+                      placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
+                      value={item.presentacionContenido}
+                      onChange={e => handlePresentacionChange(idx, 'presentacionContenido', e.target.value)}
+                      onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
+                    />
+                  </div>
+                )}
+
                 <div className="fg">
                   <label>Precio por {(item.presentacionTipo || 'presentación').toLowerCase()}</label>
                   <input
-                    type="number" step="1" placeholder="Mín. $1.000"
+                    type="number" step="1" placeholder="Ej: 10000 (mín. $1.000)"
+                    title="Escribe el precio en pesos, sin puntos ni comas."
                     value={item.presentacionPrecio}
                     onChange={e => handlePresentacionChange(idx, 'presentacionPrecio', e.target.value)}
+                    onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                   />
                 </div>
                 {stockRealItem(item) > 0 && (
@@ -850,7 +828,8 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
           </div>
           );
         })}
@@ -863,10 +842,10 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
             <span>{formatCOP(totalBruto)}</span>
           </div>
         )}
-        <div className="compra-total-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div ref={descuentoRef} className="compra-total-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              Descuento (%)
+              ¿La compra tuvo descuento? (%)
               <input
                 type="number" min="0" max="100" step="0.01" placeholder="0"
                 value={descuento}
@@ -878,7 +857,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                     else if (n > 100) v = '100';
                   }
                   setDescuento(v);
-                  if (errors.descuento) setErrors(prev => ({ ...prev, descuento: '' }));
+                  // Validación en tiempo real — antes esto solo pasaba en
+                  // onBlur (al salir del campo).
+                  setTouched(prev => ({ ...prev, descuento: true }));
+                  const invalido = v !== '' && (isNaN(v) || Number(v) < 0 || Number(v) > 100);
+                  setErrors(prev => ({ ...prev, descuento: invalido ? 'El descuento debe ser un porcentaje entre 0 y 100.' : '' }));
                 }}
                 onBlur={() => {
                   setTouched(prev => ({ ...prev, descuento: true }));
@@ -904,8 +887,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
         </div>
       </div>
 
-      {/* ── Comprobante de compra + validación OCR ── */}
-      <div className={`fg fg-full ${errors.comprobante ? 'fg-error' : ''}`} style={{ marginTop: 4 }}>
+      <div ref={comprobanteRef} className={`fg fg-full ${errors.comprobante ? 'fg-error' : ''}`} style={{ marginTop: 4 }}>
         <label>Comprobante de compra <span className="req">*</span></label>
         <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
           Sube una foto o captura clara del comprobante (JPG, JPEG o PNG). El sistema lee el total automáticamente y lo compara con el total de esta compra ({formatCOP(totalFinal)}) — es solo informativo, no impide guardar.
@@ -970,8 +952,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           </div>
         )}
 
-        {/* Error simple: archivo inválido (tipo/tamaño), antes de que exista un
-            comprobante cargado — no forma parte del informe OCR unificado. */}
         {!procesandoOCR && comprobanteError && !comprobanteFile && (
           <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(229,57,53,0.12)', color: '#EF5350', borderRadius: 8, fontSize: 13, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -979,11 +959,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           </div>
         )}
 
-        {/* ── Informe de validación OCR — un solo bloque visual, orden fijo:
-            1) aviso general, 2) recuadro de datos detectados
-            (Fecha/NIT/Proveedor/Total), 3) advertencias (sin duplicados).
-            El OCR es informativo: nunca bloquea el registro, solo exige
-            un check de confirmación cuando encuentra diferencias. ── */}
         {!procesandoOCR && comprobanteFile && (comprobanteError || chequeoOCR) && (() => {
           const esErrorDuro = !!comprobanteError && !(chequeoOCR?.advertencias?.length);
           const tono = comprobanteOk ? 'ok' : esErrorDuro ? 'error' : 'warn';
@@ -994,7 +969,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
           }[tono];
           return (
             <div style={{ marginTop: 10, borderRadius: 10, overflow: 'hidden', border: `1px solid ${colores.borde}` }}>
-              {/* 1) Aviso general */}
               <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13, background: colores.fondo, color: colores.texto }}>
                 {tono === 'ok'
                   ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ flexShrink: 0 }}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
@@ -1009,7 +983,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                 </span>
               </div>
 
-              {/* 2) Recuadro de datos detectados (Fecha / NIT / Proveedor / Total) */}
               {chequeoOCR && (
                 <div style={{ padding: '12px 14px', background: 'var(--bg-surface-2, #FAFAFA)', display: 'grid', gap: 6, borderTop: `1px solid ${colores.borde}` }}>
                   {[
@@ -1028,14 +1001,12 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
                 </div>
               )}
 
-              {/* 3) Advertencias — deduplicadas, todas juntas debajo */}
               {chequeoOCR?.advertencias?.length > 0 && (
                 <ul style={{ margin: 0, padding: '10px 14px 10px 30px', fontSize: 12.5, color: '#C9A227', background: 'rgba(201,162,39,0.06)', borderTop: `1px solid ${colores.borde}` }}>
                   {chequeoOCR.advertencias.map((a, i) => <li key={i} style={{ marginBottom: 4 }}>{a}</li>)}
                 </ul>
               )}
 
-              {/* Confirmación explícita cuando el OCR no dio un match limpio */}
               {!comprobanteOk && (
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 14px', fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', borderTop: `1px solid ${colores.borde}`, cursor: 'pointer' }}>
                   <input
@@ -1081,10 +1052,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError }) => {
       </div>
     </form>
 
-    {/* 3 — el OCR no pudo validar el comprobante automáticamente (no se
-        pudo leer el total, o no coincidió); antes de mandar la compra igual
-        se pide esta confirmación aparte del checkbox de "revisé el
-        comprobante" de más arriba. */}
     {confirmSinValidar && (
       <div className="modal-overlay" onClick={() => setConfirmSinValidar(false)}>
         <div className="modal-box" onClick={e => e.stopPropagation()}>

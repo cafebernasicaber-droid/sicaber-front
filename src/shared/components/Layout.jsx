@@ -15,6 +15,21 @@
 //       de que el navegador termina de pintar — garantiza que
 //       el DOM está listo y el scroll se aplica correctamente.
 //    3. Eliminar useLayoutEffect del scroll del nav.
+//
+//  FIX ADICIONAL — sidebar expandido se "cerraba solo" al navegar:
+//    Cada página (InsumosPage, ComprasPage, etc.) envuelve su PROPIO
+//    <Layout>, en vez de que exista un único <Layout> persistente por
+//    encima del enrutador. Eso significa que, al cambiar de módulo,
+//    React desmonta la instancia vieja de Layout y monta una nueva —
+//    y como "expanded" vivía en un useState local (inicializado en
+//    false), cada instancia nueva nacía contraída de cero. No es que
+//    el sidebar "se cerrara" al hacer click: nunca sobrevivía a la
+//    navegación en primer lugar.
+//    Solución: persistir la decisión en localStorage, fuera del ciclo
+//    de vida del componente — así, aunque Layout se vuelva a montar,
+//    el nuevo useState lee el valor guardado en vez de arrancar
+//    siempre en false, y el sidebar se queda expandido hasta que el
+//    usuario mismo decida contraerlo.
 // ─────────────────────────────────────────────────────────────
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -23,6 +38,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import DomiciliosBell from './DomiciliosBell';
 import './Layout.css';
+
+const SIDEBAR_EXPANDED_KEY = 'sicaber_sidebar_expanded';
 
 const icons = {
   dashboard:    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>,
@@ -106,13 +123,29 @@ const Layout = ({ children }) => {
   // grupos ya filtrados, para no mostrar en el riel compacto nada que el
   // modo expandido tampoco mostraría.
   const flatItems = visibleGroups.flatMap(g => g.items);
-  // Sidebar inteligente: contraído (solo iconos) por defecto; un clic en el
-  // botón de la esquina lo expande (iconos + nombres + submenús, el diseño
-  // de siempre) hasta que se vuelva a hacer clic. En modo contraído, pasar
-  // el cursor sobre un icono muestra solo el nombre de ese módulo — nunca
-  // expande todo el sidebar. El tooltip se posiciona con `fixed` (no CSS
-  // puro) para que nunca quede recortado por el scroll/overflow del nav.
-  const [expanded, setExpanded] = useState(false);
+  // Sidebar inteligente: contraído (solo iconos) o expandido (iconos +
+  // nombres + submenús), decisión que persiste en localStorage — NO en un
+  // useState "limpio" — porque cada página envuelve su propio <Layout>
+  // (ver InsumosPage.jsx, ComprasPage.jsx, etc.), así que React desmonta
+  // y vuelve a montar esta instancia en cada cambio de módulo. Sin esta
+  // persistencia, el estado "expanded" nacería en false cada vez,
+  // dando la sensación de que el sidebar "se cierra solo" al navegar. En
+  // modo contraído, pasar el cursor sobre un icono muestra solo el
+  // nombre de ese módulo — nunca expande todo el sidebar. El tooltip se
+  // posiciona con `fixed` (no CSS puro) para que nunca quede recortado
+  // por el scroll/overflow del nav.
+  const [expanded, setExpanded] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_EXPANDED_KEY) === '1'; }
+    catch { return false; }
+  });
+  const toggleExpanded = () => {
+    setExpanded(prev => {
+      const next = !prev;
+      try { localStorage.setItem(SIDEBAR_EXPANDED_KEY, next ? '1' : '0'); }
+      catch { /* localStorage no disponible — el toggle sigue funcionando en esta sesión */ }
+      return next;
+    });
+  };
   const [hoverTip, setHoverTip] = useState(null); // { label, top } | null
   const showTip = (e, label) => {
     if (expanded) return;
@@ -177,7 +210,7 @@ const Layout = ({ children }) => {
           <button
             type="button"
             className="sidebar-toggle"
-            onClick={() => { setExpanded(e => !e); hideTip(); }}
+            onClick={() => { toggleExpanded(); hideTip(); }}
             title={expanded ? 'Contraer menú' : 'Expandir menú'}
           >
             <span style={{transform: expanded ? 'rotate(180deg)' : 'none', display:'flex'}}>{icons.chevronRight}</span>
