@@ -613,28 +613,17 @@
 .buscador-select-input {
   width: 100%;
   box-sizing: border-box;
-  padding-left: 32px;
   padding-right: 32px;
   cursor: text;
 }
 .buscador-select-icon-lupa {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted, #9E9E9E);
-  pointer-events: none;
-}
-.buscador-select-icon-chevron {
   position: absolute;
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted, #9E9E9E);
   pointer-events: none;
-  transition: transform .15s ease;
 }
-.buscador-select-icon-chevron.is-open { transform: translateY(-50%) rotate(180deg); }
 .buscador-dropdown-item.is-selected {
   background: rgba(76,175,80,.10);
   font-weight: 700;

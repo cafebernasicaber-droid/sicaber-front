@@ -131,9 +131,6 @@ function BuscadorSelect({ value, options, onChange, placeholder, disabled, empty
 
   return (
     <div ref={wrapRef} className="buscador-select-wrap">
-      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
       <input
         ref={inputRef}
         type="text"
@@ -146,8 +143,8 @@ function BuscadorSelect({ value, options, onChange, placeholder, disabled, empty
         placeholder={placeholder}
         autoComplete="off"
       />
-      <svg className={`buscador-select-icon-chevron ${open ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <polyline points="6 9 12 15 18 9"/>
+      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
       {open && !disabled && (
         <div className="buscador-dropdown">

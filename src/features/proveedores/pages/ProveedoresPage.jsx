@@ -188,9 +188,11 @@ const ProveedoresPage = () => {
   const [comprasTodas, setComprasTodas] = useState([]);
   useEffect(() => {
     insumosService.getAll().then(d => setInsumosTodos(Array.isArray(d) ? d : [])).catch(() => {});
-    comprasService.getHistorial().then(d => setComprasTodas(Array.isArray(d) ? d : [])).catch(() => {});
+    Promise.all([comprasService.getActivas(), comprasService.getHistorial()])
+      .then(([a, h]) => setComprasTodas([...(a || []), ...(h || [])]))
+      .catch(() => setComprasTodas([]));
   }, []);
-  const proveedoresConCompras = new Set(comprasTodas.map(c => c.proveedorId));
+  const proveedoresConCompras = new Set(comprasTodas.map(c => String(c.proveedorId)));
 
   const base = filtered !== null ? filtered : proveedores;
   const searched = query.trim() !== '';
@@ -227,7 +229,7 @@ const ProveedoresPage = () => {
   // sin importar el proveedor. Ahora se calcula con los datos reales ya
   // cargados (insumosTodos/comprasTodas) antes de mostrar el modal.
   const openDeleteTarget = (p) => {
-    if (proveedoresConCompras.has(p.id)) {
+    if (proveedoresConCompras.has(String(p.id))) {
       setDeleteBlockedTarget(p);
       return;
     }
@@ -462,7 +464,7 @@ const ProveedoresPage = () => {
             onEditar={() => openEditar(esVer)}
             onEliminar={() => openDeleteTarget(esVer)}
             onToggle={() => handleToggle(esVer.id)}
-            tieneCompras={proveedoresConCompras.has(esVer.id)}
+            tieneCompras={proveedoresConCompras.has(String(esVer.id))}
           />
         )}
 
@@ -719,8 +721,8 @@ const ProveedoresPage = () => {
                           </Tooltip>
                           <AnularButton onClick={() => openDeleteTarget(p)} size={14}
                             className="btn-accion btn-accion-eliminar"
-                            label={proveedoresConCompras.has(p.id) ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
-                            style={proveedoresConCompras.has(p.id) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>
+                            label={proveedoresConCompras.has(String(p.id)) ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
+                            style={proveedoresConCompras.has(String(p.id)) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>
                         </div>
                       </td>
                     </tr>
