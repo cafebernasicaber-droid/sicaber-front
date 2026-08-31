@@ -83,7 +83,7 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
           </div>
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:6 }}>Descripción</div>
-            <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0 }}>{insumo.descripcion || 'Sin descripción registrada.'}</p>
+            <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0,wordBreak:'break-word',overflowWrap:'anywhere' }}>{insumo.descripcion || 'Sin descripción registrada.'}</p>
             <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(insumo.fechaCreacion)}</div>
           </div>
           {!stockOk && (

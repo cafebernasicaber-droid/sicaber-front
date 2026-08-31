@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import insumosService from '../services/insumosService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
@@ -42,6 +42,80 @@ const DESCRIPCION_INSUMO_MAX = 200;
 // como primer carácter.
 const filtrarNombreInsumo = (v) => v.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s.,%()-]/g, '');
 const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
+
+// Selector con buscador — mismo campo de siempre, pero con un input de
+// texto que filtra las opciones en tiempo real. Mismo componente ya usado
+// en el formulario de Compras, replicado acá para el selector de
+// Proveedor de este formulario.
+function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage }) {
+  const [open, setOpen] = useState(false);
+  const [texto, setTexto] = useState('');
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const onDocMouseDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setTexto('');
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const selected = options.find(o => String(o.value) === String(value));
+  const filtrados = texto.trim()
+    ? options.filter(o => {
+        const t = texto.trim().toLowerCase();
+        return o.label.toLowerCase().includes(t) || (o.sub && o.sub.toLowerCase().includes(t));
+      })
+    : options;
+
+  const abrir = () => {
+    if (disabled) return;
+    setOpen(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  return (
+    <div ref={wrapRef} className="buscador-select-wrap">
+      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input
+        ref={inputRef}
+        type="text"
+        className="buscador-select-input"
+        disabled={disabled}
+        value={open ? (texto || (selected ? selected.label : '')) : (selected ? selected.label : '')}
+        onFocus={abrir}
+        onClick={abrir}
+        onChange={e => { setTexto(e.target.value); if (!open) setOpen(true); }}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      <svg className={`buscador-select-icon-chevron ${open ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+      {open && !disabled && (
+        <div className="buscador-dropdown">
+          {filtrados.length === 0 ? (
+            <div className="buscador-dropdown-empty">{emptyMessage || 'Sin resultados.'}</div>
+          ) : filtrados.map(o => (
+            <div
+              key={o.value}
+              className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
+              onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias }) => {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -159,7 +233,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
 
   const handleProveedorChange = (e) => {
     const selectedId = e.target.value;
-    const prov = proveedores.find(p => String(p.id) === selectedId);
+    const prov = proveedores.find(p => String(p.id) === String(selectedId));
     const newForm = { ...form, proveedorId: selectedId, proveedor: prov ? prov.nombre : '' };
     setForm(newForm);
     touchAndValidate('proveedor', newForm);
@@ -330,15 +404,13 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               <span>No hay proveedores disponibles (no hay ninguno registrado, o todos están inactivos). Ve a Gestión de Proveedores para registrar o activar uno antes de continuar.</span>
             </div>
           ) : (
-            <select
+            <BuscadorSelect
               value={form.proveedorId}
-              onChange={handleProveedorChange}
-            >
-              <option value="">-- Seleccionar proveedor --</option>
-              {opcionesProveedor.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre}{p.estado !== 'Activo' ? ' (Inactivo)' : ''}</option>
-              ))}
-            </select>
+              options={opcionesProveedor.map(p => ({ value: p.id, label: `${p.nombre}${p.estado !== 'Activo' ? ' (Inactivo)' : ''}` }))}
+              onChange={(id) => handleProveedorChange({ target: { value: id } })}
+              placeholder="Buscar proveedor..."
+              emptyMessage="Ningún proveedor coincide con esa búsqueda."
+            />
           )}
           {errors.proveedor
             ? <span className="err-msg">{errors.proveedor}</span>

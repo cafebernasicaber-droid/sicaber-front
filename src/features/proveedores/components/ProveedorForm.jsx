@@ -14,14 +14,13 @@ const EMPTY_FORM = {
   telefono: '',
   correo: '',
   direccion: '',
-  ciudad: '',
+  ciudad: 'Medellín',
   observaciones: '',
   estado: 'Activo'
 };
 
 // Mismo catálogo de municipios ya usado en Clientes (ClienteRegistroModal /
 // ClienteEditarModal) para no inventar una lista nueva — Medellín primero.
-const CIUDADES = ['Medellín', 'Bello', 'Itagüí', 'Envigado', 'Sabaneta', 'Rionegro', 'Apartadó', 'Turbo'];
 
 // Persona Natural ya no admite TI, Pasaporte ni NIT como tipo de
 // documento — solo Cédula de Ciudadanía y Cédula de Extranjería.
@@ -40,7 +39,7 @@ const TELEFONO_LEN = 10;
 // máximo sube a 100 para no quedar corto con nombres compuestos de varias
 // palabras.
 const NOMBRE_COMPLETO_MIN = 3;
-const NOMBRE_COMPLETO_MAX = 100;
+const NOMBRE_COMPLETO_MAX = 60;
 // Razón Social tiene sus propias reglas, más permisivas en símbolos pero
 // con el mismo tope de 60 que ya tenía.
 const RAZON_SOCIAL_MIN = 3;
@@ -155,7 +154,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         telefono:        initialData.telefono        || '',
         correo:          initialData.correo          || '',
         direccion:       initialData.direccion       || '',
-        ciudad:          initialData.ciudad          || '',
+        ciudad:          'Medellín',
         observaciones:   initialData.observaciones   || '',
         estado:          initialData.estado !== undefined ? initialData.estado : 'Activo'
       });
@@ -213,7 +212,6 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
     else if (f.telefono.length !== TELEFONO_LEN) errs.telefono = `El teléfono debe tener exactamente ${TELEFONO_LEN} dígitos`;
     if (!f.correo.trim())   errs.correo   = 'El correo es obligatorio';
     else if (!/\S+@\S+\.\S+/.test(f.correo)) errs.correo = 'Ingresa un correo válido';
-    if (!f.ciudad)          errs.ciudad    = 'Selecciona una ciudad';
     return errs;
   };
 
@@ -417,15 +415,17 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
             : touched.correo && form.correo.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
-        <div className={`fg ${errors.ciudad ? 'fg-error' : ''}`}>
-          <label>Ciudad <span className="req">*</span></label>
-          <select name="ciudad" value={form.ciudad} onChange={handleChange}>
-            <option value="">Seleccionar ciudad</option>
-            {CIUDADES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          {errors.ciudad
-            ? <span className="err-msg">{errors.ciudad}</span>
-            : touched.ciudad && form.ciudad && <span className="ok-msg">✓ Válido</span>}
+        <div className="fg">
+          <label>Ciudad</label>
+          <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+            </svg>
+            Medellín
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+            El sistema solo maneja proveedores de Medellín.
+          </span>
         </div>
 
         <div className="fg">

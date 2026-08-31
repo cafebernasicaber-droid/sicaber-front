@@ -135,8 +135,14 @@ const Layout = ({ children }) => {
   // posiciona con `fixed` (no CSS puro) para que nunca quede recortado
   // por el scroll/overflow del nav.
   const [expanded, setExpanded] = useState(() => {
-    try { return localStorage.getItem(SIDEBAR_EXPANDED_KEY) === '1'; }
-    catch { return false; }
+    try {
+      const stored = localStorage.getItem(SIDEBAR_EXPANDED_KEY);
+      // Si nunca se ha tocado (primera visita, o localStorage limpio), el
+      // sidebar arranca expandido por defecto — solo se contrae si el
+      // usuario mismo lo eligió alguna vez.
+      return stored === null ? true : stored === '1';
+    }
+    catch { return true; }
   });
   const toggleExpanded = () => {
     setExpanded(prev => {

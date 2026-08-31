@@ -100,7 +100,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                 </div>
               ))}
               {compra.observaciones && (
-                <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>
+                <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)',wordBreak:'break-word',overflowWrap:'anywhere' }}>
                   <span style={{ fontWeight:600 }}>Notas:</span> {compra.observaciones}
                 </div>
               )}

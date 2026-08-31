@@ -57,12 +57,6 @@
   font-weight: 500;
 }
 
-.ok-msg {
-  font-size: 12px;
-  color: #4CAF50;
-  font-weight: 500;
-}
-
 /* ESTADO TOGGLE */
 .fg-estado { justify-content: flex-start; }
 
@@ -242,4 +236,66 @@
   background: var(--bg-input) !important;
   border-color: var(--border-input) !important;
   color: var(--text-primary) !important;
+}
+
+/* ── Buscador de Proveedor (BuscadorSelect) ── */
+.buscador-select-wrap {
+  position: relative;
+  width: 100%;
+}
+.buscador-select-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding-left: 32px;
+  padding-right: 32px;
+  cursor: text;
+}
+.buscador-select-icon-lupa {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted, #9E9E9E);
+  pointer-events: none;
+}
+.buscador-select-icon-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted, #9E9E9E);
+  pointer-events: none;
+  transition: transform .15s ease;
+}
+.buscador-select-icon-chevron.is-open { transform: translateY(-50%) rotate(180deg); }
+.buscador-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border-input);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  z-index: 50;
+}
+.buscador-dropdown-item {
+  padding: 9px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.buscador-dropdown-item:hover { background: rgba(76,175,80,.12); }
+.buscador-dropdown-item.is-selected {
+  background: rgba(76,175,80,.10);
+  font-weight: 700;
+  color: #388E3C;
+}
+.buscador-dropdown-empty {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
 }

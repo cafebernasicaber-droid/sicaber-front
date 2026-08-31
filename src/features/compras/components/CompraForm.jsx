@@ -88,6 +88,86 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
   return `¿${cuantosCuantas(null, unidad)} ${cantidadLabel} trae cada ${tipoLabel}?`;
 };
 
+// Selector con buscador — mismo campo de siempre (mismo lugar, misma
+// apariencia general), pero con un input de texto que filtra las
+// opciones en tiempo real en vez de tener que desplazarse por una lista
+// larga. `options` es [{ value, label, sub? }] — `sub` es texto adicional
+// donde también se busca (ej. NIT) sin mostrarse en la opción.
+function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage }) {
+  const [open, setOpen] = useState(false);
+  const [texto, setTexto] = useState('');
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const onDocMouseDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setTexto('');
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const selected = options.find(o => String(o.value) === String(value));
+  const filtrados = texto.trim()
+    ? options.filter(o => {
+        const t = texto.trim().toLowerCase();
+        return o.label.toLowerCase().includes(t) || (o.sub && o.sub.toLowerCase().includes(t));
+      })
+    : options;
+
+  // Al abrir, el campo NO se borra — sigue mostrando lo ya elegido, con
+  // todo el texto seleccionado (igual que cualquier campo de búsqueda con
+  // un valor precargado), listo para que escribir lo reemplace de
+  // inmediato. Así se ve exactamente como un select normal hasta que el
+  // usuario decide escribir para filtrar.
+  const abrir = () => {
+    if (disabled) return;
+    setOpen(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  return (
+    <div ref={wrapRef} className="buscador-select-wrap">
+      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input
+        ref={inputRef}
+        type="text"
+        className="buscador-select-input"
+        disabled={disabled}
+        value={open ? (texto || (selected ? selected.label : '')) : (selected ? selected.label : '')}
+        onFocus={abrir}
+        onClick={abrir}
+        onChange={e => { setTexto(e.target.value); if (!open) setOpen(true); }}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      <svg className={`buscador-select-icon-chevron ${open ? 'is-open' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+      {open && !disabled && (
+        <div className="buscador-dropdown">
+          {filtrados.length === 0 ? (
+            <div className="buscador-dropdown-empty">{emptyMessage || 'Sin resultados.'}</div>
+          ) : filtrados.map(o => (
+            <div
+              key={o.value}
+              className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
+              onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const itemRefs = useRef([]);
@@ -97,7 +177,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   const comprobanteRef = useRef();
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
-  const [avisoInsumoRepetido, setAvisoInsumoRepetido] = useState('');
 
   const [comprobanteFile, setComprobanteFile]   = useState(null);
   const [comprobanteError, setComprobanteError] = useState('');
@@ -205,19 +284,22 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     return errs;
   };
 
+  const seleccionarProveedor = (value) => {
+    const prov = proveedores.find(p => String(p.id) === String(value));
+    setForm(prev => ({
+      ...prev,
+      proveedorId:     value,
+      proveedorNombre: prov ? prov.nombre : '',
+      items:           [{ ...EMPTY_ITEM }]
+    }));
+    setTouched(prev => ({ ...prev, proveedorNombre: true }));
+    setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor', items: '' }));
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === 'proveedorId') {
-      const prov = proveedores.find(p => String(p.id) === value);
-      setForm(prev => ({
-        ...prev,
-        proveedorId:     value,
-        proveedorNombre: prov ? prov.nombre : '',
-        items:           [{ ...EMPTY_ITEM }]
-      }));
-      setAvisoInsumoRepetido('');
-      setTouched(prev => ({ ...prev, proveedorNombre: true }));
-      setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor', items: '' }));
+      seleccionarProveedor(value);
       return;
     } else if (name === 'fecha') {
       setForm(prev => ({ ...prev, fecha: value === getTodayStr() ? value : getTodayStr() }));
@@ -247,17 +329,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
 
   const handleInsumoSelect = (idx, nombreInsumo) => {
     const insumo = todosInsumos.find(i => i.nombre === nombreInsumo);
-
-    // Alerta de duplicado: si el insumo elegido ya está en otra línea de
-    // ESTA compra, se avisa con el mismo patrón de toast que el
-    // formulario ya usa — no se fusiona ni se bloquea, solo se advierte.
-    const yaEstaEnOtraLinea = insumo
-      ? form.items.some((it, i) => i !== idx && it.insumoId && String(it.insumoId) === String(insumo.id))
-      : false;
-    if (yaEstaEnOtraLinea) {
-      setAvisoInsumoRepetido('Ya has seleccionado este insumo en esta compra.');
-      setTimeout(() => setAvisoInsumoRepetido(''), 3000);
-    }
 
     const items = [...form.items];
     items[idx] = {
@@ -298,16 +369,25 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     }
     if (field === 'presentacionCantidad') {
       v = filtrarNumero(value, 0, 999999);
+      if (v === '0') v = ''; // entero puro — nunca puede quedar en 0
     } else if (field === 'presentacionContenido') {
-      v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
+      const esEntero = items[idx].unidad === 'unidad';
+      v = filtrarNumero(value, esEntero ? 0 : 2, 999999.99);
+      if (esEntero && v === '0') v = ''; // entero puro (piezas) — nunca 0
+      // Si admite decimales, "0" se deja transitar (para poder escribir
+      // "0.5"); se limpia si queda así al salir del campo (ver onBlur).
     } else if (field === 'presentacionPrecio') {
       v = filtrarNumero(value, 0, 999999999);
+      if (v === '0') v = ''; // entero puro — nunca puede quedar en 0
     } else if (field === 'presentacionUnidadesInternas') {
       // Unidades internas por presentación (ej. bolsas dentro de la caja): entero.
       v = filtrarNumero(value, 0, 999999);
+      if (v === '0') v = ''; // entero puro — nunca puede quedar en 0
     } else if (field === 'presentacionContenidoUnidadInterna') {
       // Contenido por unidad interna (ej. kg por bolsa): decimal según unidad.
-      v = filtrarNumero(value, items[idx].unidad === 'unidad' ? 0 : 2, 999999.99);
+      const esEntero = items[idx].unidad === 'unidad';
+      v = filtrarNumero(value, esEntero ? 0 : 2, 999999.99);
+      if (esEntero && v === '0') v = ''; // entero puro — nunca 0
     }
     items[idx] = { ...items[idx], [field]: v };
     setForm(prev => ({ ...prev, items }));
@@ -330,6 +410,19 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
+  // Los campos de contenido decimal (Contenido por presentación, Contenido
+  // por unidad interna) dejan pasar "0" mientras se escribe, para no
+  // bloquear "0.5" a mitad de tecleo. Al salir del campo, si quedó
+  // exactamente en 0, se limpia — nunca puede quedar guardado en 0.
+  const limpiarSiCeroAlSalir = (idx, field) => {
+    const items = [...form.items];
+    if (Number(items[idx][field]) === 0) {
+      items[idx] = { ...items[idx], [field]: '' };
+      setForm(prev => ({ ...prev, items }));
+      setErrors(prev => ({ ...prev, items: validateItems(items) }));
+    }
+  };
+
   const addItem = () => {
     setForm(prev => ({ ...prev, items: [...prev.items, { ...EMPTY_ITEM }] }));
     setTimeout(() => {
@@ -342,7 +435,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     if (form.items.length === 1) return;
     const items = form.items.filter((_, i) => i !== idx);
     setForm(prev => ({ ...prev, items }));
-    setAvisoInsumoRepetido('');
     if (touched.items) setErrors(prev => ({ ...prev, items: validateItems(items) }));
   };
 
@@ -564,19 +656,19 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
 
   return (
     <>
-    {avisoInsumoRepetido && <div className="toast toast-warning">⚠ {avisoInsumoRepetido}</div>}
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
       <div className="form-grid">
 
         <div ref={proveedorRef} className={`fg ${errors.proveedorNombre ? 'fg-error' : ''}`}>
           <label>Proveedor <span className="req">*</span></label>
           {proveedores.length > 0 ? (
-            <select name="proveedorId" value={form.proveedorId} onChange={handleChange}>
-              <option value="">-- Seleccionar proveedor --</option>
-              {proveedores.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre}</option>
-              ))}
-            </select>
+            <BuscadorSelect
+              value={form.proveedorId}
+              options={proveedores.map(p => ({ value: p.id, label: p.nombre, sub: [p.nit, p.numeroDocumento].filter(Boolean).join(' ') }))}
+              onChange={seleccionarProveedor}
+              placeholder="Buscar proveedor por nombre, NIT o documento..."
+              emptyMessage="Ningún proveedor activo coincide con esa búsqueda."
+            />
           ) : (
             <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
               ⚠ No hay proveedores activos registrados.
@@ -660,12 +752,18 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
               <div className="item-field">
                 <label className="item-field-label">Insumo</label>
                 {form.proveedorId && insumosFiltrados.length > 0 ? (
-                  <select value={item.insumo} onChange={e => handleInsumoSelect(idx, e.target.value)}>
-                    <option value="">-- Seleccionar insumo --</option>
-                    {insumosFiltrados.map(i => (
-                      <option key={i.id} value={i.nombre}>{i.nombre}</option>
-                    ))}
-                  </select>
+                  <BuscadorSelect
+                    value={item.insumoId}
+                    options={insumosFiltrados
+                      .filter(i => !form.items.some((it, i2) => i2 !== idx && it.insumoId && String(it.insumoId) === String(i.id)))
+                      .map(i => ({ value: i.id, label: i.nombre }))}
+                    onChange={(insumoId) => {
+                      const insumo = insumosFiltrados.find(i => String(i.id) === String(insumoId));
+                      if (insumo) handleInsumoSelect(idx, insumo.nombre);
+                    }}
+                    placeholder="Buscar insumo..."
+                    emptyMessage="Ningún insumo disponible coincide con esa búsqueda (los ya elegidos en otra línea no aparecen)."
+                  />
                 ) : (
                   <input
                     type="text"
@@ -698,7 +796,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
               </div>
 
               <div className="item-field">
-                <label className="item-field-label">Subtotal</label>
+                <label className="item-field-label item-field-label--right">Subtotal</label>
                 <span className="item-subtotal">
                   {formatCOP(subtotalItem(item))}
                 </span>
@@ -780,6 +878,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                         placeholder={contenidoEsEntero ? 'Ej: 1' : 'Ej: 5'}
                         value={item.presentacionContenidoUnidadInterna}
                         onChange={e => handlePresentacionChange(idx, 'presentacionContenidoUnidadInterna', e.target.value)}
+                        onBlur={() => limpiarSiCeroAlSalir(idx, 'presentacionContenidoUnidadInterna')}
                         onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                       />
                     </div>
@@ -792,6 +891,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                       placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
                       value={item.presentacionContenido}
                       onChange={e => handlePresentacionChange(idx, 'presentacionContenido', e.target.value)}
+                      onBlur={() => limpiarSiCeroAlSalir(idx, 'presentacionContenido')}
                       onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                     />
                   </div>

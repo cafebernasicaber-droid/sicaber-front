@@ -115,16 +115,16 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
           {/* Observaciones */}
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:6 }}>Observaciones</div>
-            <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0 }}>{proveedor.observaciones || 'Sin observaciones registradas.'}</p>
+            <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0,wordBreak:'break-word',overflowWrap:'anywhere' }}>{proveedor.observaciones || 'Sin observaciones registradas.'}</p>
             <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(proveedor.fechaCreacion)}</div>
           </div>
 
           {/* Acciones */}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            <AnularButton onClick={onEliminar} disabled={tieneCompras} size={14} className=""
+            <AnularButton onClick={onEliminar} size={14} className=""
               label={tieneCompras ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
-              style={{ padding:10,background: tieneCompras ? 'var(--bg-surface-3)' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color: tieneCompras ? 'var(--text-muted)' : 'white',cursor: tieneCompras ? 'not-allowed' : 'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
+              style={{ padding:10,background: tieneCompras ? 'var(--bg-surface-3)' : 'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color: tieneCompras ? 'var(--text-muted)' : 'white',cursor: tieneCompras ? 'not-allowed' : 'pointer',opacity: tieneCompras ? 0.6 : 1,display:'flex',alignItems:'center',justifyContent:'center' }}/>
             <Tooltip label="Editar proveedor">
               <button className="btn-confirm-primary" onClick={onEditar} style={{display:'flex',alignItems:'center',justifyContent:'center'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
             </Tooltip>
@@ -169,6 +169,11 @@ const ProveedoresPage = () => {
   const PER_PAGE = 7;
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteInfo, setDeleteInfo]   = useState(null);
+  // Proveedor que el usuario intentó eliminar pero tiene compras
+  // asociadas — mismo patrón que "deleteBlockedTarget" en InsumosPage: en
+  // vez de abrir el modal normal de eliminación, se muestra una alerta
+  // centrada explicando por qué no puede eliminarse.
+  const [deleteBlockedTarget, setDeleteBlockedTarget] = useState(null);
   const [successMsg, setSuccessMsg]   = useState('');
   const [errorMsg, setErrorMsg]       = useState('');
   const [modal, setModal]             = useState(null); // 'nuevo' | proveedor-obj (editar) | { ver: proveedor-obj }
@@ -222,9 +227,12 @@ const ProveedoresPage = () => {
   // sin importar el proveedor. Ahora se calcula con los datos reales ya
   // cargados (insumosTodos/comprasTodas) antes de mostrar el modal.
   const openDeleteTarget = (p) => {
+    if (proveedoresConCompras.has(p.id)) {
+      setDeleteBlockedTarget(p);
+      return;
+    }
     const insumos = insumosTodos.filter(i => String(i.proveedorId) === String(p.id));
-    const tieneCompras = proveedoresConCompras.has(p.id);
-    setDeleteInfo({ insumos, tieneCompras });
+    setDeleteInfo({ insumos, tieneCompras: false });
     setDeleteTarget(p);
   };
 
@@ -514,31 +522,46 @@ const ProveedoresPage = () => {
                 </svg>
               </div>
               <h3>¿Eliminar proveedor?</h3>
-              {deleteInfo.tieneCompras ? (
-                <>
-                  <p style={{ color:'#B71C1C',fontWeight:600 }}>
-                    ⛔ No se puede eliminar: "{deleteTarget.nombre}" tiene compras registradas (activas o anuladas). Solo puedes desactivarlo.
-                  </p>
-                  <div className="modal-actions">
-                    <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>Entendido</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {deleteInfo.insumos.length > 0 && (
-                    <div style={{ background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#E65100' }}>
-                      ⚠ También se eliminarán los siguientes insumos asociados:
-                      <ListaInsumosAfectados insumos={deleteInfo.insumos} />
-                    </div>
-                  )}
-                  <p>Esta acción es <strong>permanente</strong> y no se puede deshacer.</p>
-                  <div className="modal-detail">"{deleteTarget.nombre}"</div>
-                  <div className="modal-actions">
-                    <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>Cancelar</button>
-                    <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
-                  </div>
-                </>
+              {deleteInfo.insumos.length > 0 && (
+                <div style={{ background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#E65100' }}>
+                  ⚠ También se eliminarán los siguientes insumos asociados:
+                  <ListaInsumosAfectados insumos={deleteInfo.insumos} />
+                </div>
               )}
+              <p>Esta acción es <strong>permanente</strong> y no se puede deshacer.</p>
+              <div className="modal-detail">"{deleteTarget.nombre}"</div>
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>Cancelar</button>
+                <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: no se puede eliminar (proveedor con compras asociadas) —
+            mismo patrón/copy que el equivalente en InsumosPage. Reemplaza
+            por completo la alerta lateral roja que existía antes. */}
+        {deleteBlockedTarget && (
+          <div className="modal-overlay" onClick={() => setDeleteBlockedTarget(null)}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
+              <div className="modal-icon modal-icon-danger">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+              </div>
+              <h3>¿Eliminar proveedor?</h3>
+              <p style={{ color:'#B71C1C',fontWeight:600,display:'flex',alignItems:'flex-start',gap:8 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink:0,marginTop:2 }}>
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>No se puede eliminar "{deleteBlockedTarget.nombre}": tiene compras registradas, desactívalo en su lugar.</span>
+              </p>
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => setDeleteBlockedTarget(null)}>Entendido</button>
+              </div>
             </div>
           </div>
         )}
@@ -634,6 +657,11 @@ const ProveedoresPage = () => {
                     </svg>
                   </div>
                   <h3>No hay proveedores{tabFiltro !== 'todos' ? ` ${tabFiltro}` : ''} registrados</h3>
+                  <p>
+                    {tabFiltro !== 'todos'
+                      ? 'Cambia el filtro para ver otros proveedores'
+                      : 'Comienza agregando tu primer proveedor al sistema'}
+                  </p>
                   {tabFiltro === 'todos' && (
                     <button className="btn-add-first" onClick={openNuevo}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -690,7 +718,6 @@ const ProveedoresPage = () => {
                             </button>
                           </Tooltip>
                           <AnularButton onClick={() => openDeleteTarget(p)} size={14}
-                            disabled={proveedoresConCompras.has(p.id)}
                             className="btn-accion btn-accion-eliminar"
                             label={proveedoresConCompras.has(p.id) ? 'Tiene compras registradas — solo puede desactivarse' : 'Eliminar'}
                             style={proveedoresConCompras.has(p.id) ? { opacity:0.45, cursor:'not-allowed' } : undefined}/>

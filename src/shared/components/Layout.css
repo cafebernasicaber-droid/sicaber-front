@@ -6,10 +6,18 @@
 .layout-root { display: flex; height: 100vh; overflow: hidden; }
 
 /* ── SIDEBAR — siempre oscuro (identidad de marca) ─────────── */
-/* Sidebar inteligente: contraído (solo iconos) por defecto; un clic en
-   .sidebar-toggle lo expande al diseño completo de siempre. El ancho
-   transiciona con CSS — .layout-main es flex:1, así que el contenido
-   reacomoda automáticamente sin animación adicional. */
+/* Sidebar inteligente: expandido por defecto al cargar; un clic en
+   .sidebar-toggle lo contrae a solo iconos. El ancho transiciona con
+   CSS — .layout-main es flex:1, así que el contenido reacomoda
+   automáticamente sin animación adicional.
+   FIX transición abrupta: el ancho del sidebar YA transicionaba
+   suave, pero los textos (marca, módulos, usuario) usaban
+   `display:none` para ocultarse — esa propiedad no se puede animar,
+   así que aparecían/desaparecían de golpe aunque el contenedor se
+   moviera suave. Se reemplaza por opacity + max-width + overflow,
+   que sí se pueden transicionar, para que el texto se desvanezca y
+   colapse junto con el ancho, en ambas direcciones (expandir y
+   contraer). */
 .sidebar {
   min-width: 72px; height: 100vh;
   background: linear-gradient(180deg, #1c2a1e 0%, #141a15 100%);
@@ -26,6 +34,7 @@
   display: flex; flex-direction: column; align-items: center;
   padding: 28px 20px 20px;
   border-bottom: 1px solid rgba(255,255,255,0.05); gap: 10px; position: relative;
+  transition: padding .25s ease;
 }
 .sidebar--compact .sidebar-logo { padding: 24px 8px 16px; }
 .sidebar--compact .sidebar-logo-circle { width: 44px; height: 44px; }
@@ -39,11 +48,46 @@
 }
 .sidebar-toggle:hover { background: rgba(93,187,99,.18); border-color: rgba(93,187,99,.4); color: #A5D6A7; }
 .sidebar-toggle svg { transition: transform .25s ease; }
+
+/* Texto que se desvanece + colapsa (en vez de display:none instantáneo) —
+   mismo tiempo (.25s) que el ancho del sidebar, para que ambos se sientan
+   como un solo movimiento continuo, no dos animaciones desincronizadas. */
+.sidebar-brand {
+  opacity: 1;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity .2s ease, max-width .25s ease;
+}
+.sidebar-tagline {
+  opacity: 1;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity .2s ease, max-width .25s ease;
+}
+.sidebar-nav-item__label {
+  opacity: 1;
+  max-width: 160px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity .2s ease, max-width .25s ease;
+}
+.sidebar-user-info {
+  opacity: 1;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity .2s ease, max-width .25s ease;
+}
 .sidebar--compact .sidebar-brand,
 .sidebar--compact .sidebar-tagline,
 .sidebar--compact .sidebar-nav-item__label,
-.sidebar--compact .sidebar-user-info { display: none; }
-.sidebar--compact .sidebar-nav-item { justify-content: center; padding: 11px 0; }
+.sidebar--compact .sidebar-user-info {
+  opacity: 0;
+  max-width: 0;
+}
+.sidebar--compact .sidebar-nav-item { padding: 11px 0; justify-content: center; }
 .sidebar--compact .sidebar-nav-item:hover { padding-left: 0; border-left-color: transparent; }
 .sidebar--compact .sidebar-user { justify-content: center; }
 .sidebar--compact .btn-logout { padding: 9px 0; }
@@ -95,7 +139,8 @@
   background:transparent; border:none; border-radius:10px;
   color:rgba(255,255,255,.45); font-size:13px; font-weight:500;
   font-family:'Open Sans',sans-serif; width:100%; text-align:left;
-  transition:all .18s ease; cursor:pointer; border-left:2px solid transparent; position:relative;
+  transition:background .18s ease, color .18s ease, border-left-color .18s ease, padding .25s ease;
+  cursor:pointer; border-left:2px solid transparent; position:relative;
 }
 .sidebar-nav-item:hover { background:rgba(93,187,99,.08); color:rgba(165,214,167,.9); border-left-color:rgba(93,187,99,.3); padding-left:16px; }
 .sidebar-nav-item.active {
@@ -116,7 +161,8 @@
 .sidebar-bottom { padding:12px 10px 14px; border-top:1px solid rgba(255,255,255,.05); display:flex; flex-direction:column; gap:10px; }
 .sidebar-user {
   display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px;
-  background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.05); transition:background .18s;
+  background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.05);
+  transition:background .18s ease, justify-content .25s ease;
 }
 .sidebar-user:hover { background:rgba(255,255,255,.05); }
 .sidebar-avatar {
