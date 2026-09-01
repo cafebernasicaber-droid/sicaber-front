@@ -17,6 +17,7 @@ const DEPARTAMENTOS = {
   'Huila':             ['Neiva','Pitalito','Garzón'],
   'Cauca':             ['Popayán','Santander de Quilichao'],
 };
+const COMUNAS_MEDELLIN = ['Comuna 8 - Villa Hermosa', 'Comuna 9 - Buenos Aires'];
 const TIPOS_DOC_ESTANDAR = ['Cédula de Ciudadanía', 'Tarjeta de Identidad', 'Cédula de Extranjería'];
 
 const labelStyle = { fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 };
@@ -54,6 +55,11 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
           numeroDoc: c?.numeroDoc || '',
           departamento: c?.departamento || 'Antioquia',
           municipio: c?.municipio || 'Medellín',
+          // La comuna se mostraba en el registro pero NO se podía corregir
+          // al editar: el campo ni siquiera existía en este formulario, así
+          // que un cliente que se equivocara al registrarse quedaba con esa
+          // comuna para siempre (y los domicilios solo aplican a la 8 y la 9).
+          comuna: c?.comuna || '',
           direccion: c?.direccion || '',
         });
       } catch {
@@ -78,7 +84,9 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
   const municipios = DEPARTAMENTOS[form.departamento] || [];
 
   const handleDepartamento = (dep) => {
-    setForm(f => ({ ...f, departamento: dep, municipio: (DEPARTAMENTOS[dep] || [])[0] || '' }));
+    // La comuna se limpia al cambiar de departamento: solo tiene sentido en
+    // Medellín, y dejar la anterior colgada guardaría una comuna imposible.
+    setForm(f => ({ ...f, departamento: dep, municipio: (DEPARTAMENTOS[dep] || [])[0] || '', comuna: '' }));
   };
 
   const handleSubmit = async (e) => {
@@ -95,6 +103,9 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
         numeroDoc: form.numeroDoc,
         departamento: form.departamento,
         municipio: form.municipio,
+        // Solo aplica a Medellín; fuera de ahí se manda vacía a propósito
+        // para que el backend la limpie (distingue "vacía" de "no enviada").
+        comuna: form.municipio === 'Medellín' ? form.comuna : '',
         direccion: form.direccion,
         // El correo nunca se envía: es de solo lectura y la API tampoco lo aceptaría.
       };
@@ -198,6 +209,23 @@ const ClienteEditarModal = ({ cliente, onClose, onSaved }) => {
                   </select>
                 </div>
               </div>
+
+              {form.municipio === 'Medellín' && (
+                <div>
+                  <label style={labelStyle}>
+                    Comuna <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(domicilios solo en comunas 8 y 9)</span>
+                  </label>
+                  <select style={inputStyle} value={form.comuna} onChange={e => set('comuna', e.target.value)}>
+                    <option value="">Seleccionar comuna...</option>
+                    {COMUNAS_MEDELLIN.map(c => <option key={c}>{c}</option>)}
+                    {/* Conserva una comuna registrada antes que ya no esté en
+                        la lista, para no perder el dato hasta que se corrija. */}
+                    {form.comuna && !COMUNAS_MEDELLIN.includes(form.comuna) && (
+                      <option value={form.comuna}>{form.comuna} (fuera de cobertura)</option>
+                    )}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label style={labelStyle}>Dirección</label>

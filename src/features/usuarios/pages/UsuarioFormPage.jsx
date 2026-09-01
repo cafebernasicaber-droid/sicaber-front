@@ -4,6 +4,8 @@ import Layout from '../../../shared/components/Layout';
 import useUsuarios from '../hooks/useUsuarios';
 import usuariosService from '../services/usuariosService';
 import useRoles from '../../roles/hooks/useRoles';
+import { errorPassword } from '../../../shared/utils/passwordPolicy';
+import PasswordRequisitos from '../../../shared/components/PasswordRequisitos';
 import '../pages/Usuarios.css';
 import '../../roles/pages/Roles.css';
 
@@ -35,7 +37,11 @@ const UsuarioFormPage = ({ mode }) => {
     if (!form.username.trim()) { setError('El nombre de usuario es obligatorio.'); return; }
     if (form.correo && !/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
     if (!isEdit && !form.password) { setError('La contraseña es obligatoria.'); return; }
-    if (!isEdit && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    // Regla única compartida con el backend (ver shared/utils/passwordPolicy).
+    if (form.password) {
+      const errPw = errorPassword(form.password);
+      if (errPw) { setError(errPw); return; }
+    }
     if (!isEdit && !confirm) { setError('Debes confirmar la contraseña.'); return; }
     if (form.password && form.password !== confirm) { setError('Las contraseñas no coinciden.'); return; }
     if (!form.rolId) { setError('Selecciona un rol.'); return; }
@@ -98,8 +104,9 @@ const UsuarioFormPage = ({ mode }) => {
             <div className="form-row">
               <div className="form-group">
                 <label>{isEdit ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}</label>
-                <input type="password" placeholder={isEdit ? 'Nueva contraseña...' : 'Mín. 6 caracteres'}
+                <input type="password" placeholder={isEdit ? 'Nueva contraseña...' : 'Contraseña segura'}
                   value={form.password} onChange={e => setForm({...form, password: e.target.value})} />
+                <PasswordRequisitos password={form.password} mostrarSiempre={!isEdit} compacto />
               </div>
               <div className="form-group">
                 <label>{isEdit ? 'Confirmar nueva contraseña' : 'Confirmar contraseña *'}</label>

@@ -6,6 +6,8 @@ import empleadosService from '../services/empleadosService';
 import localesService from '../../../shared/services/localesService';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
+import { errorPassword } from '../../../shared/utils/passwordPolicy';
+import PasswordRequisitos from '../../../shared/components/PasswordRequisitos';
 import './EmpleadosPage.css';
 
 const fmt = iso => iso ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium' }).format(new Date(iso)) : '—';
@@ -18,7 +20,13 @@ const CARGO_COLORS = {
   'Asistente': { bg: '#F3E5F5', color: '#6A1B9A' },
 };
 
-export function EmpleadoModal({ initial, onClose, onSave }) {
+// `cargoFijo` (opcional) fuerza el cargo y lo deja en solo lectura. Lo usa
+// el módulo de Usuarios: al elegir "registrar un Bartender" se abre ESTE
+// mismo formulario —el de Empleados, con documento, dirección, local y
+// cuenta de acceso— ya con el cargo definido, en vez del formulario genérico
+// de usuario que solo pedía nombre/usuario/contraseña. Sin `cargoFijo` el
+// modal funciona exactamente igual que antes.
+export function EmpleadoModal({ initial, onClose, onSave, cargoFijo }) {
   const cargos = ['Bartender', 'Cajero', 'Administrador'];
   // El backend devuelve tipo_doc/numero_doc (snake_case) — usar `initial`
   // directo como estado inicial dejaba esos dos campos (y cualquier otro
@@ -26,7 +34,7 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
   // existiera guardado.
   const [form, setForm] = useState(initial ? {
     nombre:    initial.nombre    || '',
-    cargo:     initial.cargo     || '',
+    cargo:     initial.cargo     || cargoFijo || '',
     telefono:  initial.telefono  || '',
     correo:    initial.correo    || '',
     estado:    initial.estado    || 'Activo',
@@ -41,7 +49,7 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
     // empleados/usuarios (POST/PUT) — antes el selector solo mandaba el
     // nombre, así que local_id quedaba siempre NULL.
     localId:   initial.localId   || initial.local_id || '',
-  } : { nombre: '', cargo: '', telefono: '', correo: '', estado: 'Activo', tipoDoc: 'Cédula de Ciudadanía', numeroDoc: '', direccion: '', username: '', password: '', sede: '', localId: '' });
+  } : { nombre: '', cargo: cargoFijo || '', telefono: '', correo: '', estado: 'Activo', tipoDoc: 'Cédula de Ciudadanía', numeroDoc: '', direccion: '', username: '', password: '', sede: '', localId: '' });
   const esLoginCargo = ['cajero', 'bartender'].some(c => (form.cargo || '').toLowerCase().includes(c));
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
@@ -66,7 +74,13 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
     if (esLoginCargo && !initial && !form.username.trim()) { setError('El usuario del sistema es obligatorio para este cargo.'); return; }
     if (esLoginCargo && !form.sede) { setError('Selecciona a qué local pertenece este empleado.'); return; }
     if (!initial && !form.password) { setError('La contraseña es obligatoria.'); return; }
-    if (!initial && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    // Regla única compartida con el backend (10 caracteres, 8 números, 1
+    // mayúscula, 1 especial). Antes aquí se pedían 6 y el servidor rechazaba.
+    // Al editar solo se valida si escribieron una contraseña nueva.
+    if (form.password) {
+      const errPw = errorPassword(form.password);
+      if (errPw) { setError(errPw); return; }
+    }
     if (!initial && !confirm) { setError('Debes confirmar la contraseña.'); return; }
     if (form.password && form.password !== confirm) { setError('Las contraseñas no coinciden.'); return; }
     setSaving(true);
@@ -85,9 +99,13 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ maxWidth: 480, textAlign: 'left', padding: '32px 36px' }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 4 }}>{initial ? 'Editar empleado' : 'Nuevo empleado'}</h3>
+        <h3 style={{ marginBottom: 4 }}>{initial ? 'Editar empleado' : `Nuevo ${(cargoFijo || 'empleado').toLowerCase()}`}</h3>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-          {initial ? `Modificando: ${initial.nombre}` : 'Agrega un empleado al equipo'}
+          {initial
+            ? `Modificando: ${initial.nombre}`
+            : (cargoFijo
+                ? `Registra un ${cargoFijo.toLowerCase()} con su cuenta de acceso al sistema`
+                : 'Agrega un empleado al equipo')}
         </p>
         {error && <div style={{ background:'rgba(229,57,53,0.12)',color:'var(--color-red)',padding:'10px 14px',borderRadius:8,marginBottom:16,fontSize:13 }}>⚠ {error}</div>}
         <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -98,10 +116,19 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
             </div>
             <div className="emp-form-group">
               <label>Cargo *</label>
-              <select value={form.cargo} onChange={e => setForm({...form, cargo: e.target.value})}>
-                <option value="">Seleccionar cargo...</option>
-                {cargos.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              {cargoFijo ? (
+                // Registro iniciado desde Usuarios con un cargo ya elegido:
+                // se muestra, pero no se puede cambiar aquí (para cambiarlo,
+                // se vuelve atrás y se elige otro tipo de registro).
+                <input type="text" value={form.cargo} readOnly disabled
+                  title="Cargo elegido en el paso anterior — no se puede cambiar aquí"
+                  style={{ background:'var(--bg-surface-2)', color:'var(--text-secondary)', cursor:'not-allowed' }} />
+              ) : (
+                <select value={form.cargo} onChange={e => setForm({...form, cargo: e.target.value})}>
+                  <option value="">Seleccionar cargo...</option>
+                  {cargos.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
             </div>
           </div>
           <div className="emp-form-row">
@@ -182,7 +209,8 @@ export function EmpleadoModal({ initial, onClose, onSave }) {
           <div className="emp-form-row">
             <div className="emp-form-group">
               <label>{initial ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}</label>
-              <input type="password" value={form.password||''} onChange={e => setForm({...form, password: e.target.value})} placeholder="Mín. 6 caracteres" />
+              <input type="password" value={form.password||''} onChange={e => setForm({...form, password: e.target.value})} placeholder="Contraseña segura" />
+              <PasswordRequisitos password={form.password} mostrarSiempre={!initial} compacto />
             </div>
             <div className="emp-form-group">
               <label>{initial ? 'Confirmar nueva contraseña' : 'Confirmar contraseña *'}</label>

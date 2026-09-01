@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import clientesService from '../services/clientesService';
+import { errorPassword } from '../../../shared/utils/passwordPolicy';
+import PasswordRequisitos from '../../../shared/components/PasswordRequisitos';
 
 // ── Datos de ubicación (mismo catálogo usado en Editar cliente) ───────────────
 const DEPARTAMENTOS = {
@@ -54,7 +56,11 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
     if (!form.correo.trim())  { setError('El correo es obligatorio.'); return; }
     if (!/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
     if (!form.password)      { setError('La contraseña es obligatoria.'); return; }
-    if (form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    // Regla única compartida con el backend. Antes aquí se pedían 6
+    // caracteres y el servidor exige 10: el registro se rechazaba después
+    // de que este formulario ya lo había dado por bueno.
+    const errPw = errorPassword(form.password);
+    if (errPw) { setError(errPw); return; }
     if (!form.confirm)       { setError('Debes confirmar la contraseña.'); return; }
     if (form.password !== form.confirm) { setError('Las contraseñas no coinciden.'); return; }
     if (form.tipoDoc === 'Otros' && !form.tipoDocOtro.trim()) { setError('Escribe el nombre del tipo de documento.'); return; }
@@ -179,8 +185,9 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={labelStyle}>Contraseña *</label>
-                  <input style={inputStyle} type="password" placeholder="Mín. 6 caracteres"
+                  <input style={inputStyle} type="password" placeholder="Contraseña segura"
                     value={form.password} onChange={e => set('password', e.target.value)} />
+                  <PasswordRequisitos password={form.password} mostrarSiempre compacto />
                 </div>
                 <div>
                   <label style={labelStyle}>Confirmar contraseña *</label>

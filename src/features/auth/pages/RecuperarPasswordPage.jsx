@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AuthPage.css';
+import { errorPassword } from '../../../shared/utils/passwordPolicy';
+import PasswordRequisitos from '../../../shared/components/PasswordRequisitos';
 const API = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 
 export default function RecuperarPasswordPage() {
@@ -37,7 +39,10 @@ export default function RecuperarPasswordPage() {
     if (!nuevaPass)         { setError('La nueva contraseña es obligatoria.'); return; }
     if (!confirmar)         { setError('Debes confirmar la nueva contraseña.'); return; }
     if (nuevaPass !== confirmar) { setError('Las contraseñas no coinciden'); return; }
-    if (nuevaPass.length < 6)    { setError('Mínimo 6 caracteres'); return; }
+    // Misma regla que el resto del sistema y que la API (que rechazaba con
+    // 10 mientras esta pantalla decía que 6 bastaban).
+    const errPw = errorPassword(nuevaPass);
+    if (errPw) { setError(errPw); return; }
     setLoading(true);
     try {
       const res  = await fetch(`${API}/auth/cliente/reset-password`, {
@@ -84,7 +89,8 @@ export default function RecuperarPasswordPage() {
             </div>
             <div className="auth-field">
               <label>Nueva contraseña</label>
-              <input type="password" value={nuevaPass} onChange={e=>setNueva(e.target.value)} placeholder="Mínimo 6 caracteres"/>
+              <input type="password" value={nuevaPass} onChange={e=>setNueva(e.target.value)} placeholder="Contraseña segura"/>
+              <PasswordRequisitos password={nuevaPass} mostrarSiempre compacto />
             </div>
             <div className="auth-field">
               <label>Confirmar contraseña</label>

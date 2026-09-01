@@ -11,15 +11,14 @@ import adicionesService from '../../adiciones/services/adicionesService';
 import InsumoSearchSelect from '../../../shared/components/InsumoSearchSelect';
 import '../../insumos/pages/InsumosPage.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
+// Vocabulario y derivación del tipo de preparación a partir de la categoría
+// del producto — espejo exacto del backend (config/tiposPreparacion.js), que
+// aplica estas mismas reglas al guardar.
+import { CATEGORIAS_PREP, derivarTipoPreparacion, resolverTipoPreparacion } from '../../../shared/utils/tiposPreparacion';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 const fmtPct = n => `${Math.round((n||0)*100)}%`;
 const fmtFecha = iso => iso ? new Intl.DateTimeFormat('es-CO',{dateStyle:'medium'}).format(new Date(iso)) : '—';
-
-// Vocabulario de "Tipo de preparación" — un único origen de verdad que
-// comparten el formulario y el filtro del listado (antes solo vivía inline
-// dentro del formulario, duplicándose si se necesitaba en otro lado).
-const CATEGORIAS_PREP = ['Caliente','Frío','Batido','Al vapor','Sin preparación'];
 
 // Margen de ganancia mínimo esperado por el negocio (30%). Se usa solo para
 // advertir al administrador — nunca bloquea el guardado de la ficha.
@@ -67,24 +66,39 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   // parte de este formulario las necesitaba hasta ahora.
   const [adiciones, setAdiciones] = useState([]);
   useEffect(() => {
-    productosService.getAll().then(d => setProductos(Array.isArray(d) ? d.filter(p=>p.estado==='Activo') : [])).catch(()=>{});
+    productosService.getAll().then(d => {
+      const lista = Array.isArray(d) ? d : [];
+      // Se muestran los productos activos y, además, el de la ficha que se
+      // está editando aunque esté inactivo: al desactivar una ficha la
+      // cascada desactiva también su producto (ver PATCH /:id/estado en el
+      // backend), así que sin esta excepción el producto desaparecía del
+      // selector justo al volver a abrir esa misma ficha para editarla.
+      const idActual = fichaInicial ? Number(fichaInicial.id_producto) : null;
+      setProductos(lista.filter(p => p.estado === 'Activo' || (idActual && Number(p.id) === idActual)));
+    }).catch(()=>{});
     insumosService.getAll().then(d => setInsumos(Array.isArray(d) ? d : [])).catch(()=>{});
     adicionesService.getAll().then(d => setAdiciones(Array.isArray(d) ? d.filter(a=>a.estado==='Activo') : [])).catch(()=>{});
   }, []);
+  // Al editar, cualquier columna puede venir NULL de fichas guardadas antes
+  // de que existieran las validaciones actuales. Sin los respaldos de abajo,
+  // String(null) dejaba literalmente el texto "null" dentro del campo (y un
+  // categoria_prep nulo rompía el <select>).
   const def = fichaInicial ? {
-    id_producto: String(fichaInicial.id_producto),
-    categoria_prep: fichaInicial.categoria_prep,
-    porciones: String(fichaInicial.porciones),
-    tiempo_prep: String(fichaInicial.tiempo_prep),
-    costo_estimado: String(fichaInicial.costo_estimado),
-    estado: fichaInicial.estado,
+    id_producto: fichaInicial.id_producto != null ? String(fichaInicial.id_producto) : '',
+    categoria_prep: fichaInicial.categoria_prep || 'Caliente',
+    porciones: fichaInicial.porciones != null ? String(fichaInicial.porciones) : '1',
+    tiempo_prep: fichaInicial.tiempo_prep != null ? String(fichaInicial.tiempo_prep) : '5',
+    costo_estimado: fichaInicial.costo_estimado != null ? String(fichaInicial.costo_estimado) : '',
+    estado: fichaInicial.estado !== false,
     notas: fichaInicial.notas || '',
     resumen_prep: fichaInicial.resumen_prep || '',
     preparacion: fichaInicial.preparacion || '',
     vaso_id: fichaInicial.vaso_id ? String(fichaInicial.vaso_id) : '',
     // Antes: fichaInicial.insumos.map(...) — si el backend no traía el
     // arreglo `insumos` en la ficha, esto tronaba al abrir "Editar".
-    insumos: (fichaInicial.insumos || []).map(i => ({ id_insumo: String(i.id_insumo), cantidad: String(i.cantidad), unidad: i.unidad })),
+    insumos: (fichaInicial.insumos || [])
+      .filter(i => i && i.id_insumo != null)
+      .map(i => ({ id_insumo: String(i.id_insumo), cantidad: i.cantidad != null ? String(i.cantidad) : '', unidad: i.unidad || 'g' })),
     // 3 — si el backend ya trae `toppings_ficha` en la propia ficha (nuevo
     // campo, cantidad de cada topping específica de este producto), se
     // prefilena directo desde ahí. Si no viene (fichas guardadas antes de
@@ -100,9 +114,18 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     toppings:[],
   };
 
+  // Si una ficha antigua quedó guardada sin insumos (algo que la API ya no
+  // permite), el formulario abre igual con una fila vacía lista para llenar
+  // en vez de una sección en blanco sin nada donde escribir.
+  if (def.insumos.length === 0) def.insumos = [{ id_insumo:'', cantidad:'', unidad:'g' }];
+
   const [form, setForm] = useState(def);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  // Id de la ficha si ya se llegó a crear dentro de esta misma sesión del
+  // modal (ver handleSubmit): sirve para que un reintegro tras un fallo
+  // parcial actualice esa ficha en vez de intentar crear una segunda.
+  const [fichaYaCreadaId, setFichaYaCreadaId] = useState(null);
 
   // ── Asistente paso a paso (4 pasos) ──────────────────────────────────────
   // Cambio puramente visual: el formulario sigue siendo un único `form` en
@@ -168,14 +191,43 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   const vasosDisponibles = insumos.filter(i => esCategoriaVaso(i) && i.estado === 'Activo');
   const vasoSel = insumos.find(i => String(i.id) === String(form.vaso_id));
 
-  // 3 — un producto solo puede tener una ficha técnica activa. Si estamos
-  // creando (no editando) y el producto elegido ya tiene una ficha activa,
-  // avisamos y ofrecemos saltar directo a editarla en vez de dejar crear
-  // una segunda. El backend valida lo mismo (400) como respaldo por si este
-  // filtro del frontend falla (ej. `fichasExistentes` desactualizado).
+  // Un producto solo puede tener UNA ficha técnica, activa o inactiva. Si
+  // estamos creando (no editando) y el producto elegido ya tiene ficha,
+  // avisamos y ofrecemos saltar directo a editarla en vez de dejar crear una
+  // segunda. El backend valida exactamente lo mismo (400) como respaldo por
+  // si este filtro del frontend falla (ej. `fichasExistentes` desactualizado).
+  //
+  // Antes esta comprobación exigía además `&& f.estado`, así que solo frenaba
+  // los duplicados ACTIVOS: se podían acumular fichas inactivas repetidas del
+  // mismo producto, que volvían a chocar en cuanto alguien las reactivaba.
   const fichaDuplicada = !fichaInicial && form.id_producto
-    ? fichasExistentes.find(f => Number(f.id_producto) === Number(form.id_producto) && f.estado)
+    ? fichasExistentes.find(f => Number(f.id_producto) === Number(form.id_producto))
     : null;
+
+  // ── Tipo de preparación derivado de la categoría del producto ────────────
+  // `tipoPrepDerivado` es null cuando la categoría no permite deducirlo; en
+  // ese caso —y solo en ese— el formulario deja elegirlo a mano.
+  const tipoPrepDerivado   = derivarTipoPreparacion(prodSel?.categoria);
+  const tipoPrepAutomatico = !!(prodSel && tipoPrepDerivado);
+  // Mantiene form.categoria_prep sincronizado con el producto elegido. Se
+  // ejecuta al elegir producto y al cambiarlo, incluso al editar una ficha
+  // vieja que se guardó con un tipo que no corresponde a su categoría (que
+  // era justo lo que se podía hacer antes). Si no es derivable, se respeta
+  // lo que ya había (o el valor por defecto).
+  //
+  // Las dependencias son a propósito solo las del producto: form.categoria_prep
+  // se lee dentro, pero incluirlo volvería a disparar el efecto por su propio
+  // cambio de estado. Por eso el setForm de abajo usa la forma funcional y
+  // compara antes de escribir, así nunca entra en bucle.
+  const idProdSel  = prodSel?.id;
+  const catProdSel = prodSel?.categoria;
+  useEffect(() => {
+    if (!idProdSel) return;
+    setForm(f => {
+      const resuelto = resolverTipoPreparacion(catProdSel, f.categoria_prep);
+      return resuelto === f.categoria_prep ? f : { ...f, categoria_prep: resuelto };
+    });
+  }, [idProdSel, catProdSel]);
 
   // 16.6 — Validación automática de margen y costo de producción: costo
   // real calculado a partir de los insumos consumibles de la ficha MÁS el
@@ -265,20 +317,49 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     return Array.from(mapa.values());
   })();
 
+  // Reglas de los parámetros numéricos, en un solo lugar para que
+  // `validate()` (guardar) y `validarPaso1()` (botón Siguiente) no puedan
+  // discrepar. Mismos topes que el backend: ver validarFichaTecnica en
+  // routes/index.js.
+  const errorNumerico = (valor, min, max) => {
+    if (valor === '' || valor === null || valor === undefined || isNaN(valor)) return `Ingresa un número entre ${min} y ${max}`;
+    const n = Number(valor);
+    if (!Number.isInteger(n)) return 'Debe ser un número entero';
+    if (n < min || n > max) return `Debe estar entre ${min} y ${max}`;
+    return '';
+  };
+
+  // Ids de insumo repetidos dentro de una misma lista. El buscador ya oculta
+  // los ya elegidos en otras filas, pero una ficha guardada antes de esa
+  // mejora sí puede traer repetidos, y el backend los rechaza — mejor
+  // avisarlo aquí que recibir un 400 al guardar.
+  const hayInsumosRepetidos = (lista) => {
+    const ids = lista.map(x => x.id_insumo).filter(Boolean).map(String);
+    return new Set(ids).size !== ids.length;
+  };
+
   const validate = () => {
     const er = {};
     if (!form.id_producto) er.id_producto = 'Selecciona un producto';
-    if (!form.porciones || isNaN(form.porciones) || Number(form.porciones)<1) er.porciones = 'Número ≥ 1';
-    if (!form.tiempo_prep || isNaN(form.tiempo_prep) || Number(form.tiempo_prep)<1) er.tiempo_prep = 'Número ≥ 1';
-    if (!form.costo_estimado || isNaN(form.costo_estimado) || Number(form.costo_estimado) < 0) er.costo_estimado = 'Valor numérico ≥ 0 requerido';
+    er.porciones   = errorNumerico(form.porciones, 1, 1000);
+    er.tiempo_prep = errorNumerico(form.tiempo_prep, 1, 1440);
+    if (!er.porciones)   delete er.porciones;
+    if (!er.tiempo_prep) delete er.tiempo_prep;
+    if (form.costo_estimado === '' || isNaN(form.costo_estimado) || Number(form.costo_estimado) < 0) er.costo_estimado = 'Valor numérico ≥ 0 requerido';
     else if (costoEstimadoSuperaPrecio) er.costo_estimado = 'El costo estimado supera o iguala el valor de venta del producto. Revisa la ficha para evitar pérdidas.';
-    if (!form.preparacion.trim()) er.preparacion = 'La preparación es obligatoria';
-    if (form.insumos.some(i => !i.id_insumo || !i.cantidad || isNaN(i.cantidad) || Number(i.cantidad) <= 0)) er.insumos = 'Completa todos los insumos con una cantidad mayor a 0';
+    // .trim(): un texto de puros espacios ("      ") no es una preparación
+    // válida. El backend aplica exactamente el mismo criterio.
+    if (!form.preparacion.trim()) er.preparacion = 'La preparación es obligatoria y no puede contener solo espacios en blanco';
+    if (form.insumos.length === 0) er.insumos = 'Agrega al menos un insumo a la ficha técnica';
+    else if (form.insumos.some(i => !i.id_insumo || i.cantidad === '' || isNaN(i.cantidad) || Number(i.cantidad) <= 0)) er.insumos = 'Completa todos los insumos con una cantidad mayor a 0';
+    else if (hayInsumosRepetidos(form.insumos)) er.insumos = 'No puedes repetir el mismo insumo dos veces';
     if (!form.vaso_id) er.vaso_id = 'Selecciona el vaso utilizado para este producto';
     // 2 — los toppings son opcionales (la ficha puede no tener ninguno),
     // pero una fila que ya se empezó a llenar debe completarse o quitarse.
-    if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || !t.cantidad || isNaN(t.cantidad) || Number(t.cantidad) <= 0))) {
+    if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || t.cantidad === '' || isNaN(t.cantidad) || Number(t.cantidad) <= 0))) {
       er.toppings = 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)';
+    } else if (hayInsumosRepetidos(form.toppings)) {
+      er.toppings = 'No puedes repetir el mismo insumo dos veces en los toppings';
     }
     // Bloqueo real: no se puede guardar una ficha cuyo costo de producción
     // (insumos + vaso) iguale o supere el precio de venta del producto.
@@ -289,7 +370,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     // backend valida lo mismo con un 400 que queda cubierto por el
     // try/catch de handleSubmit si este filtro llega a fallar.
     if (fichaDuplicada) {
-      er.id_producto = 'Este producto ya tiene una ficha técnica activa. Edítala en vez de crear una nueva.';
+      er.id_producto = 'Este producto ya tiene una ficha técnica registrada. Edítala en vez de crear una nueva.';
     }
     setErrors(er); return Object.keys(er).length === 0;
   };
@@ -309,25 +390,30 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   const validarPaso1 = () => {
     const er = { id_producto:'', porciones:'', tiempo_prep:'', costo_estimado:'' };
     if (!form.id_producto) er.id_producto = 'Selecciona un producto';
-    else if (fichaDuplicada) er.id_producto = 'Este producto ya tiene una ficha técnica activa. Edítala en vez de crear una nueva.';
-    if (!form.porciones || isNaN(form.porciones) || Number(form.porciones)<1) er.porciones = 'Número ≥ 1';
-    if (!form.tiempo_prep || isNaN(form.tiempo_prep) || Number(form.tiempo_prep)<1) er.tiempo_prep = 'Número ≥ 1';
-    if (!form.costo_estimado || isNaN(form.costo_estimado) || Number(form.costo_estimado) < 0) er.costo_estimado = 'Valor numérico ≥ 0 requerido';
+    else if (fichaDuplicada) er.id_producto = 'Este producto ya tiene una ficha técnica registrada. Edítala en vez de crear una nueva.';
+    er.porciones   = errorNumerico(form.porciones, 1, 1000);
+    er.tiempo_prep = errorNumerico(form.tiempo_prep, 1, 1440);
+    if (form.costo_estimado === '' || isNaN(form.costo_estimado) || Number(form.costo_estimado) < 0) er.costo_estimado = 'Valor numérico ≥ 0 requerido';
     else if (costoEstimadoSuperaPrecio) er.costo_estimado = 'El costo estimado supera o iguala el valor de venta del producto. Revisa la ficha para evitar pérdidas.';
     setErrors(e => ({ ...e, ...er }));
     return !er.id_producto && !er.porciones && !er.tiempo_prep && !er.costo_estimado;
   };
 
   const validarPaso2 = () => {
-    const hayError = form.insumos.some(i => !i.id_insumo || !i.cantidad || isNaN(i.cantidad) || Number(i.cantidad) <= 0);
-    setErrors(e => ({ ...e, insumos: hayError ? 'Completa todos los insumos con una cantidad mayor a 0' : '' }));
-    return !hayError;
+    let mensaje = '';
+    if (form.insumos.length === 0) mensaje = 'Agrega al menos un insumo a la ficha técnica';
+    else if (form.insumos.some(i => !i.id_insumo || i.cantidad === '' || isNaN(i.cantidad) || Number(i.cantidad) <= 0)) mensaje = 'Completa todos los insumos con una cantidad mayor a 0';
+    else if (hayInsumosRepetidos(form.insumos)) mensaje = 'No puedes repetir el mismo insumo dos veces';
+    setErrors(e => ({ ...e, insumos: mensaje }));
+    return !mensaje;
   };
 
   const validarPaso3 = () => {
-    const hayError = form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || !t.cantidad || isNaN(t.cantidad) || Number(t.cantidad) <= 0));
-    setErrors(e => ({ ...e, toppings: hayError ? 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)' : '' }));
-    return !hayError;
+    let mensaje = '';
+    if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || t.cantidad === '' || isNaN(t.cantidad) || Number(t.cantidad) <= 0))) mensaje = 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)';
+    else if (hayInsumosRepetidos(form.toppings)) mensaje = 'No puedes repetir el mismo insumo dos veces en los toppings';
+    setErrors(e => ({ ...e, toppings: mensaje }));
+    return !mensaje;
   };
 
   const handleSiguiente = () => {
@@ -350,27 +436,61 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
       });
       return;
     }
-    setLoading(true); await new Promise(r => setTimeout(r, 600)); setLoading(false);
+    // ⚠️ Antes acá había `setLoading(true); await …600ms; setLoading(false);`
+    // ANTES de llamar a la API: el botón se volvía a habilitar justo cuando
+    // empezaba el guardado real, así que un segundo clic (o un doble clic)
+    // disparaba una segunda petición y creaba una ficha duplicada. Ahora
+    // `loading` se mantiene en true durante TODA la petición y solo se
+    // libera en el `finally` de más abajo.
+    setLoading(true);
     // 3 — cantidad de cada topping específica de este producto: va en el
     // campo `toppings_ficha` de la propia ficha (igual que `insumos`), no
     // solo como registros aparte en la tabla `toppings` (ver el sync más
     // abajo, que se mantiene por compatibilidad con la selección de
     // toppings por defecto del Cajero).
     const toppingsFicha = form.toppings
-      .filter(t => t.id_insumo && t.cantidad && !isNaN(t.cantidad))
+      .filter(t => t.id_insumo && t.cantidad !== '' && !isNaN(t.cantidad) && Number(t.cantidad) > 0)
       .map(t => ({ id_insumo: Number(t.id_insumo), cantidad: Number(t.cantidad), unidad: t.unidad }));
     // `toppings` (crudo, con _toppingId de uso interno) no se manda tal
     // cual — se excluye del spread para no confundir al backend con dos
     // campos de toppings a la vez; lo que se envía es `toppings_ficha`.
     const { toppings: _formTopRaw, ...formSinToppingsRaw } = form;
-    const data = { ...formSinToppingsRaw, id_producto:Number(form.id_producto), porciones:Number(form.porciones), tiempo_prep:Number(form.tiempo_prep), costo_estimado:Number(form.costo_estimado), vaso_id:Number(form.vaso_id), toppings_ficha: toppingsFicha };
+    const data = {
+      ...formSinToppingsRaw,
+      id_producto: Number(form.id_producto),
+      porciones: Number(form.porciones),
+      tiempo_prep: Number(form.tiempo_prep),
+      costo_estimado: Number(form.costo_estimado),
+      vaso_id: Number(form.vaso_id),
+      // Se recortan los textos antes de enviarlos para que no se guarden
+      // espacios sobrantes al inicio/final (el backend hace lo mismo, pero
+      // así lo que se ve en pantalla y lo que se guarda coinciden).
+      preparacion: form.preparacion.trim(),
+      resumen_prep: form.resumen_prep.trim(),
+      notas: form.notas.trim(),
+      // El tipo de preparación se recalcula desde la categoría del producto
+      // justo antes de enviar: es la misma regla que aplica el servidor, así
+      // que nunca puede salir un valor distinto al que se guardará.
+      categoria_prep: resolverTipoPreparacion(prodSel?.categoria, form.categoria_prep),
+      toppings_ficha: toppingsFicha,
+    };
     // api.js lanza (throw) cuando el backend responde con error — ej. la
     // validación real de "el costo estimado supera el precio de venta".
     // Sin try/catch esa excepción quedaba sin capturar: el modal no
     // mostraba nada y el usuario veía como si "no se guardara" sin motivo.
     try {
-      const r = fichaInicial ? await fichasTecnicasService.update(getFichaId(fichaInicial), data) : await fichasTecnicasService.create(data);
-      if (r.error) { setErrors({general:r.error}); return; }
+      // `fichaYaCreadaId` cubre el reintento tras un fallo en la
+      // sincronización de toppings (ver más abajo): en ese caso la ficha YA
+      // se creó, así que un segundo "Guardar" tiene que ACTUALIZARLA, no
+      // volver a crearla. Sin esto el reintento chocaba contra la regla de
+      // "un producto = una ficha" y el usuario quedaba atascado con un
+      // error de duplicado que no podía resolver desde el modal.
+      const idExistente = fichaInicial ? getFichaId(fichaInicial) : fichaYaCreadaId;
+      const r = idExistente
+        ? await fichasTecnicasService.update(idExistente, data)
+        : await fichasTecnicasService.create(data);
+      if (r.error) { setErrors({general:r.error}); setLoading(false); return; }
+      if (!idExistente) setFichaYaCreadaId(getFichaId(r));
 
       // 2 — sincroniza los toppings ligados a este producto: crea/actualiza
       // los que quedaron en el formulario y elimina los que el usuario quitó.
@@ -379,7 +499,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
       // guardado de la ficha — ya quedó guardada — solo se avisa aparte.
       try {
         const idProd = Number(form.id_producto);
-        const filasValidas = form.toppings.filter(t => t.id_insumo && t.cantidad && !isNaN(t.cantidad));
+        const filasValidas = form.toppings.filter(t => t.id_insumo && t.cantidad !== '' && !isNaN(t.cantidad) && Number(t.cantidad) > 0);
         const idsConservados = new Set(filasValidas.filter(t => t._toppingId).map(t => t._toppingId));
         await Promise.all([
           ...filasValidas.map(t => {
@@ -392,15 +512,21 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
       } catch (topErr) {
         // La ficha ya quedó guardada — no revertimos eso — pero no cerramos
         // el modal para que el error sea visible y el usuario pueda
-        // reintentar (guardar de nuevo es seguro: no se duplica la ficha,
-        // el backend la reconoce como ya existente si hiciera falta).
+        // reintentar. El reintento es seguro: `fichaYaCreadaId` hace que el
+        // siguiente guardado sea una actualización de esa misma ficha.
         setErrors({general: 'La ficha se guardó, pero no se pudieron actualizar sus toppings: ' + (topErr.message || 'error desconocido')});
+        setLoading(false);
         return;
       }
 
       onSave(r);
     } catch (err) {
       setErrors({general: err.message || 'No se pudo guardar la ficha técnica.'});
+    } finally {
+      // Se libera SIEMPRE, también si algo lanzó una excepción: si no, el
+      // botón quedaba deshabilitado para siempre y había que cerrar el modal
+      // y volver a empezar.
+      setLoading(false);
     }
   };
 
@@ -492,7 +618,9 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
                 {fichaDuplicada && (
                   <div style={{background:'rgba(245,176,0,0.12)',border:'1px solid rgba(245,176,0,0.4)',borderRadius:8,padding:'8px 10px',marginTop:6,fontSize:12,color:'#F57F17',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                     <IconAlerta style={{flexShrink:0}}/>
-                    <span style={{flex:1}}>Este producto ya tiene una ficha técnica activa.</span>
+                    <span style={{flex:1}}>
+                      Este producto ya tiene una ficha técnica{fichaDuplicada.estado ? '' : ' (inactiva)'}.
+                    </span>
                     <button type="button" onClick={() => onEditExisting && onEditExisting(fichaDuplicada)}
                       style={{padding:'4px 10px',borderRadius:6,border:'1.5px solid #F57F17',background:'transparent',color:'#F57F17',cursor:'pointer',fontSize:11,fontWeight:700}}>
                       Editar ficha existente
@@ -500,24 +628,45 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
                   </div>
                 )}
               </div>
-              <div>
-                <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Categoría</label>
-                {/* 4 — la categoría pertenece al producto, no a la ficha
-                    técnica: se autocompleta al elegir el producto y queda
-                    bloqueada (readOnly), no es un dato que el usuario deba
-                    poder cambiar manualmente aquí. */}
-                <input type="text" readOnly disabled value={prodSel ? prodSel.categoria : ''}
-                  placeholder="Elige un producto"
-                  title="Categoría del producto — se autocompleta y no es editable"
-                  style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-surface-2)',color:'var(--text-secondary)',cursor:'not-allowed'}}/>
-              </div>
-              <div>
-                <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Tipo de preparación</label>
-                <select value={form.categoria_prep} onChange={e => setF('categoria_prep', e.target.value)}
-                  title="Cómo se prepara este producto"
-                  style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}>
-                  {CATEGORIAS_PREP.map(c => <option key={c}>{c}</option>)}
-                </select>
+              {/* El campo "Categoría" independiente se eliminó: era un dato
+                  del producto repetido en la ficha (ya aparece junto al
+                  nombre en el selector de arriba y en el resumen verde de
+                  abajo), y lo único que hacía falta de él —el tipo de
+                  preparación— ahora se deduce solo. */}
+              <div style={{gridColumn:'span 2'}}>
+                <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>
+                  Tipo de preparación
+                  {tipoPrepAutomatico && <span style={{fontWeight:500,color:'var(--text-muted)',marginLeft:6}}>(automático)</span>}
+                </label>
+                {tipoPrepAutomatico ? (
+                  // Caso normal: la categoría del producto dice cómo se
+                  // prepara ("bebidas calientes" → Caliente, "bebidas
+                  // frías"/"jugos naturales" → Frío), así que el tipo se
+                  // llena solo y queda en solo lectura. Antes había que
+                  // elegirlo a mano y nada impedía guardar una ficha
+                  // "Caliente" para una bebida fría.
+                  <div title={`Se toma de la categoría del producto (${prodSel?.categoria || '—'})`}
+                    style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-surface-2)',color:'var(--text-secondary)',cursor:'not-allowed',display:'flex',alignItems:'center',gap:8}}>
+                    <span style={{fontWeight:700,color:'var(--text-primary)'}}>{form.categoria_prep}</span>
+                    <span style={{fontSize:11,color:'var(--text-muted)'}}>· según la categoría «{prodSel?.categoria}»</span>
+                  </div>
+                ) : (
+                  // Solo cuando la categoría del producto no permite
+                  // deducirlo (una categoría nueva con un nombre que no dice
+                  // nada sobre la preparación) se deja elegir a mano.
+                  <>
+                    <select value={form.categoria_prep} onChange={e => setF('categoria_prep', e.target.value)}
+                      title="Cómo se prepara este producto"
+                      style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}>
+                      {CATEGORIAS_PREP.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <div style={{fontSize:11,color:'var(--text-muted)',marginTop:4}}>
+                      {prodSel
+                        ? `La categoría «${prodSel.categoria || 'sin categoría'}» no indica cómo se prepara: elígelo aquí.`
+                        : 'Elige primero un producto para que se complete automáticamente.'}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             {prodSel && (
@@ -865,7 +1014,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
                 </button>
               ) : (
                 <button key="btn-guardar" type="submit" className="btn-add" disabled={loading || costoSuperaPrecio || costoEstimadoSuperaPrecio || !!fichaDuplicada}
-                  title={costoSuperaPrecio || costoEstimadoSuperaPrecio ? 'El costo de producción supera o iguala el precio de venta — corrige la ficha antes de guardar' : fichaDuplicada ? 'Este producto ya tiene una ficha técnica activa' : undefined}
+                  title={costoSuperaPrecio || costoEstimadoSuperaPrecio ? 'El costo de producción supera o iguala el precio de venta — corrige la ficha antes de guardar' : fichaDuplicada ? 'Este producto ya tiene una ficha técnica registrada' : undefined}
                   style={{display:'flex',alignItems:'center',gap:6}}>
                   {loading ? 'Guardando...' : fichaInicial ? <><IconGuardar/> Actualizar ficha</> : <><IconMas/> Guardar ficha técnica</>}
                 </button>
@@ -1074,7 +1223,10 @@ export default function FichasTecnicasPage() {
   const displayed = fichas.filter(f => {
     const p = getProd(f.id_producto);
     const q = query.trim().toLowerCase();
-    const matchQuery = !q || (p?.nombre||'').toLowerCase().includes(q) || f.categoria_prep.toLowerCase().includes(q);
+    // (f.categoria_prep||''): si una ficha antigua tiene el tipo de
+    // preparación vacío, `.toLowerCase()` sobre null tumbaba TODA la página
+    // en cuanto se escribía algo en el buscador.
+    const matchQuery = !q || (p?.nombre||'').toLowerCase().includes(q) || (f.categoria_prep||'').toLowerCase().includes(q);
     const matchCat   = catFiltro === 'todas' || p?.categoria === catFiltro;
     const matchTipo  = tipoPrepFiltro === 'todos' || f.categoria_prep === tipoPrepFiltro;
     const matchEstado = estadoFiltro === 'todos' || (estadoFiltro === 'activas' ? !!f.estado : !f.estado);
@@ -1084,9 +1236,32 @@ export default function FichasTecnicasPage() {
   const totalPages = Math.ceil(displayed.length / PER_PAGE);
   const paginated  = displayed.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
+  // Activar/desactivar una ficha desde la tabla. Antes el error del
+  // servidor (ej. reactivar una ficha cuyo producto ya tiene otra activa,
+  // que responde 400) se perdía en silencio: el interruptor simplemente no
+  // se movía y no aparecía ninguna explicación.
+  const handleToggleEstado = async (ficha) => {
+    setListError('');
+    try {
+      await fichasTecnicasService.toggleEstado?.(getFichaId(ficha));
+      refresh();
+    } catch (err) {
+      setListError(err?.message || 'No se pudo cambiar el estado de la ficha técnica.');
+    }
+  };
+
   const handleDelete = async () => {
-    await fichasTecnicasService.remove(getFichaId(deleteTarget));
-    refresh(); showOk('Ficha técnica anulada'); setDel(null); closeModal();
+    // Antes no había try/catch: si la API respondía con error (ficha ya
+    // borrada, sesión expirada, servidor caído) la excepción quedaba sin
+    // capturar y la pantalla mostraba igual "Ficha técnica anulada" aunque
+    // no se hubiera borrado nada.
+    try {
+      await fichasTecnicasService.remove(getFichaId(deleteTarget));
+      refresh(); showOk('Ficha técnica anulada'); setDel(null); closeModal();
+    } catch (err) {
+      setDel(null);
+      setListError(err?.message || 'No se pudo anular la ficha técnica.');
+    }
   };
 
   return (
@@ -1228,7 +1403,7 @@ export default function FichasTecnicasPage() {
                         <td style={{fontWeight:600,color:'#E65100'}}>{fmt(f.costo_estimado)}</td>
                         <td>
                           {hasPermiso('fichas', 'editar') ? (
-                            <button className={`toggle-btn ${f.estado?'toggle-on':'toggle-off'}`} onClick={async () => { await fichasTecnicasService.toggleEstado?.(getFichaId(f)); refresh(); }} title={f.estado?'Activa':'Inactiva'}>
+                            <button className={`toggle-btn ${f.estado?'toggle-on':'toggle-off'}`} onClick={() => handleToggleEstado(f)} title={f.estado?'Activa (clic para desactivar)':'Inactiva (clic para activar)'}>
                               <span className="toggle-thumb"/>
                             </button>
                           ) : (

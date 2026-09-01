@@ -23,6 +23,8 @@ import '../shared/components/PedidoProgreso.css';
 import ImageLightbox from '../shared/components/ImageLightbox';
 import '../shared/components/ImageLightbox.css';
 import './Landing.css';
+import { errorPassword } from '../shared/utils/passwordPolicy';
+import PasswordRequisitos from '../shared/components/PasswordRequisitos';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 
@@ -1458,8 +1460,12 @@ const handleLogin = async e => {
     if (!regData.correo.trim()) { setAuthError("El correo es obligatorio."); return; }
     if (!/\S+@\S+\.\S+/.test(regData.correo)) { setAuthError("Ingresa un correo electrónico válido."); return; }
     if (!regData.password) { setAuthError("La contraseña es obligatoria."); return; }
-    if (regData.password.length < 8) { setAuthError("La contraseña debe tener mínimo 8 caracteres."); return; }
-    if (!/[A-Z]/.test(regData.password)) { setAuthError("La contraseña debe tener al menos una letra mayúscula."); return; }
+    // Regla única compartida con el resto del sistema y con la API. Antes
+    // aquí se pedían 8 caracteres + 1 mayúscula, pero el servidor exige 10
+    // con 8 números y 1 carácter especial: el registro se caía después de
+    // que esta pantalla lo había dado por válido.
+    const errPw = errorPassword(regData.password);
+    if (errPw) { setAuthError(errPw); return; }
     if (!regData.confirm) { setAuthError("Debes confirmar la contraseña."); return; }
     if (regData.password !== regData.confirm) { setAuthError("Las contraseñas no coinciden."); return; }
     if (regData.municipio === 'Medellín' && regData.comuna && regData.comuna !== 'Comuna 8 - Villa Hermosa' && regData.comuna !== 'Comuna 9 - Buenos Aires') {
@@ -2173,10 +2179,9 @@ const handleLogin = async e => {
                   <p style={{fontSize:12,color:'#81C784',marginTop:-8,marginBottom:4,fontWeight:600}}>✓ ¡Perfecto! Hacemos domicilios a tu zona.</p>
                 )}
                 <div className="lx-form__2">
-                  <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Mín. 8, 1 mayúscula" value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
+                  <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Contraseña segura" value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div><PasswordRequisitos password={regData.password} mostrarSiempre compacto /></div>
                   <div className="lx-field"><label>Confirmar *</label><div className="lx-pass-wrap"><input type={showRegConf?'text':'password'} placeholder="••••••••" value={regData.confirm} onChange={e=>setRegData({...regData,confirm:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegConf(v=>!v)}>{showRegConf?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                 </div>
-                <p style={{fontSize:11,color:'var(--lx-muted)',marginTop:-8,marginBottom:4}}>La contraseña debe tener mínimo 8 caracteres y al menos una letra mayúscula.</p>
                 <button type="submit" className="lx-btn lx-btn--full" disabled={authLoading}>{authLoading?"Creando...":"Crear cuenta"}</button>
               </form>
             )}

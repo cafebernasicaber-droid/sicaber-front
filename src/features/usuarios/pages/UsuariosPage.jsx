@@ -6,11 +6,21 @@ import AnularButton from '../../../shared/components/AnularButton';
 import useUsuarios from '../hooks/useUsuarios';
 import rolesService from '../../roles/services/rolesService';
 import useClientes from '../../clientes/hooks/useClientes';
-import clientesService from '../../clientes/services/clientesService';
 import useProveedores from '../../proveedores/hooks/useProveedores';
 import useEmpleados from '../../empleados/hooks/useEmpleados';
 import { EmpleadoModal } from '../../empleados/pages/EmpleadosPage';
+// Formularios NATIVOS del módulo de Clientes. Registrar/editar un cliente
+// desde esta pantalla abre exactamente el mismo formulario que se usa en
+// Clientes — antes había aquí una copia aparte (ModalFormCliente) que pedía
+// campos distintos y perdía datos (la comuna, por ejemplo).
+import ClienteRegistroModal from '../../clientes/components/ClienteRegistroModal';
+import ClienteEditarModal from '../../clientes/components/ClienteEditarModal';
 import localesService from '../../../shared/services/localesService';
+// Regla ÚNICA de contraseña (espejo del backend) + checklist visible en vivo.
+// Antes esta pantalla exigía 6 caracteres y el servidor 10: el formulario
+// decía que estaba bien y la API la rechazaba después.
+import { errorPassword } from '../../../shared/utils/passwordPolicy';
+import PasswordRequisitos from '../../../shared/components/PasswordRequisitos';
 import '../../insumos/pages/InsumosPage.css';
 import './Usuarios.css';
 import './Usuarios.modal.css';
@@ -45,6 +55,22 @@ const ROLES_FIJOS_INFO = {
   'Bartender':     {  color: '#43A047', desc: 'Acceso al módulo de preparación de pedidos' },
 };
 const ROLES_FIJOS_NOMBRES = Object.keys(ROLES_FIJOS_INFO);
+
+// Roles que en el sistema NO son "un usuario suelto" sino un EMPLEADO con
+// su cuenta de acceso: registrarlos crea una fila en `empleados` Y su
+// usuario en `usuarios` (ver POST /empleados en el backend, constante
+// CARGOS_CON_LOGIN, que contiene exactamente estos dos). Por eso al elegir
+// "registrar un Bartender" desde esta pantalla se abre el formulario real de
+// Empleados (documento, dirección, local, usuario y contraseña) y no el
+// formulario genérico de usuario.
+//
+// ⚠️ "Administrador" queda FUERA a propósito, aunque el módulo de Empleados
+// lo ofrezca como cargo: el backend solo crea cuenta de acceso para Cajero y
+// Bartender, así que un Administrador registrado por esa vía quedaría sin
+// usuario y NO podría iniciar sesión. Los administradores y cualquier rol
+// personalizado siguen usando ModalFormUsuario, que es su formulario propio.
+const ROLES_DE_EMPLEADO = ['Cajero', 'Bartender'];
+const esRolDeEmpleado = (rol) => ROLES_DE_EMPLEADO.some(r => r.toLowerCase() === String(rol || '').trim().toLowerCase());
 // `roles` es opcional: sin la lista real solo se pierde la descripción
 // personalizada de un rol nuevo (queda un texto genérico) — el ícono y el
 // color siempre funcionan igual, así que cualquier llamado existente que no
@@ -69,23 +95,10 @@ const construirTiposRegistro = (roles) => {
   return [TIPO_CLIENTE, ...fijos.map(f => getTipoInfo(f, rolesList)), ...extras];
 };
 
-// ── Ubicación (usado por el formulario de cliente) ────────────────────────────
-const DEPARTAMENTOS = {
-  'Antioquia':        ['Medellín','Bello','Itagüí','Envigado','Sabaneta','Rionegro','Apartadó','Turbo'],
-  'Bogotá D.C.':       ['Bogotá'],
-  'Valle del Cauca':   ['Cali','Buenaventura','Palmira','Tuluá','Cartago'],
-  'Cundinamarca':      ['Soacha','Facatativá','Zipaquirá','Chía','Fusagasugá'],
-  'Atlántico':         ['Barranquilla','Soledad','Malambo'],
-  'Bolívar':           ['Cartagena','Magangué','Turbaco'],
-  'Santander':         ['Bucaramanga','Floridablanca','Girón','Piedecuesta'],
-  'Córdoba':           ['Montería','Lorica','Sahagún'],
-  'Nariño':            ['Pasto','Tumaco','Ipiales'],
-  'Risaralda':         ['Pereira','Dosquebradas','Santa Rosa de Cabal'],
-  'Tolima':            ['Ibagué','Espinal','Melgar'],
-  'Huila':             ['Neiva','Pitalito','Garzón'],
-  'Cauca':             ['Popayán','Santander de Quilichao'],
-};
-const COMUNAS_MEDELLIN = ['Comuna 8 - Villa Hermosa', 'Comuna 9 - Buenos Aires'];
+// (Las listas de departamentos/municipios/comunas ya no viven aquí: eran del
+// formulario de cliente propio de esta pantalla, que se retiró en favor de
+// los formularios nativos del módulo de Clientes — ellos traen su propio
+// catálogo de ubicación, que es el mismo.)
 
 // ── Modal: Seleccionar tipo de registro ───────────────────────────────────────
 function ModalSeleccionarTipo({ tipos, onSelect, onClose }) {
@@ -242,7 +255,12 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
     if (!form.username.trim()) { setError('El nombre de usuario es obligatorio.'); return; }
     if (form.correo && !/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
     if (!isEdit && !form.password) { setError('La contraseña es obligatoria.'); return; }
-    if (!isEdit && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
+    // Al editar, la contraseña es opcional: solo se valida si escribieron una
+    // nueva (dejarla en blanco significa "no cambiarla").
+    if (form.password) {
+      const errPw = errorPassword(form.password);
+      if (errPw) { setError(errPw); return; }
+    }
     if (!isEdit && !confirm) { setError('Debes confirmar la contraseña.'); return; }
     if (!form.rol) { setError('Selecciona un rol.'); return; }
     // El local solo es obligatorio para Cajero y Bartender: son los roles
@@ -332,8 +350,9 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
                     {isEdit ? 'Nueva contraseña (dejar en blanco para no cambiar)' : 'Contraseña *'}
                   </label>
                   <input style={inputStyle} type="password"
-                    placeholder={isEdit ? 'Nueva contraseña...' : 'Mín. 6 caracteres'}
+                    placeholder={isEdit ? 'Nueva contraseña...' : 'Contraseña segura'}
                     value={form.password} onChange={e => set('password', e.target.value)} />
+                  <PasswordRequisitos password={form.password} mostrarSiempre={!isEdit} compacto />
                 </div>
                 <div>
                   <label style={labelStyle}>
@@ -418,173 +437,12 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
   );
 }
 
-// ── Modal: Crear / Editar cliente ─────────────────────────────────────────────
-function ModalFormCliente({ cliente, onCreate, onUpdate, onClose }) {
-  const isEdit = !!cliente;
-  const [form, setForm] = useState({
-    nombre: cliente?.nombre || '', correo: cliente?.correo || '', telefono: cliente?.telefono || '',
-    tipoDoc: cliente?.tipoDoc || 'Cédula de Ciudadanía', numeroDoc: cliente?.numeroDoc || '',
-    departamento: cliente?.departamento || 'Antioquia', municipio: cliente?.municipio || 'Medellín', comuna: cliente?.comuna || '',
-    direccion: cliente?.direccion || '', password: '', confirm: '',
-  });
-  const [error, setError]     = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const municipios = DEPARTAMENTOS[form.departamento] || [];
-
-  const handleDepartamento = (dep) => {
-    setForm(f => ({ ...f, departamento: dep, municipio: (DEPARTAMENTOS[dep] || [])[0] || '', comuna: '' }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault(); setError('');
-    if (!form.nombre.trim())  { setError('El nombre es obligatorio.'); return; }
-    if (!form.correo.trim())  { setError('El correo es obligatorio.'); return; }
-    if (!/\S+@\S+\.\S+/.test(form.correo)) { setError('Ingresa un correo electrónico válido.'); return; }
-    if (!isEdit && !form.password) { setError('La contraseña es obligatoria.'); return; }
-    if (!isEdit && form.password.length < 6) { setError('La contraseña debe tener mínimo 6 caracteres.'); return; }
-    if (!isEdit && !form.confirm) { setError('Debes confirmar la contraseña.'); return; }
-    if (form.password && form.password !== form.confirm) { setError('Las contraseñas no coinciden.'); return; }
-
-    setLoading(true);
-    const { confirm, password, ...resto } = form;
-    const datos = password ? { ...resto, password } : resto;
-    try {
-      const r = isEdit ? await onUpdate(cliente.id, datos) : await onCreate(datos);
-      if (r && r.error) { setError(r.error); setLoading(false); return; }
-      setLoading(false);
-    } catch (err) {
-      setError(err.message || 'Ocurrió un error al guardar el cliente.');
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="usuario-modal-box" style={{ width: '100%', maxWidth: 620 }} onClick={e => e.stopPropagation()}>
-        <div className="usuario-modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(0,172,193,0.15)', color: '#00ACC1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-              🧑
-            </div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>{isEdit ? 'Editar cliente' : 'Nuevo cliente'}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{isEdit ? `Modificando: ${cliente.nombre}` : 'Crea una cuenta de cliente para la tienda en línea'}</div>
-            </div>
-          </div>
-          <button className="usuario-modal-close" onClick={onClose}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="usuario-modal-body">
-          {error && (
-            <div style={{ background: 'rgba(229,57,53,0.12)', color: 'var(--color-red)', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
-              ⚠ {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={labelStyle}>Nombre completo *</label>
-                  <input style={inputStyle} type="text" placeholder="Nombre completo"
-                    value={form.nombre} onChange={e => set('nombre', e.target.value)} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Teléfono</label>
-                  <input style={inputStyle} type="tel" placeholder="300 000 0000"
-                    value={form.telefono} onChange={e => set('telefono', e.target.value)} />
-                </div>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Correo electrónico *</label>
-                <input style={inputStyle} type="text" placeholder="correo@ejemplo.com"
-                  value={form.correo} onChange={e => set('correo', e.target.value)} />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={labelStyle}>Tipo de documento</label>
-                  <select style={inputStyle} value={form.tipoDoc} onChange={e => set('tipoDoc', e.target.value)}>
-                    <option>Cédula de Ciudadanía</option>
-                    <option>Tarjeta de Identidad</option>
-                    <option>Cédula de Extranjería</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Número de documento</label>
-                  <input style={inputStyle} type="text" placeholder="Ej: 1234567890"
-                    value={form.numeroDoc} onChange={e => set('numeroDoc', e.target.value)} />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={labelStyle}>Departamento</label>
-                  <select style={inputStyle} value={form.departamento}
-                    onChange={e => handleDepartamento(e.target.value)}>
-                    {Object.keys(DEPARTAMENTOS).map(d => <option key={d}>{d}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Municipio / Ciudad</label>
-                  <select style={inputStyle} value={form.municipio} onChange={e => set('municipio', e.target.value)}>
-                    {municipios.map(m => <option key={m}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {form.municipio === 'Medellín' && (
-                <div>
-                  <label style={labelStyle}>
-                    Comuna <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(domicilios solo en comunas 8 y 9)</span>
-                  </label>
-                  <select style={inputStyle} value={form.comuna} onChange={e => set('comuna', e.target.value)}>
-                    <option value="">Seleccionar comuna...</option>
-                    {COMUNAS_MEDELLIN.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label style={labelStyle}>Dirección</label>
-                <input style={inputStyle} type="text" placeholder="Ej: Calle 10 # 43-20"
-                  value={form.direccion} onChange={e => set('direccion', e.target.value)} />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={labelStyle}>{isEdit ? 'Nueva contraseña (opcional)' : 'Contraseña *'}</label>
-                  <input style={inputStyle} type="password" placeholder="Mín. 6 caracteres"
-                    value={form.password} onChange={e => set('password', e.target.value)} />
-                </div>
-                <div>
-                  <label style={labelStyle}>{isEdit ? 'Confirmar nueva contraseña' : 'Confirmar contraseña *'}</label>
-                  <input style={inputStyle} type="password" placeholder="Repite la contraseña"
-                    value={form.confirm} onChange={e => set('confirm', e.target.value)} />
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-              <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
-              <button type="submit" className="btn-confirm-primary" disabled={loading}>
-                {loading ? 'Guardando...' : isEdit ? '💾 Guardar cambios' : '✅ Registrar cliente'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ── Modal de cliente: se usan los formularios NATIVOS del módulo de
+// Clientes (ClienteRegistroModal / ClienteEditarModal, importados arriba).
+// Aquí vivía una copia propia, `ModalFormCliente`, que se eliminó: pedía
+// campos distintos a los del registro real de un cliente (sin la opción
+// "Otros" en el tipo de documento) y enviaba la comuna a un endpoint que no
+// la leía, así que ese dato se perdía en silencio al guardar.
 
 // ── Modal: Crear / Editar proveedor ───────────────────────────────────────────
 function ModalFormProveedor({ proveedor, onCreate, onUpdate, onClose }) {
@@ -702,8 +560,8 @@ const UsuariosPage = () => {
   // usuarioRows/clienteRows más abajo) — cada fila gobierna su propio
   // permiso según su `tipo`, no siempre 'usuarios'.
   const moduloDe = item => (item.tipo === 'usuario' ? 'usuarios' : 'clientes');
-  const { usuarios, create, update, remove, toggleEstado } = useUsuarios();
-  const { clientes, update: updateCliente, remove: removeCliente, toggleEstado: toggleClienteEstado, refresh: refreshClientes } = useClientes();
+  const { usuarios, create, update, remove, toggleEstado, refresh: refreshUsuarios } = useUsuarios();
+  const { clientes, remove: removeCliente, toggleEstado: toggleClienteEstado, refresh: refreshClientes } = useClientes();
   const { proveedores, create: createProveedor, update: updateProveedor, remove: removeProveedor, toggleEstado: toggleProveedorEstado } = useProveedores();
   // ⚠️ Esta línea estaba COMENTADA, pero las tres funciones que devuelve se
   // seguían usando más abajo: handleToggleEstado (tipo 'Empleado'),
@@ -863,15 +721,6 @@ const UsuariosPage = () => {
     return r;
   };
 
-  const handleCreateCliente = async data => {
-    const r = await clientesService.register(data);
-    if (r?.error) return r;
-    refreshClientes();
-    showOk('Cliente registrado correctamente.');
-    closeModal();
-    return r;
-  };
-
   const handleCreateProveedor = async data => {
     const r = await createProveedor(data);
     if (r?.error) return r;
@@ -885,14 +734,6 @@ const UsuariosPage = () => {
     const r = await update(id, data);
     if (r?.error) return r;
     showOk('Usuario actualizado correctamente.');
-    closeModal();
-    return r;
-  };
-
-  const handleUpdateCliente = async (id, data) => {
-    const r = await updateCliente(id, data);
-    if (r?.error) return r;
-    showOk('Cliente actualizado correctamente.');
     closeModal();
     return r;
   };
@@ -952,12 +793,33 @@ const UsuariosPage = () => {
           />
         )}
 
-        {(modal === 'nuevo' || modal === 'editar') && registroTipo === 'Cliente' && (
-          <ModalFormCliente
-            cliente={modal === 'editar' ? targetItem?.raw : null}
-            onCreate={handleCreateCliente}
-            onUpdate={handleUpdateCliente}
+        {/* ── Cliente ──────────────────────────────────────────────────────
+            Registrar y editar un cliente abre EXACTAMENTE los mismos
+            formularios del módulo de Clientes (ClienteRegistroModal /
+            ClienteEditarModal). Antes esta pantalla tenía su propia copia
+            (ModalFormCliente) que pedía campos distintos: no permitía elegir
+            "Otros" como tipo de documento y enviaba la comuna a un endpoint
+            que no la leía, así que ese dato se perdía. */}
+        {modal === 'nuevo' && registroTipo === 'Cliente' && (
+          <ClienteRegistroModal
             onClose={closeModal}
+            onCreated={() => {
+              refreshClientes();
+              showOk('Cliente registrado correctamente.');
+              closeModal();
+            }}
+          />
+        )}
+
+        {modal === 'editar' && registroTipo === 'Cliente' && targetItem?.raw && (
+          <ClienteEditarModal
+            cliente={targetItem.raw}
+            onClose={closeModal}
+            onSaved={() => {
+              refreshClientes();
+              showOk('Cliente actualizado correctamente.');
+              closeModal();
+            }}
           />
         )}
 
@@ -970,19 +832,51 @@ const UsuariosPage = () => {
           />
         )}
 
-        {(modal === 'nuevo' || modal === 'editar') && registroTipo === 'Empleado' && (
+        {/* ── Empleado ─────────────────────────────────────────────────────
+            Dos caminos hasta el MISMO formulario del módulo de Empleados:
+              • registroTipo === 'Empleado'        → como siempre;
+              • registroTipo Cajero/Bartender      → al elegir esa tarjeta en
+                "¿Qué deseas registrar?", con el cargo ya fijado.
+            Al guardar se refrescan las DOS listas: el backend crea el
+            empleado y, además, su cuenta en `usuarios`, así que la fila nueva
+            tiene que aparecer también en la tabla de esta pantalla. */}
+        {modal === 'nuevo' && (registroTipo === 'Empleado' || esRolDeEmpleado(registroTipo)) && (
           <EmpleadoModal
-            initial={modal === 'editar' ? targetItem?.raw : null}
+            cargoFijo={esRolDeEmpleado(registroTipo) ? registroTipo : undefined}
+            initial={null}
             onClose={closeModal}
             onSave={() => {
               refreshEmpleados();
-              showOk(modal === 'editar' ? 'Empleado actualizado correctamente.' : 'Empleado registrado correctamente.');
+              refreshUsuarios();
+              showOk(`${registroTipo === 'Empleado' ? 'Empleado' : registroTipo} registrado correctamente.`);
               closeModal();
             }}
           />
         )}
 
-        {(modal === 'nuevo' || modal === 'editar') && registroTipo !== 'Cliente' && registroTipo !== 'Proveedor' && registroTipo !== 'Empleado' && (
+        {modal === 'editar' && registroTipo === 'Empleado' && (
+          <EmpleadoModal
+            initial={targetItem?.raw || null}
+            onClose={closeModal}
+            onSave={() => {
+              refreshEmpleados();
+              refreshUsuarios();
+              showOk('Empleado actualizado correctamente.');
+              closeModal();
+            }}
+          />
+        )}
+
+        {/* ── Usuario interno ──────────────────────────────────────────────
+            Administrador y cualquier rol personalizado creado en Gestión de
+            Roles: este ES su formulario propio (no existe otro). También se
+            usa para EDITAR cualquier fila de la tabla `usuarios`, incluidos
+            los Cajeros/Bartenders — editar ahí cambia la cuenta de acceso,
+            que es justo lo que muestra esta pantalla; para cambiar el resto
+            de datos del empleado se entra por el módulo de Empleados. */}
+        {(modal === 'nuevo' || modal === 'editar')
+          && registroTipo !== 'Cliente' && registroTipo !== 'Proveedor' && registroTipo !== 'Empleado'
+          && !(modal === 'nuevo' && esRolDeEmpleado(registroTipo)) && (
           <ModalFormUsuario
             usuario={modal === 'editar' ? targetItem?.raw : null}
             roles={roles}
