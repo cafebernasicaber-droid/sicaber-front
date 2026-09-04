@@ -1,0 +1,97 @@
+/* ══════════════ Page Transition Overlay (global) ══════════════ */
+.pto {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pto__run {
+  position: absolute;
+  inset: 0;
+}
+
+/* Velo de fondo: oscurece y difumina la pantalla mientras se ejecuta el
+   cambio (antes esto lo tapaba la cortina verde). Usa --modal-overlay
+   —translúcido y definido en ambos temas— para que la taza blanca
+   siga contrastando en claro y en oscuro. */
+.pto__blur {
+  position: absolute;
+  inset: 0;
+  background: var(--modal-overlay);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  opacity: 0;
+  animation: ptoBlurFade 1.9s ease forwards;
+}
+@keyframes ptoBlurFade {
+  0%   { opacity: 0;   backdrop-filter: blur(0px);   -webkit-backdrop-filter: blur(0px); }
+  18%  { opacity: 1;   backdrop-filter: blur(9px);    -webkit-backdrop-filter: blur(9px); }
+  78%  { opacity: 1;   backdrop-filter: blur(9px);    -webkit-backdrop-filter: blur(9px); }
+  100% { opacity: 0;   backdrop-filter: blur(0px);    -webkit-backdrop-filter: blur(0px); }
+}
+
+.pto__content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  opacity: 0;
+  animation: ptoContentFade 1.9s ease forwards;
+}
+@keyframes ptoContentFade {
+  0%, 26%   { opacity: 0; transform: scale(.92); }
+  38%, 62%  { opacity: 1; transform: scale(1);   }
+  76%, 100% { opacity: 0; transform: scale(.92); }
+}
+
+.pto__cup { width: 84px; height: 84px; position: relative; }
+.pto__cup svg { width: 100%; height: 100%; display: block; }
+
+.pto__steam {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 9px;
+}
+.pto__steam span {
+  display: block;
+  width: 3px;
+  height: 16px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.85);
+  opacity: 0;
+  animation: ptoSteamRise 1.6s ease-in-out infinite;
+}
+.pto__steam span:nth-child(1) { animation-delay: 0s; }
+.pto__steam span:nth-child(2) { animation-delay: .35s; }
+.pto__steam span:nth-child(3) { animation-delay: .7s; }
+@keyframes ptoSteamRise {
+  0%   { opacity: 0;   transform: translateY(6px) scaleY(.6); }
+  35%  { opacity: .9;  transform: translateY(-4px) scaleY(1); }
+  100% { opacity: 0;   transform: translateY(-22px) scaleY(1.15); }
+}
+
+.pto__label {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  text-align: center;
+  max-width: 80vw;
+  padding: 0 16px;
+  opacity: 0;
+  animation: ptoLabelFade 1.9s ease forwards;
+}
+@keyframes ptoLabelFade {
+  0%, 30%   { opacity: 0; transform: translateY(4px); }
+  42%, 60%  { opacity: .9; transform: translateY(0); }
+  76%, 100% { opacity: 0; transform: translateY(4px); }
+}
