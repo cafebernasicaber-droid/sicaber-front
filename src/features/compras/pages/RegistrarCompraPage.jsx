@@ -904,8 +904,9 @@ const RegistrarCompraPage = () => {
                   emptyMessage="Ningún local coincide con esa búsqueda."
                 />
               ) : (
-                <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
-                  ⚠ No hay locales activos registrados.
+                <div className="alerta-advertencia">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>No hay locales activos registrados.</span>
                 </div>
               )}
               <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
@@ -927,8 +928,9 @@ const RegistrarCompraPage = () => {
                   emptyMessage="Ningún proveedor activo coincide con esa búsqueda."
                 />
               ) : (
-                <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
-                  ⚠ No hay proveedores activos registrados.
+                <div className="alerta-advertencia">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>No hay proveedores activos registrados.</span>
                 </div>
               )}
               {errors.proveedorNombre
@@ -974,14 +976,16 @@ const RegistrarCompraPage = () => {
               </div>
 
               {(!form.localId || !form.proveedorId) && (
-                <div style={{ padding: '12px 16px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227', margin: '0 16px 12px' }}>
-                  ⚠ Elige el <strong>proveedor</strong> y el <strong>local</strong> arriba para poder configurar insumos.
+                <div className="alerta-advertencia" style={{ margin: '0 16px 12px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>Elige el <strong>proveedor</strong> y el <strong>local</strong> arriba para poder configurar insumos.</span>
                 </div>
               )}
 
               {form.localId && form.proveedorId && insumosFiltrados.length === 0 && (
-                <div style={{ padding: '12px 16px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227', margin: '0 16px 12px' }}>
-                  ⚠ No hay insumos registrados en <strong>{form.localNombre}</strong>. Registra insumos para ese local (Gestión de Insumos).
+                <div className="alerta-advertencia" style={{ margin: '0 16px 12px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>No hay insumos registrados en <strong>{form.localNombre}</strong>. Registra insumos para ese local (Gestión de Insumos).</span>
                 </div>
               )}
 
@@ -1119,6 +1123,15 @@ const RegistrarCompraPage = () => {
                             onBlur={() => marcarTocado('presentacionPrecio')}
                             onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
                           />
+                          {/* Recuento con puntuación de miles — puramente informativo, no
+                              cambia el valor real que se envía (itemActual.presentacionPrecio
+                              sigue siendo el número plano "10000"). Ayuda a confirmar de un
+                              vistazo que se escribió la cifra correcta antes de guardar. */}
+                          {itemActual.presentacionPrecio !== '' && !isNaN(itemActual.presentacionPrecio) && (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#4CAF50', marginTop: 2 }}>
+                              {formatCOP(itemActual.presentacionPrecio)}
+                            </span>
+                          )}
                           {mensajeCampo('presentacionPrecio') && <span className="err-msg">{mensajeCampo('presentacionPrecio')}</span>}
                         </div>
 
@@ -1275,7 +1288,7 @@ const RegistrarCompraPage = () => {
               </div>
             </div>
             {errors.descuento && <div className="items-error-msg">{errors.descuento}</div>}
-            <div className="compra-total-row compra-total-row--sticky">
+            <div className={`compra-total-row ${totalFinal > 0 ? 'compra-total-row--sticky' : ''}`}>
               <span>Total de la compra</span>
               <span className="compra-total-value">{formatCOP(totalFinal)}</span>
             </div>
@@ -1308,6 +1321,13 @@ const RegistrarCompraPage = () => {
                     onClick={e => { e.stopPropagation(); setZoomComprobante(true); }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
                   </button>
+                </div>
+              ) : comprobanteFile ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#4CAF50' }}>Archivo cargado correctamente</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-all', maxWidth: '90%' }}>{comprobanteFile.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(comprobanteFile.size / 1024).toFixed(0)} KB — haz clic para cambiarlo</span>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: 'var(--text-muted)' }}>
@@ -1357,7 +1377,7 @@ const RegistrarCompraPage = () => {
               const tono = comprobanteOk ? 'ok' : esErrorDuro ? 'error' : 'warn';
               const colores = {
                 ok:    { fondo: 'rgba(76,175,80,0.08)',   borde: 'rgba(76,175,80,0.3)',   texto: '#4CAF50' },
-                warn:  { fondo: 'rgba(201,162,39,0.10)',  borde: 'rgba(201,162,39,0.35)', texto: '#C9A227' },
+                warn:  { fondo: 'rgba(230,115,0,0.10)',  borde: 'rgba(230,115,0,0.28)', texto: '#E65100' },
                 error: { fondo: 'rgba(229,57,53,0.10)',   borde: 'rgba(239,83,80,0.3)',   texto: '#EF5350' },
               }[tono];
               return (
@@ -1393,7 +1413,7 @@ const RegistrarCompraPage = () => {
                     </div>
                   )}
                   {chequeoOCR?.advertencias?.length > 0 && (
-                    <ul style={{ margin: 0, padding: '10px 14px 10px 30px', fontSize: 12.5, color: '#C9A227', background: 'rgba(201,162,39,0.06)', borderTop: `1px solid ${colores.borde}` }}>
+                    <ul style={{ margin: 0, padding: '10px 14px 10px 30px', fontSize: 12.5, color: '#E65100', fontWeight: 600, background: 'rgba(230,115,0,0.06)', borderTop: `1px solid ${colores.borde}` }}>
                       {chequeoOCR.advertencias.map((a, i) => <li key={i} style={{ marginBottom: 4 }}>{a}</li>)}
                     </ul>
                   )}

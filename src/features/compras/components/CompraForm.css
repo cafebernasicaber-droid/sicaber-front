@@ -229,7 +229,11 @@
   border: 1.5px solid var(--border);
   border-radius: 10px;
   background: var(--bg-surface-2, var(--bg-surface));
-  overflow: hidden;
+  /* Antes tenía overflow:hidden — recortaba el dropdown del buscador
+     (ej. Tipo de presentación) cuando se abría hacia abajo y el bloque
+     era más bajo de lo que el menú necesitaba. El redondeado de las
+     esquinas ya no depende de recortar el contenido: el encabezado
+     (.item-block-header, si aplica) tiene su propio border-radius. */
 }
 .item-block--error {
   border-color: #EF5350;
@@ -246,6 +250,7 @@
   padding: 8px 14px;
   background: var(--tbl-head-bg, rgba(76,175,80,.06));
   border-bottom: 1px solid var(--border);
+  border-radius: 10px 10px 0 0;
 }
 .item-block-title {
   display: flex;
@@ -395,7 +400,7 @@
   font-weight: 600;
   color: var(--text-secondary);
   line-height: 1.3;
-  min-height: 30px;
+  min-height: 38px;
   display: flex;
   align-items: flex-end;
 }
@@ -446,6 +451,25 @@
   align-items: center;
   gap: 6px;
 }
+
+/* Alerta de advertencia genérica — mismo estándar visual que
+   .item-stock-bajo-alert (que ya se veía bien): fondo naranja, ícono,
+   buen contraste y peso de texto. Reemplaza el estilo anterior más débil
+   (#C9A227 sin negrita) que tenían varias alertas del sistema. */
+.alerta-advertencia {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(230,115,0,0.10);
+  border: 1px solid rgba(230,115,0,0.28);
+  color: #E65100;
+  font-size: 13px;
+  font-weight: 600;
+}
+.alerta-advertencia svg { flex-shrink: 0; }
+.alerta-advertencia strong { font-weight: 800; }
 
 @media (max-width: 700px) {
   .item-presentacion-panel { grid-template-columns: 1fr 1fr; }
