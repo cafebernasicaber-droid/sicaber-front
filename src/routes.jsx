@@ -24,6 +24,7 @@ import ProveedoresPage from './features/proveedores/pages/ProveedoresPage';
 
 import ComprasPage from './features/compras/pages/ComprasPage';
 import HistorialComprasPage from './features/compras/pages/HistorialComprasPage';
+import RegistrarCompraPage from './features/compras/pages/RegistrarCompraPage';
 
 import PedidosPage from './features/pedidos/pages/PedidosPage';
 import EmpleadosPage from './features/empleados/pages/EmpleadosPage';
@@ -93,6 +94,10 @@ const AppRoutes = () => (
     <Route path="/proveedores"            element={<PR modulo="proveedores"><ProveedoresPage /></PR>} />
 
     <Route path="/compras"             element={<PR modulo="compras"><ComprasPage /></PR>} />
+    {/* Registrar Compra: antes era un modal abierto desde /compras, ahora
+        es su propia vista de página completa — misma convención que el
+        resto de páginas de creación (ej. /productos/nuevo). */}
+    <Route path="/compras/registrar"   element={<PR modulo="compras" accion="crear"><RegistrarCompraPage /></PR>} />
     <Route path="/compras/historial"   element={<PR modulo="compras"><HistorialComprasPage /></PR>} />
 
     {/* ── Cajero ── */}
@@ -111,4 +116,4 @@ const AppRoutes = () => (
   </Routes>
 );
 
-export default AppRoutes; 
+export default AppRoutes;

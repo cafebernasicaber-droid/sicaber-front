@@ -17,6 +17,25 @@ const formatCOP = v =>
 const formatDate = iso =>
   iso ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso)) : '—';
 
+// Texto de tooltip según qué tan cerca está el stock de agotarse — se usa
+// en cualquier lugar donde se muestre el estado/badge de stock de un
+// insumo (lista y detalle). Devuelve null cuando el stock es normal (no
+// se muestra ningún tooltip en ese caso).
+function getStockTooltip(stockActual, stockMinimo) {
+  if (stockActual <= 0) {
+    return "Este insumo está agotado";
+  }
+  // "acercándose" al mínimo: dentro de un margen de 20% por encima del mínimo (ajustable)
+  const margenAlerta = stockMinimo * 1.2;
+  if (stockActual > stockMinimo && stockActual <= margenAlerta) {
+    return "Este insumo se está agotando";
+  }
+  if (stockActual <= stockMinimo) {
+    return "Stock por debajo del mínimo";
+  }
+  return null; // no mostrar tooltip, stock normal
+}
+
 // ── Modal: Ver insumo ─────────────────────────────────────────────────────────
 function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, deshabilitarEliminar, puedeEditar = true, puedeEliminar = true }) {
   const stockOk = insumo.stockActual >= insumo.stockMinimo;
@@ -39,7 +58,11 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
               <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
                 <span className="badge-cat">{insumo.categoria}</span>
                 <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:insumo.estado==='Activo'?'#E8F5E9':'#F5F5F5',color:insumo.estado==='Activo'?'#2E7D32':'#888',border:`1px solid ${insumo.estado==='Activo'?'#A5D6A7':'#ccc'}` }}>{insumo.estado==='Activo'?'Activo':'Inactivo'}</span>
-                {!stockOk && <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(230,115,0,0.15)',color:'#FF8A65',border:'1px solid #FFCC80' }}>⚠ Stock bajo</span>}
+                {!stockOk && (() => {
+                  const tip = getStockTooltip(insumo.stockActual, insumo.stockMinimo);
+                  const badge = <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(230,115,0,0.15)',color:'#FF8A65',border:'1px solid #FFCC80' }}>⚠ Stock bajo</span>;
+                  return tip ? <Tooltip label={tip}>{badge}</Tooltip> : badge;
+                })()}
               </div>
             </div>
           </div>
@@ -56,7 +79,6 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
                 ['Categoría', <span className="badge-cat">{insumo.categoria}</span>],
                 ['Unidad medida', insumo.unidadMedida],
                 ['Local', insumo.localNombre || '—'],
-                ['Proveedor', insumo.proveedor || '—'],
                 ['Estado',
                   <div style={{ display:'flex',alignItems:'center',gap:8 }}>
                     <button className={`toggle-btn ${insumo.estado==='Activo'?'toggle-on':'toggle-off'}`} onClick={onToggle}
@@ -76,7 +98,11 @@ function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, desha
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Stock & Precio</div>
               {[
-                ['Stock actual', <span style={{ fontWeight:800,fontSize:15,color:stockOk?'#81C784':'#EF5350' }}>{insumo.stockActual} {insumo.unidadMedida}</span>],
+                ['Stock actual', (() => {
+                  const valor = <span style={{ fontWeight:800,fontSize:15,color:stockOk?'#81C784':'#EF5350' }}>{insumo.stockActual} {insumo.unidadMedida}</span>;
+                  const tip = getStockTooltip(insumo.stockActual, insumo.stockMinimo);
+                  return tip ? <Tooltip label={tip}>{valor}</Tooltip> : valor;
+                })()],
                 ['Stock mínimo', `${insumo.stockMinimo} ${insumo.unidadMedida}`],
                 ['Último precio pagado', insumo.precioUnitario ? <span style={{ fontWeight:700,color:'#FFCC80' }}>{formatCOP(insumo.precioUnitario)}</span> : <span style={{ color:'var(--text-secondary)' }}>Sin compras aún</span>],
               ].map(([label, val], idx, arr) => (
@@ -168,16 +194,24 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
 }
 
 // ── Modal: Gestionar categorías de insumos ───────────────────────────────────
+// Simplificado: agregar, editar el nombre, activar/desactivar — nada más.
+// Antes tenía un flujo de "eliminar" con recategorización previa
+// (ModalRecategorizar), pero una categoría de insumo es solo una etiqueta
+// para organizar/filtrar (insumos.categoria_id tiene ON DELETE SET NULL:
+// un insumo nunca queda "roto" por su categoría). Mismo patrón simple que
+// Ciudades y Tipos de Presentación: nunca se elimina, solo se desactiva —
+// un insumo ya creado con una categoría desactivada CONSERVA esa
+// categoría; desactivar solo la saca de las opciones para insumos nuevos.
 function ModalCategoriasInsumo({ onClose }) {
-  const { categorias, create, update, remove, toggleEstado, recategorizar } = useCategoriasInsumos();
+  const { categorias, create, update, toggleEstado } = useCategoriasInsumos();
   const [nombre, setNombre] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const [editId, setEditId] = useState(null);
   const [editNombre, setEditNombre] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [toggleLoadingId, setToggleLoadingId] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
 
   const existeCategoriaEquivalente = (valor, ignorarId = null) => {
     const normalizado = normalizarComparacion(valor);
@@ -246,23 +280,6 @@ function ModalCategoriasInsumo({ onClose }) {
     }
   };
 
-  const [recategorizarTarget, setRecategorizarTarget] = useState(null);
-
-  const handleDelete = async () => {
-    try {
-      await remove(deleteTarget.id);
-      setDeleteTarget(null);
-    } catch (err) {
-      if (err.status === 409 && err.insumosAsociados) {
-        setRecategorizarTarget({ id: deleteTarget.id, nombre: deleteTarget.nombre, insumos: err.insumos || [], insumosAsociados: err.insumosAsociados });
-        setDeleteTarget(null);
-        return;
-      }
-      setError(err.message || 'No se pudo eliminar la categoría.');
-      setDeleteTarget(null);
-    }
-  };
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
@@ -277,6 +294,9 @@ function ModalCategoriasInsumo({ onClose }) {
         </div>
 
         <div style={{ padding: '20px 24px' }}>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+            Una categoría no se puede eliminar del catálogo — solo desactivarse, para que deje de aparecer como opción en insumos nuevos. Un insumo ya creado con ella conserva su categoría sin importar su estado.
+          </p>
           {error && (
             <div style={{ background: 'rgba(229,57,53,0.12)', color: '#EF5350', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
               ⚠ {error}
@@ -294,13 +314,40 @@ function ModalCategoriasInsumo({ onClose }) {
             </button>
           </form>
 
-          {categorias.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
-              Aún no hay categorías registradas.
+          {categorias.length > 0 && (
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input
+                type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre..."
+                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 36px 9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              />
+              <svg style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
             </div>
-          ) : (
+          )}
+
+          {(() => {
+            const categoriasFiltradas = busqueda.trim()
+              ? categorias.filter(c => normalizarComparacion(c.nombre).includes(normalizarComparacion(busqueda)))
+              : categorias;
+            if (categorias.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Aún no hay categorías registradas.
+                </div>
+              );
+            }
+            if (categoriasFiltradas.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Ninguna categoría coincide con "{busqueda}".
+                </div>
+              );
+            }
+            return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {categorias.map(c => (
+              {categoriasFiltradas.map(c => (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
                   {editId === c.id ? (
                     <>
@@ -341,142 +388,16 @@ function ModalCategoriasInsumo({ onClose }) {
                           style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                         </button>
-                        <AnularButton size={14} className="" onClick={() => setDeleteTarget(c)}
-                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(229,57,53,0.12)', color: '#EF5350', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}/>
                       </div>
                     </>
                   )}
                 </div>
               ))}
             </div>
-          )}
+            );
+          })()}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
-          </div>
-        </div>
-
-        {deleteTarget && (
-          <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
-            <div className="modal-box" onClick={e => e.stopPropagation()}>
-              <div className="modal-icon modal-icon-danger">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-              </div>
-              <h3>¿Eliminar "{deleteTarget.nombre}"?</h3>
-              <p>Si tiene insumos asociados, te pediremos recategorizarlos primero. Si solo quieres dejar de usarla para insumos nuevos sin perder el historial, considera <strong>desactivarla</strong> en vez de eliminarla.</p>
-              <div className="modal-actions">
-                <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>Cancelar</button>
-                <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {recategorizarTarget && (
-          <ModalRecategorizar
-            target={recategorizarTarget}
-            categorias={categorias.filter(c => c.id !== recategorizarTarget.id && c.estado === 'Activo')}
-            onRecategorizar={recategorizar}
-            onClose={() => setRecategorizarTarget(null)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Modal: Recategorizar insumos antes de eliminar una categoría ───────────
-function ModalRecategorizar({ target, categorias, onRecategorizar, onClose }) {
-  const [modo, setModo] = useState('existente');
-  const [categoriaId, setCategoriaId] = useState('');
-  const [nuevoNombre, setNuevoNombre] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleConfirmar = async () => {
-    setError('');
-    if (modo === 'existente' && !categoriaId) { setError('Selecciona la nueva categoría.'); return; }
-    if (modo === 'nueva' && !nuevoNombre.trim()) { setError('Escribe el nombre de la nueva categoría.'); return; }
-    setLoading(true);
-    try {
-      const payload = modo === 'existente'
-        ? { nuevaCategoriaId: categoriaId }
-        : { nuevaCategoriaNombre: nuevoNombre.trim() };
-      const r = await onRecategorizar(target.id, payload);
-      if (r?.error) { setError(r.error); return; }
-      onClose();
-    } catch (err) {
-      setError(err.message || 'No se pudo recategorizar los insumos.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 460,
-        boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
-      }}>
-        <div style={{ padding: '22px 24px 4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(245,124,0,0.15)', color: '#F57C00', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>"{target.nombre}" tiene insumos</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{target.insumosAsociados} insumo{target.insumosAsociados !== 1 ? 's' : ''} registrado{target.insumosAsociados !== 1 ? 's' : ''}: {target.insumos.slice(0, 4).join(', ')}{target.insumos.length > 4 ? '…' : ''}</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ padding: '14px 24px 24px' }}>
-          {error && (
-            <div style={{ background: 'rgba(229,57,53,0.12)', color: '#EF5350', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
-              ⚠ {error}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-            <button type="button" onClick={() => setModo('existente')}
-              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-                border: modo === 'existente' ? '1.5px solid var(--color-green,#4CAF50)' : '1.5px solid var(--border-input)',
-                background: modo === 'existente' ? 'rgba(76,175,80,0.10)' : 'transparent',
-                color: modo === 'existente' ? 'var(--color-green,#4CAF50)' : 'var(--text-secondary)' }}>
-              Mover a categoría existente
-            </button>
-            <button type="button" onClick={() => setModo('nueva')}
-              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-                border: modo === 'nueva' ? '1.5px solid var(--color-green,#4CAF50)' : '1.5px solid var(--border-input)',
-                background: modo === 'nueva' ? 'rgba(76,175,80,0.10)' : 'transparent',
-                color: modo === 'nueva' ? 'var(--color-green,#4CAF50)' : 'var(--text-secondary)' }}>
-              Crear categoría nueva
-            </button>
-          </div>
-
-          {modo === 'existente' ? (
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>Nueva categoría</label>
-              <select value={categoriaId} onChange={e => setCategoriaId(e.target.value)}
-                style={{ width: '100%', padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
-                <option value="">-- Seleccionar --</option>
-                {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </select>
-              {categorias.length === 0 && (
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>No hay otras categorías activas. Crea una nueva en su lugar.</div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>Nombre de la nueva categoría</label>
-              <input type="text" value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} placeholder="Ej: Desechables"
-                style={{ width: '100%', padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-            </div>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-            <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
-            <button type="button" className="btn-confirm-primary" disabled={loading} onClick={handleConfirmar}>
-              {loading ? 'Aplicando...' : 'Recategorizar y eliminar'}
-            </button>
           </div>
         </div>
       </div>
@@ -803,28 +724,7 @@ const InsumosPage = () => {
           </div>
         )}
 
-        {stockBajoList.length > 0 && (
-          <div style={{
-            marginBottom: 18, borderRadius: 12, padding: '14px 18px',
-            background: 'rgba(230,115,0,0.12)', border: '1.5px solid rgba(230,115,0,0.4)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: 14, fontWeight: 800, color: '#E65100' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              <span>{stockBajoList.length} insumo{stockBajoList.length !== 1 ? 's' : ''} con stock bajo — revisa antes de que se agoten</span>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {stockBajoList.map(i => (
-                <div key={i.id} style={{
-                  display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 14px', borderRadius: 10,
-                  background: 'var(--bg-surface)', border: '1px solid rgba(230,115,0,0.35)', fontSize: 12, color: '#E65100',
-                }}>
-                  <span style={{ fontWeight: 700 }}>{i.nombre}</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>Quedan: <strong style={{ color:'#E65100' }}>{i.stockActual} {i.unidadMedida || ''}</strong> (mínimo: {i.stockMinimo})</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+
 
         <div style={{ display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center' }}>
           <button style={tabStyle('todos')} onClick={() => { setTabFiltro('todos'); setPage(1); }}>
@@ -973,17 +873,22 @@ const InsumosPage = () => {
                         <td className="td-stock">
                           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
                             <span>{stockReal} {ins.unidadMedida}</span>
-                            {sinStock ? (
-                              <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                                Sin stock
-                              </span>
-                            ) : stockBajo && (
-                              <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(230,115,0,0.15)',color:'#E65100',border:'1px solid #FFCC80' }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                Stock bajo
-                              </span>
-                            )}
+                            {(() => {
+                              const tip = getStockTooltip(stockReal, ins.stockMinimo);
+                              const badge = sinStock ? (
+                                <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                  Sin stock
+                                </span>
+                              ) : stockBajo ? (
+                                <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(230,115,0,0.15)',color:'#E65100',border:'1px solid #FFCC80' }}>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                  Stock bajo
+                                </span>
+                              ) : null;
+                              if (!badge) return null;
+                              return tip ? <Tooltip label={tip}>{badge}</Tooltip> : badge;
+                            })()}
                           </div>
                         </td>
                         <td >

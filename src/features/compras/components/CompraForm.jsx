@@ -226,16 +226,14 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       .catch(() => setTodosInsumos([]));
   }, []);
 
-  // El insumo tiene que ser de ESTE proveedor Y de ESTE local. El local es
-  // el filtro nuevo: un insumo "Café" del Local A no puede sumar stock en
-  // una compra del Local B. Si por algún dato viejo un insumo no tiene
-  // localId, no aparece (el backend igual lo rechazaría por no pertenecer
-  // al local de la compra).
-  const insumosFiltrados = (form.proveedorId && form.localId)
-    ? todosInsumos.filter(i =>
-        (String(i.proveedorId) === String(form.proveedorId) || i.proveedor === form.proveedorNombre) &&
-        String(i.localId) === String(form.localId)
-      )
+  // El insumo depende ÚNICAMENTE del local — proveedor e insumo son
+  // independientes entre sí, solo se relacionan al momento de esta
+  // compra puntual (quien registra decide qué insumo abasteció este
+  // proveedor). Si por algún dato viejo un insumo no tiene localId, no
+  // aparece (el backend igual lo rechazaría por no pertenecer al local
+  // de la compra).
+  const insumosFiltrados = form.localId
+    ? todosInsumos.filter(i => String(i.localId) === String(form.localId))
     : [];
 
   // El comprobante es obligatorio salvo que todos los ítems sean de tipo
@@ -328,10 +326,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       ...prev,
       proveedorId:     value,
       proveedorNombre: prov ? prov.nombre : '',
-      items:           [{ ...EMPTY_ITEM }]
     }));
     setTouched(prev => ({ ...prev, proveedorNombre: true }));
-    setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor', items: '' }));
+    setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor' }));
   };
 
   // Cambiar el local reinicia los insumos ya elegidos (igual que al cambiar
@@ -812,9 +809,9 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
           </div>
         )}
 
-        {form.proveedorId && form.localId && insumosFiltrados.length === 0 && (
+        {form.localId && insumosFiltrados.length === 0 && (
           <div style={{ padding: '12px 16px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227', marginBottom: 10 }}>
-            ⚠ No hay insumos de este proveedor en <strong>{form.localNombre}</strong>. Registra insumos para ese proveedor en ese local (Gestión de Insumos).
+            ⚠ No hay insumos registrados en <strong>{form.localNombre}</strong>. Registra insumos para ese local (Gestión de Insumos).
           </div>
         )}
 
@@ -838,7 +835,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
             <div className="item-row">
               <div className="item-field">
                 <label className="item-field-label">Insumo</label>
-                {form.proveedorId && form.localId && insumosFiltrados.length > 0 ? (
+                {form.localId && insumosFiltrados.length > 0 ? (
                   <BuscadorSelect
                     value={item.insumoId}
                     options={insumosFiltrados
@@ -854,7 +851,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
                 ) : (
                   <input
                     type="text"
-                    placeholder={!form.localId ? 'Selecciona el local primero' : !form.proveedorId ? 'Selecciona un proveedor primero' : 'Sin insumos para este proveedor en este local'}
+                    placeholder={!form.localId ? 'Selecciona el local primero' : 'Sin insumos en este local'}
                     value={item.insumo}
                     readOnly
                     style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}

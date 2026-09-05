@@ -222,6 +222,20 @@ export const proveedoresApi = {
   toggleEstado:  (id)     => patch(`/proveedores/${id}/estado`),
 };
 
+// ── CIUDADES (Proveedores) ───────────────────────────────────
+// El campo "Ciudad" del formulario de Proveedores estaba fijo en
+// "Medellín" — ahora es un catálogo gestionable, mismo patrón exacto que
+// tiposPresentacionApi de arriba: sin `remove`, solo `toggleEstado`
+// (desactivar). A diferencia de tipos_presentacion (con "Unitario" como
+// excepción fija), acá NINGUNA ciudad tiene trato especial — ni siquiera
+// Medellín, que solo es la primera de la siembra inicial.
+export const ciudadesApi = {
+  getAll:       ()       => get   ('/ciudades'),
+  create:       (data)   => post  ('/ciudades', data),
+  update:       (id, d)  => put   (`/ciudades/${id}`, d),
+  toggleEstado: (id)     => patch (`/ciudades/${id}/estado`),
+};
+
 // ── INSUMOS ──────────────────────────────────────────────────
 export const insumosApi = {
   getAll:  ()       => get ('/insumos'),
@@ -233,24 +247,23 @@ export const insumosApi = {
 };
 
 // ── CATEGORÍAS DE INSUMOS ───────────────────────────────────────
+// Sin `remove` ni `recategorizar`: una categoría de insumo es solo una
+// etiqueta para organizar/filtrar (insumos.categoria_id tiene ON DELETE
+// SET NULL) — mismo patrón simple que ciudadesApi/tiposPresentacionApi.
+// Nunca se elimina, solo se desactiva.
 export const categoriasInsumosApi = {
   getAll:       ()       => get   ('/categorias-insumos'),
   getById:      (id)     => get   (`/categorias-insumos/${id}`),
   create:       (data)   => post  ('/categorias-insumos', data),
   update:       (id, d)  => put   (`/categorias-insumos/${id}`, d),
-  remove:       (id)     => del   (`/categorias-insumos/${id}`),
   toggleEstado: (id)     => patch (`/categorias-insumos/${id}/estado`),
-  recategorizar:(id, d)  => post  (`/categorias-insumos/${id}/recategorizar`, d),
 };
 
 // ── TIPOS DE PRESENTACIÓN (Compras) ─────────────────────────────
 // Antes una lista fija en el código del formulario de compra (Caja,
-// Paquete, Bolsa) — ahora un catálogo gestionable, mismo patrón que
-// categoriasInsumosApi de arriba. Deliberadamente sin `remove` ni
-// `recategorizar`: un tipo de presentación no queda "pegado" a una
-// entidad persistente como sí ocurre con la relación insumo-categoría,
-// así que no necesita ese flujo — "desactivar" (toggleEstado) es
-// suficiente. "Unitario" NO pasa por este servicio: sigue siendo una
+// Paquete, Bolsa) — ahora un catálogo gestionable, mismo patrón simple
+// que categoriasInsumosApi/ciudadesApi de arriba: agregar, editar,
+// desactivar. "Unitario" NO pasa por este servicio: sigue siendo una
 // opción fija y especial del sistema, manejada aparte por el propio
 // formulario de compra.
 export const tiposPresentacionApi = {
@@ -290,37 +303,15 @@ export const pedidosApi = {
   // local del usuario logueado. Ver PATCH /pedidos/:id/tomar en el backend.
   tomar:         (id)         => patch(`/pedidos/${id}/tomar`, {}),
   remove:        (id)         => del (`/pedidos/${id}`),
-  // Verificación del comprobante de pago (pedidos por Nequi/Transferencia
-  // con comprobante ya adjuntado por el cliente en su checkout). Al
-  // aprobar, el backend deja el pedido en 'pendiente' (pago confirmado,
-  // listo para pasar a preparación); al rechazar, lo cancela. Rutas
-  // corregidas: las anteriores (/aprobar-comprobante, /rechazar-comprobante)
-  // no existen en el backend y devolvían 404.
   aprobarComprobante:  (id) => patch(`/pedidos/${id}/comprobante/aprobar`, {}),
-  // El motivo es OBLIGATORIO: el backend lo guarda en
-  // `comprobante_motivo_rechazo` y el cliente lo ve en el detalle de su
-  // pedido rechazado ("Mis pedidos").
   rechazarComprobante: (id, motivo) => patch(`/pedidos/${id}/comprobante/rechazar`, { motivo }),
-  // Cobro en efectivo: confirma que el cajero ya recibió el pago ANTES de
-  // que el pedido pueda pasar a 'en_preparacion'. Distinto del pago por
-  // transferencia (arriba, se aprueba con comprobante) y de "Cobrar" al
-  // entregar (ventasApi). Antes apuntaba a /confirmar-cobro (404); la ruta
-  // real del backend es /confirmar-pago.
   confirmarPago: (id) => patch(`/pedidos/${id}/confirmar-pago`, {}),
-  // Domicilio: el cajero/domiciliario que ve el pedido primero lo acepta
-  // (queda asignado a él vía domiciliario_id) o, si ya lo había aceptado,
-  // lo libera de nuevo (vuelve a quedar disponible para otro). No es lo
-  // mismo que "tomar" (arriba, asigna el pedido completo a un local) — esto
-  // es "quién de los repartidores/cajeros de ESE local se hace cargo de la
-  // entrega puntual".
   aceptarDomicilio:  (id) => patch(`/pedidos/${id}/aceptar-domicilio`, {}),
   rechazarDomicilio: (id) => patch(`/pedidos/${id}/rechazar-domicilio`, {}),
 };
 
 // ── VENTAS ───────────────────────────────────────────────────
 export const ventasApi = {
-  // sede opcional: igual que pedidosApi.getAll, si se pasa el backend solo
-  // devuelve las ventas de ese local (cajero) o acota la vista de admin.
   getAll:        (sede)       => get (sede ? `/ventas?sede=${encodeURIComponent(sede)}` : '/ventas'),
   getStats:      ()           => get ('/ventas/stats'),
   getById:       (id)         => get (`/ventas/${id}`),
@@ -330,12 +321,8 @@ export const ventasApi = {
 
 // ── DEVOLUCIONES ─────────────────────────────────────────────
 export const devolucionesApi = {
-  // sede opcional: mismo criterio que ventasApi.getAll.
   getAll:        (sede)       => get (sede ? `/devoluciones?sede=${encodeURIComponent(sede)}` : '/devoluciones'),
   create:        (data)       => post('/devoluciones', data),
-  // El motivo es obligatorio cuando estado==='rechazada' — el backend lo
-  // exige y lo guarda en devoluciones.motivo_rechazo, para que quede
-  // registrado por qué se rechazó (antes no se guardaba nada).
   cambiarEstado: (id, estado, motivoRechazo) => patch(`/devoluciones/${id}/estado`, { estado, motivo_rechazo: motivoRechazo || null }),
 };
 
@@ -350,11 +337,6 @@ export const fichasTecnicasApi = {
 };
 
 // ── DISPONIBILIDAD (pública) ──────────────────────────────────
-// A diferencia de fichasTecnicasApi/insumosApi (protegidas: exponen
-// costos, proveedores y recetas), esta ruta solo devuelve
-// { id_producto, stock_disponible } y no requiere sesión — es la que debe
-// usar cualquier pantalla de cara al cliente (Landing) para saber cuántas
-// unidades de un producto se pueden vender según el inventario real.
 export const disponibilidadApi = {
   getAll: () => get('/disponibilidad', true),
 };

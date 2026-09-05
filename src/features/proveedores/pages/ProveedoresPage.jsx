@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import useProveedores from '../hooks/useProveedores';
 import proveedoresService from '../services/proveedoresService';
-import insumosService from '../../insumos/services/insumosService';
 import comprasService from '../../compras/services/comprasService';
 import { filtrarBusqueda } from '../../../shared/utils/busqueda';
 import ProveedorForm from '../components/ProveedorForm';
@@ -146,27 +145,6 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
 }
 
 // ── Página principal ──────────────────────────────────────────────────────────
-// Lista de insumos afectados por una cascada (eliminar o desactivar un
-// proveedor), mostrando solo los primeros N y un "+X más" desplegable si
-// hay más, para no saturar la alerta de confirmación.
-function ListaInsumosAfectados({ insumos, limite = 5 }) {
-  const [expandido, setExpandido] = useState(false);
-  const visibles = expandido ? insumos : insumos.slice(0, limite);
-  const restantes = insumos.length - limite;
-  return (
-    <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
-      {visibles.map(i => <li key={i.id}>{i.nombre}</li>)}
-      {!expandido && restantes > 0 && (
-        <li style={{ listStyle: 'none', marginLeft: -16, marginTop: 4 }}>
-          <button type="button" onClick={() => setExpandido(true)}
-            style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5 }}>
-            +{restantes} más — ver todos
-          </button>
-        </li>
-      )}
-    </ul>
-  );
-}
 
 const ProveedoresPage = () => {
   const { proveedores, remove, toggleEstado, refresh } = useProveedores();
@@ -186,7 +164,6 @@ const ProveedoresPage = () => {
   const [page, setPage]               = useState(1);
   const PER_PAGE = 7;
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleteInfo, setDeleteInfo]   = useState(null);
   // Proveedor que el usuario intentó eliminar pero tiene compras
   // asociadas — mismo patrón que "deleteBlockedTarget" en InsumosPage: en
   // vez de abrir el modal normal de eliminación, se muestra una alerta
@@ -198,14 +175,10 @@ const ProveedoresPage = () => {
   const [serverError, setServerError] = useState('');
   const searchRef = useRef();
 
-  // Cargados una sola vez para (a) deshabilitar "Anular" en proveedores con
-  // compras y (b) mostrar la vista previa de insumos asociados antes de
-  // eliminar — reutiliza los servicios ya existentes de Insumos y Compras,
-  // sin duplicar lógica de fetch.
-  const [insumosTodos, setInsumosTodos] = useState([]);
+  // Cargadas una sola vez para deshabilitar "Eliminar" en proveedores con
+  // compras registradas.
   const [comprasTodas, setComprasTodas] = useState([]);
   useEffect(() => {
-    insumosService.getAll().then(d => setInsumosTodos(Array.isArray(d) ? d : [])).catch(() => {});
     Promise.all([comprasService.getActivas(), comprasService.getHistorial()])
       .then(([a, h]) => setComprasTodas([...(a || []), ...(h || [])]))
       .catch(() => setComprasTodas([]));
@@ -242,59 +215,33 @@ const ProveedoresPage = () => {
   };
   const clearSearch = () => { setQuery(''); setFiltered(null); setPage(1); searchRef.current?.focus(); };
 
-  // Antes esto estaba fijo en { insumos: [], tieneCompras: false } — el
-  // modal de confirmación siempre mostraba el camino "seguro para eliminar"
-  // sin importar el proveedor. Ahora se calcula con los datos reales ya
-  // cargados (insumosTodos/comprasTodas) antes de mostrar el modal.
+  // Antes esto mostraba una vista previa de insumos asociados antes de
+  // eliminar — proveedor e insumo son independientes ahora, así que el
+  // único motivo para bloquear la eliminación es tener compras registradas.
   const openDeleteTarget = (p) => {
     if (proveedoresConCompras.has(String(p.id))) {
       setDeleteBlockedTarget(p);
       return;
     }
-    const insumos = insumosTodos.filter(i => String(i.proveedorId) === String(p.id));
-    setDeleteInfo({ insumos, tieneCompras: false });
     setDeleteTarget(p);
   };
-
-  const [deactivateConfirm, setDeactivateConfirm] = useState(null); // { origen, proveedorId, proveedorNombre, insumos, data }
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      const result = await remove(deleteTarget.id);
+      await remove(deleteTarget.id);
       setFiltered(query.trim() ? filtrarProveedores(proveedores, query) : null);
-      let msg = `Proveedor "${deleteTarget.nombre}" eliminado correctamente`;
-      if (result?.insumosEliminados > 0) {
-        msg += `. También se eliminaron ${result.insumosEliminados} insumo(s): ${result.nombresInsumos.join(', ')}`;
-      }
-      showSuccess(msg);
-      setDeleteTarget(null); setDeleteInfo(null);
+      showSuccess(`Proveedor "${deleteTarget.nombre}" eliminado correctamente`);
+      setDeleteTarget(null);
       // Cerrar modal ver si estaba abierto
       if (modal?.ver) setModal(null);
     } catch (err) {
       showError(err.message || 'No se pudo eliminar el proveedor.');
-      setDeleteTarget(null); setDeleteInfo(null);
+      setDeleteTarget(null);
     }
   };
 
-  const insumosActivosDe = (proveedorId) => insumosTodos.filter(i => String(i.proveedorId) === String(proveedorId) && i.estado === 'Activo');
-
-  // El interruptor rápido ya no desactiva de inmediato: si el proveedor
-  // tiene insumos activos asociados, primero se avisa cuáles se van a
-  // desactivar junto con él.
   const handleToggle = async (id) => {
-    const proveedor = proveedores.find(p => String(p.id) === String(id));
-    if (proveedor?.estado === 'Activo') {
-      const afectados = insumosActivosDe(id);
-      if (afectados.length > 0) {
-        setDeactivateConfirm({ origen: 'toggle', proveedorId: id, proveedorNombre: proveedor.nombre, insumos: afectados });
-        return;
-      }
-    }
-    await ejecutarToggle(id);
-  };
-
-  const ejecutarToggle = async (id) => {
     const proveedor = proveedores.find(p => String(p.id) === String(id));
     const result = await toggleEstado(id);
     if (query.trim()) setFiltered(filtrarProveedores(proveedores, query));
@@ -303,19 +250,6 @@ const ProveedoresPage = () => {
     // que nunca quede desincronizado del listado.
     if (modal?.ver?.id === id && result?.estado) {
       setModal(prev => ({ ver: { ...prev.ver, estado: result.estado } }));
-    }
-    if (result?.insumosDesactivados > 0) {
-      showSuccess(`Proveedor "${proveedor?.nombre}" desactivado. También se desactivaron ${result.insumosDesactivados} insumo(s): ${result.nombresInsumosDesactivados.join(', ')}`);
-    }
-  };
-
-  const confirmarDesactivacion = async () => {
-    const { origen, proveedorId, data } = deactivateConfirm;
-    setDeactivateConfirm(null);
-    if (origen === 'toggle') {
-      await ejecutarToggle(proveedorId);
-    } else {
-      await guardarConDesactivacion(proveedorId, data);
     }
   };
 
@@ -406,22 +340,10 @@ const ProveedoresPage = () => {
       return;
     }
 
-    // Punto de desactivación en cascada: si se está editando y el estado
-    // pasa de Activo a Inactivo, y el proveedor tiene insumos activos
-    // asociados, se pregunta ANTES de guardar — igual que ya se hace con
-    // el interruptor rápido.
-    if (esEdicion && modal.estado === 'Activo' && data.estado === 'Inactivo') {
-      const afectados = insumosActivosDe(modal.id);
-      if (afectados.length > 0) {
-        setDeactivateConfirm({ origen: 'form', proveedorId: modal.id, proveedorNombre: modal.nombre, insumos: afectados, data });
-        return;
-      }
-    }
-
-    await guardarConDesactivacion(esEdicion ? modal.id : null, data, esEdicion, onDuplicateError);
+    await guardarProveedor(esEdicion ? modal.id : null, data, esEdicion, onDuplicateError);
   };
 
-  const guardarConDesactivacion = async (id, data, esEdicionForzada, onDuplicateError) => {
+  const guardarProveedor = async (id, data, esEdicionForzada, onDuplicateError) => {
     const esEdicion = esEdicionForzada ?? (modal && modal !== 'nuevo' && !modal.ver);
     // api.js lanza (throw) cuando el backend responde con error — sin
     // try/catch esa excepción quedaba sin capturar y el modal no mostraba
@@ -532,8 +454,8 @@ const ProveedoresPage = () => {
         )}
 
         {/* Modal Anular */}
-        {deleteTarget && deleteInfo && (
-          <div className="modal-overlay" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>
+        {deleteTarget && (
+          <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
               <div className="modal-icon modal-icon-danger">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -544,16 +466,10 @@ const ProveedoresPage = () => {
                 </svg>
               </div>
               <h3>¿Eliminar proveedor?</h3>
-              {deleteInfo.insumos.length > 0 && (
-                <div style={{ background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#E65100' }}>
-                  ⚠ También se eliminarán los siguientes insumos asociados:
-                  <ListaInsumosAfectados insumos={deleteInfo.insumos} />
-                </div>
-              )}
               <p>Esta acción es <strong>permanente</strong> y no se puede deshacer.</p>
               <div className="modal-detail">"{deleteTarget.nombre}"</div>
               <div className="modal-actions">
-                <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteInfo(null); }}>Cancelar</button>
+                <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>Cancelar</button>
                 <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
               </div>
             </div>
@@ -583,30 +499,6 @@ const ProveedoresPage = () => {
               </p>
               <div className="modal-actions">
                 <button className="btn-cancel" onClick={() => setDeleteBlockedTarget(null)}>Entendido</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal confirmar desactivación */}
-        {deactivateConfirm && (
-          <div className="modal-overlay" onClick={() => setDeactivateConfirm(null)}>
-            <div className="modal-box" onClick={e => e.stopPropagation()}>
-              <div className="modal-icon modal-icon-warn">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-              </div>
-              <h3>¿Desactivar proveedor?</h3>
-              <div style={{ background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#E65100' }}>
-                ⚠ También se desactivarán los siguientes insumos asociados:
-                <ListaInsumosAfectados insumos={deactivateConfirm.insumos} />
-              </div>
-              <div className="modal-detail">"{deactivateConfirm.proveedorNombre}"</div>
-              <div className="modal-actions">
-                <button className="btn-cancel" onClick={() => setDeactivateConfirm(null)}>Cancelar</button>
-                <button className="btn-confirm-danger" onClick={confirmarDesactivacion}>Sí, desactivar</button>
               </div>
             </div>
           </div>
