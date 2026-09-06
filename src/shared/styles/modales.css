@@ -1,0 +1,422 @@
+/* ═══════════════════════════════════════════════════════════════
+   SICABER — ESTÁNDAR VISUAL DE MODALES Y BOTONES DE ACCIÓN
+
+   Por qué existe este archivo
+   ───────────────────────────
+   `.modal-overlay` y `.modal-box` estaban redefinidos en NUEVE hojas
+   distintas (Layout, Insumos, Compras, Proveedores, Pedidos, Ventas,
+   Devoluciones, Empleados, Roles, Usuarios, Modulos), cada una con sus
+   propios valores: radio de 16px, 18px o 20px; unas con `backdrop-filter`
+   y otras sin él; animación `slideUp` en unas y `popIn` en otras. Cuál
+   ganaba dependía del orden en que webpack juntara los CSS, así que el
+   mismo modal se veía distinto según por qué pantalla hubiera pasado el
+   usuario antes.
+
+   Lo mismo pasaba con los botones de acción de las tablas: `.btn-ver`
+   era un chip verde de 30x30 en Pedidos y Ventas, pero un icono
+   transparente de 4px de padding en Compras y Proveedores.
+
+   Cómo lo resuelve
+   ────────────────
+   Esta hoja se importa en App.js DESPUÉS de global.css, así que queda de
+   última en el bundle y fija el aspecto final sin necesidad de editar
+   ninguna de las hojas por módulo (que siguen intactas y siguen sirviendo
+   para todo lo demás que definen).
+
+   IMPORTANTE — alcance: esto es SOLO diseño. No se cambia ningún tamaño
+   que venga por `style=` en el JSX (los `maxWidth` de cada modal son
+   intencionales según su contenido), ni ninguna clase de comportamiento.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── FONDO DEL MODAL ────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  background: var(--modal-overlay) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  /* Aire lateral para que en pantallas bajas el modal nunca quede pegado
+     al borde ni se salga por arriba. */
+  padding: 24px 16px !important;
+  z-index: 1000 !important;
+  animation: sicaberModalFade .16s ease !important;
+  /* Reset: InsumosPage.css le había dejado `font-size:12px`, `font-weight:600`
+     y `gap:4px` al overlay — restos de otro componente que se colaban como
+     estilo heredado a todo modal que se abriera desde esa pantalla. */
+  font-size: initial !important;
+  font-weight: initial !important;
+  gap: 0 !important;
+}
+
+@keyframes sicaberModalFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sicaberModalIn {
+  from { transform: translateY(14px) scale(.98); opacity: 0; }
+  to   { transform: translateY(0)    scale(1);   opacity: 1; }
+}
+
+/* ── CAJA DEL MODAL ─────────────────────────────────────────── */
+
+/* No se toca `max-width`, `width`, `padding` ni `text-align`: cada modal
+   los define según su contenido y son decisiones válidas. Acá solo se
+   unifica la piel (fondo, borde, radio, sombra) y el scroll. */
+.modal-box {
+  background: var(--modal-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 18px !important;
+  box-shadow: var(--shadow-lg) !important;
+  animation: sicaberModalIn .22s ease !important;
+  /* Scroll estándar: ningún modal vuelve a quedar con el pie recortado
+     fuera de la pantalla, que era lo que pasaba en los que no declaraban
+     `maxHeight` ni `overflow`. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Contenedores de modal "a medida" (los que se arman con estilos en línea
+   en vez de .modal-box): misma piel para que no desentonen. */
+.usuario-modal-box,
+.modal-compra-box {
+  border-radius: 18px !important;
+  box-shadow: var(--shadow-lg) !important;
+  border: 1px solid var(--border) !important;
+  animation: sicaberModalIn .22s ease !important;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── BARRA DE SCROLL — misma en todos los modales ───────────── */
+
+.modal-box,
+.usuario-modal-box,
+.modal-compra-box,
+.usuario-modal-body,
+.modal-compra-body,
+.modal-scroll-suave {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-input) transparent;
+}
+
+.modal-box::-webkit-scrollbar,
+.usuario-modal-box::-webkit-scrollbar,
+.modal-compra-box::-webkit-scrollbar,
+.usuario-modal-body::-webkit-scrollbar,
+.modal-compra-body::-webkit-scrollbar,
+.modal-scroll-suave::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.modal-box::-webkit-scrollbar-track,
+.usuario-modal-box::-webkit-scrollbar-track,
+.modal-compra-box::-webkit-scrollbar-track,
+.usuario-modal-body::-webkit-scrollbar-track,
+.modal-compra-body::-webkit-scrollbar-track,
+.modal-scroll-suave::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-box::-webkit-scrollbar-thumb,
+.usuario-modal-box::-webkit-scrollbar-thumb,
+.modal-compra-box::-webkit-scrollbar-thumb,
+.usuario-modal-body::-webkit-scrollbar-thumb,
+.modal-compra-body::-webkit-scrollbar-thumb,
+.modal-scroll-suave::-webkit-scrollbar-thumb {
+  background: var(--border-input);
+  border-radius: 8px;
+}
+
+.modal-box::-webkit-scrollbar-thumb:hover,
+.usuario-modal-box::-webkit-scrollbar-thumb:hover,
+.modal-compra-box::-webkit-scrollbar-thumb:hover,
+.usuario-modal-body::-webkit-scrollbar-thumb:hover,
+.modal-compra-body::-webkit-scrollbar-thumb:hover,
+.modal-scroll-suave::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── SECCIONES INTERNAS DE LOS MODALES DE DETALLE ───────────── */
+
+/* Tarjeta gris usada dentro de los modales "Ver detalle" (Ficha técnica,
+   Compras, Ventas). Compras usaba --bg-surface-3 y Fichas --bg-surface-2;
+   ahora las tres comparten el mismo tono. */
+.modal-seccion {
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.modal-seccion__titulo {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  margin-bottom: 10px;
+}
+
+/* Fila etiqueta/valor dentro de una sección de detalle. */
+.modal-fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.modal-fila:last-child { border-bottom: none; }
+.modal-fila__k { color: var(--text-secondary); font-weight: 600; }
+.modal-fila__v { color: var(--text-primary);   font-weight: 500; text-align: right; }
+
+/* Encabezado estándar de los modales de detalle. */
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head__icon {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: var(--color-green-btn);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+}
+
+.modal-head__title { font-weight: 800; font-size: 16px; color: var(--text-primary); }
+.modal-head__sub   { font-size: 12px;  color: var(--text-secondary); margin-top: 2px; }
+
+/* Botón redondo de cerrar — mismo en todos los modales de detalle. */
+.modal-close-btn {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.modal-close-btn:hover {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+}
+
+/* Pie de acciones de los modales de detalle. */
+.modal-pie {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ── BOTONES DE ACCIÓN DE TABLA — un solo aspecto ───────────── */
+
+/* Se usa `!important` porque varias hojas los definen con selectores más
+   específicos (`.pd-root .btn-ver`, `.insumos-root .btn-ver`). */
+.actions-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  flex-wrap: wrap;
+}
+
+.btn-ver,
+.btn-editar,
+.btn-accion {
+  width: 30px !important;
+  height: 30px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  border: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: background .15s ease, color .15s ease, transform .15s ease !important;
+}
+
+.btn-ver,
+.btn-accion-ver {
+  background: rgba(76,175,80,.12) !important;
+  color: #4CAF50 !important;
+  opacity: 1 !important;
+}
+
+.btn-ver:hover,
+.btn-accion-ver:hover {
+  background: #4CAF50 !important;
+  color: #fff !important;
+  transform: scale(1.05) !important;
+  opacity: 1 !important;
+}
+
+.btn-editar,
+.btn-accion-editar {
+  background: rgba(21,101,192,.12) !important;
+  color: #1565C0 !important;
+  opacity: 1 !important;
+}
+
+.btn-editar:hover,
+.btn-accion-editar:hover {
+  background: #1565C0 !important;
+  color: #fff !important;
+  transform: scale(1.05) !important;
+  opacity: 1 !important;
+}
+
+.btn-accion-eliminar {
+  background: rgba(229,57,53,.12) !important;
+  color: #E53935 !important;
+}
+
+.btn-accion-eliminar:hover {
+  background: #E53935 !important;
+  color: #fff !important;
+  transform: scale(1.05) !important;
+}
+
+/* Botón de acción con texto (Anular, Aprobar, Rechazar) — mismo alto que
+   los de icono para que la fila no quede despareja. */
+.btn-anular,
+.btn-accion-aprobar,
+.btn-accion-rechazar {
+  height: 30px !important;
+  padding: 0 12px !important;
+  border-radius: 8px !important;
+  border: none !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  font-family: 'Open Sans', sans-serif !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none !important;
+  /* Anula el `margin-left:auto` que traía .btn-add cuando se usaba, mal,
+     como botón de fila (ver Pagos por verificar). */
+  margin: 0 !important;
+  transition: background .15s ease, color .15s ease, transform .15s ease !important;
+}
+
+.btn-anular,
+.btn-accion-rechazar {
+  background: rgba(229,57,53,.10) !important;
+  color: #E53935 !important;
+  opacity: 1 !important;
+}
+
+.btn-anular:hover,
+.btn-accion-rechazar:hover {
+  background: #E53935 !important;
+  color: #fff !important;
+  transform: scale(1.05) !important;
+  opacity: 1 !important;
+}
+
+.btn-accion-aprobar {
+  background: rgba(76,175,80,.12) !important;
+  color: #2E7D32 !important;
+}
+
+.btn-accion-aprobar:hover {
+  background: var(--color-green-btn) !important;
+  color: #fff !important;
+  transform: scale(1.05) !important;
+}
+
+[data-theme="dark"] .btn-accion-aprobar { color: #81C784 !important; }
+
+/* Botón secundario de barra de herramientas (ej. "Historial" en Compras),
+   para que no siga llevando estilos en línea propios. */
+.btn-toolbar-secundario {
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface-2);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Open Sans', sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background .18s ease, color .18s ease, border-color .18s ease;
+}
+
+.btn-toolbar-secundario:hover {
+  background: var(--bg-surface-3);
+  border-color: var(--color-green);
+  color: var(--color-green);
+}
+
+/* Montos destacados dentro de los modales de detalle (totales de compra).
+   Antes iban con '#FFCC80' fijo: un naranja pensado para el modo oscuro que
+   sobre el fondo blanco del modo claro quedaba prácticamente ilegible. */
+.modal-monto {
+  color: #E65100;
+  font-weight: 800;
+}
+
+[data-theme="dark"] .modal-monto { color: #FFCC80; }
+
+/* Control de filtro de barra (selects y fechas de Ventas, Compras…). Antes
+   cada uno repetía los mismos estilos en línea y se desincronizaban entre
+   módulos: 10px 14px en unos, 10px 12px en otros, 13px vs 12.5px de fuente. */
+.filtro-select {
+  height: 40px;
+  padding: 0 12px;
+  border: 1.5px solid var(--border-input);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Open Sans', sans-serif;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+.filtro-select:focus {
+  border-color: var(--color-green);
+  box-shadow: 0 0 0 3px var(--color-green-glow);
+}
+
+/* ── AJUSTE MÓVIL ───────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .modal-overlay { padding: 12px !important; }
+  .modal-box,
+  .usuario-modal-box,
+  .modal-compra-box {
+    max-height: calc(100vh - 24px);
+  }
+}

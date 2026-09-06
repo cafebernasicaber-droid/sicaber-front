@@ -1,0 +1,109 @@
+/* ── ImageLightbox ───────────────────────────────────────────── */
+
+.ilb-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: ilbFadeIn .15s ease;
+}
+
+@keyframes ilbFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ilb-stage {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 24px;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.ilb-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform .08s ease-out;
+  border-radius: 4px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.5);
+}
+
+.ilb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 100px;
+  margin-top: 18px;
+  backdrop-filter: blur(6px);
+}
+
+.ilb-btn {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 100px;
+  border: none;
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  transition: background .15s;
+}
+
+.ilb-btn:hover:not(:disabled) { background: rgba(255,255,255,0.24); }
+.ilb-btn:disabled { opacity: 0.35; cursor: default; }
+
+.ilb-btn--reset { font-size: 11px; font-weight: 600; }
+.ilb-btn--close { background: rgba(229,57,53,0.85); }
+.ilb-btn--close:hover { background: rgba(229,57,53,1); }
+
+.ilb-zoom-label {
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  min-width: 42px;
+  text-align: center;
+}
+
+.ilb-hint {
+  color: rgba(255,255,255,0.55);
+  font-size: 11.5px;
+  margin: 10px 0 18px;
+  text-align: center;
+}
+
+/* Botón "lupa" que se superpone sobre la miniatura para abrir el lightbox */
+.ilb-zoom-trigger {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.ilb-zoom-trigger:hover { background: rgba(0,0,0,0.75); }

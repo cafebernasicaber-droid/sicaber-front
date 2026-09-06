@@ -1,0 +1,145 @@
+﻿/* ── BOTONES DE ACCIÓN — override específico para ventas ── */
+.insumos-root .actions-group { display: flex; align-items: center; gap: 4px; }
+
+.insumos-root .btn-ver {
+  width: 30px; height: 30px; padding: 0; border-radius: 8px; border: none;
+  background: rgba(76,175,80,.10); color: #4CAF50;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, transform .15s; cursor: pointer;
+  opacity: 1 !important;
+}
+.insumos-root .btn-ver:hover {
+  background: #4CAF50; color: white; transform: scale(1.05);
+  opacity: 1 !important;
+}
+
+.insumos-root .btn-anular {
+  padding: 4px 10px; border-radius: 8px; border: none;
+  background: rgba(229,57,53,.08); color: #E53935;
+  font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  transition: background .15s, transform .15s; cursor: pointer;
+  opacity: 1 !important;
+}
+.insumos-root .btn-anular:hover {
+  background: #E53935; color: white; transform: scale(1.05);
+  opacity: 1 !important;
+}
+
+/* ════════════════════════════════════════════════════════════
+   THEME PATCH — reemplaza colores hardcoded con variables CSS
+   Aplica tanto en dark como en light gracias a global.css vars
+   ════════════════════════════════════════════════════════════ */
+
+/* Page header */
+.page-title    { color: var(--text-primary) !important; }
+.page-subtitle { color: var(--text-secondary) !important; }
+
+/* Search input */
+.search-input {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.search-input::placeholder { color: var(--text-muted) !important; }
+.search-input:focus {
+  border-color: var(--color-green) !important;
+  box-shadow: 0 0 0 3px var(--color-green-glow) !important;
+}
+.search-icon { color: var(--text-muted) !important; }
+
+/* Table card container */
+.insumos-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+/* Table head */
+.insumos-table thead tr {
+  background: var(--tbl-head-bg) !important;
+  border-bottom-color: var(--tbl-border) !important;
+}
+.insumos-table th { color: var(--tbl-head-clr) !important; }
+.insumos-table tbody tr { border-bottom-color: var(--tbl-border) !important; }
+.insumos-table tbody tr:hover { background: var(--tbl-hover) !important; }
+.insumos-table td { color: var(--tbl-row-clr) !important; }
+.td-nombre { color: var(--text-primary) !important; }
+.td-id     { color: var(--text-muted) !important; }
+.td-muted  { color: var(--text-muted) !important; }
+
+/* Empty state */
+.empty-icon { background: var(--bg-surface-3) !important; color: var(--text-secondary) !important; }
+.empty-state h3 { color: var(--text-primary) !important; }
+.empty-state p  { color: var(--text-secondary) !important; }
+
+/* Modal */
+.modal-overlay { background: var(--modal-overlay) !important; }
+.modal-box {
+  background: var(--modal-bg) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+.modal-box h3   { color: var(--text-primary) !important; }
+.modal-box p    { color: var(--text-secondary) !important; }
+.modal-detail   { background: var(--bg-surface-2) !important; border-color: var(--border) !important; color: var(--text-primary) !important; }
+
+/* Buttons */
+.btn-add, .btn-add-first, .btn-search {
+  background: var(--color-green-btn) !important;
+  color: #fff !important;
+  box-shadow: 0 3px 12px rgba(76,175,80,0.35) !important;
+}
+.btn-cancel {
+  background: var(--bg-surface-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
+.btn-cancel:hover { background: var(--bg-surface-3) !important; color: var(--text-primary) !important; }
+.btn-confirm-primary { background: var(--color-green-btn) !important; }
+.btn-outline-green {
+  border-color: var(--color-green) !important;
+  color: var(--color-green) !important;
+}
+
+/* User cell */
+.user-cell__name { color: var(--text-primary) !important; }
+.user-cell__user { color: var(--text-muted) !important; }
+
+/* Toggle thumb adapts */
+.toggle-thumb { background: var(--toggle-thumb) !important; }
+
+/* Estado inactivo badge */
+.estado-inactivo {
+  background: var(--bg-surface-3) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border) !important;
+}
+
+/* Breadcrumbs */
+.breadcrumb      { color: var(--text-secondary) !important; }
+.breadcrumb-link { color: var(--color-green) !important; }
+
+/* search-results-info */
+.search-results-info { background: var(--bg-surface-2) !important; border-color: var(--border) !important; color: var(--text-secondary) !important; }
+
+/* ── LIGHT MODE — tbody rows explicit white (fixes dark table rows) ── */
+[data-theme="light"] .insumos-table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .insumos-table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}
+[data-theme="light"] .insumos-card {
+  background: #ffffff !important;
+}
+[data-theme="light"] .table-wrap {
+  background: #ffffff !important;
+}
+[data-theme="light"] .data-table tbody tr {
+  background: #ffffff !important;
+}
+[data-theme="light"] .data-table tbody tr:hover {
+  background: rgba(58,158,66,0.05) !important;
+}

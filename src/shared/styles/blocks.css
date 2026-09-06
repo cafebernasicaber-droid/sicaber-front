@@ -1,0 +1,80 @@
+/* ════════════════════════════════════════════════════════════════
+   Bloques de vista (batch 3, item 6)
+   Separación visual consistente entre pestañas / filtros / tabla en
+   Pedidos, Insumos y Compras. Mismo espaciado en claro y oscuro,
+   sin desborde horizontal.
+   ════════════════════════════════════════════════════════════════ */
+
+.sic-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-block);
+}
+
+.sic-block {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: var(--space-inset);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Bloque de pestañas: chips en fila, con wrap y sin desborde */
+.sic-block--tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Bloque de filtros: buscador + selector de local + acciones, alineados
+   dentro del mismo contenedor con su propio aire respecto al borde */
+.sic-block--filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.sic-block--filters > * { min-width: 0; }
+
+/* Bloque de tabla: la card recorta las esquinas; el contenido scrollea
+   dentro de su propio contenedor en pantallas angostas */
+.sic-block--table {
+  padding: 0;
+  overflow: hidden;
+}
+.sic-block--table > .table-wrap,
+.sic-block--table > .sic-table-scroll {
+  overflow-x: auto;
+}
+/* padding interno para que las celdas no toquen el borde de la card */
+.sic-block--table table { width: 100%; }
+.sic-block--table .sic-pagination {
+  padding: var(--space-inset-sm) var(--space-inset);
+  border-top: 1px solid var(--border);
+}
+
+/* batch 6 item 2 — barra de filtros unificada: pestañas + selector de
+   local en la fila superior, buscador + contador en la inferior, dentro
+   de UN solo card, separadas por un divisor sutil. Misma estructura en
+   Pedidos, Insumos y Compras. */
+.sic-filterbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sic-filterbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.sic-filterbar__row > * { min-width: 0; }
+.sic-filterbar__row--sep {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .sic-block { padding: var(--space-inset-sm); }
+}

@@ -1,0 +1,176 @@
+.registrar-compra-root { width: 100%; }
+
+/* ── Los 2 paneles ── */
+.registrar-compra-paneles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .registrar-compra-paneles { grid-template-columns: 1fr; }
+}
+
+/* Panel de Gestión (izquierda) — configura UN insumo a la vez */
+.panel-gestion {
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.panel-gestion-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--tbl-border, var(--border));
+}
+
+/* Panel de Listado (derecha) — resumen compacto + scroll propio */
+.panel-listado {
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Altura fija razonable para que el scroll interno tenga sentido en
+     pantallas normales; en móvil el layout pasa a 1 columna (ver arriba)
+     y esta altura deja de aplicar tan estrictamente. */
+  max-height: 640px;
+}
+.panel-listado-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--tbl-border, var(--border));
+  flex-shrink: 0;
+}
+.panel-listado-scroll {
+  overflow-y: auto;
+  flex: 1;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-listado-vacio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+/* Tarjeta compacta de cada insumo ya agregado — resumen, no el formulario
+   completo (eso solo vive en el Panel de Gestión). */
+.listado-item {
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg-surface-2, var(--bg-surface));
+  transition: border-color .15s, background .15s;
+}
+.listado-item--editando {
+  border-color: #4CAF50;
+  background: rgba(76,175,80,.06);
+  box-shadow: 0 0 0 2px rgba(76,175,80,.12);
+}
+.listado-item--error {
+  border-color: #EF5350;
+  background: rgba(229,57,53,.06);
+}
+.listado-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.listado-item-nombre {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.listado-item-resumen {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.listado-item-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.listado-item-subtotal {
+  font-size: 14px;
+  font-weight: 800;
+  color: #4CAF50;
+}
+.listado-item-acciones {
+  display: flex;
+  gap: 6px;
+}
+.listado-item-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .15s;
+  border: 1px solid transparent;
+}
+.listado-item-btn--editar {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-input);
+}
+.listado-item-btn--editar:hover { background: rgba(76,175,80,.12); color: #4CAF50; border-color: #4CAF50; }
+.listado-item-btn--quitar {
+  background: rgba(229,57,53,.1);
+  color: #E53935;
+  border-color: #E53935;
+}
+.listado-item-btn--quitar:hover { background: rgba(229,57,53,.2); }
+
+/* ── Reorganización visual del Panel de Gestión (config. de insumo) ── */
+.item-block.config-tarjeta {
+  transition: border-color .2s ease, background .2s ease;
+}
+.item-block.config-tarjeta--completa {
+  border-color: #4CAF50 !important;
+  background: rgba(76,175,80,.035);
+}
+.config-grupo {
+  padding: 14px 14px 4px;
+}
+.config-grupo--cantidad {
+  border-top: 1px dashed var(--border);
+  padding-top: 14px;
+  margin-top: 4px;
+}
+.config-grupo-titulo {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted, #9E9E9E);
+  margin-bottom: 10px;
+}

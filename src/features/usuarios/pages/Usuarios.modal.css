@@ -1,0 +1,94 @@
+/* Agregar al final de Usuarios.css */
+
+/* ── Modal de formulario de usuario ── */
+.usuario-modal-box {
+  border-radius: 16px;
+  background: var(--bg-surface);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  overflow: hidden;
+  animation: modalSlideIn 0.2s ease;
+}
+
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(-16px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.usuario-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.usuario-modal-close {
+  width: 36px; height: 36px;
+  border-radius: 50%; border: none;
+  background: var(--bg-surface-3); color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+}
+.usuario-modal-close:hover { background: #FFEBEE; color: #E53935; }
+
+.usuario-modal-body {
+  padding: 24px;
+  max-height: 75vh;
+  overflow-y: auto;
+}
+
+/* ════════════════════════════════════════════════════════════
+   THEME PATCH — form pages & ver pages
+   ════════════════════════════════════════════════════════════ */
+.mod-form-card, .form-card, .ver-section, .proveedor-card {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.mod-form-group label, .form-group label, .field-label {
+  color: var(--text-secondary) !important;
+}
+.mod-form-group input,
+.mod-form-group select,
+.mod-form-group textarea,
+.form-group input,
+.form-group select,
+.form-group textarea,
+.form-input {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+}
+.mod-form-group input::placeholder,
+.form-group input::placeholder { color: var(--text-muted) !important; }
+.mod-form-group input:focus,
+.mod-form-group select:focus,
+.mod-form-group textarea:focus,
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--color-green) !important;
+  box-shadow: 0 0 0 3px var(--color-green-glow) !important;
+}
+.mod-form-footer { border-top-color: var(--border) !important; }
+/* Ver page titles & values */
+.ver-header-left h1 { color: var(--text-primary) !important; }
+.ver-section__title { color: var(--text-secondary) !important; }
+.field-row .label, .ver-label { color: var(--text-muted) !important; }
+.field-row .value, .ver-value { color: var(--text-primary) !important; }
+/* Breadcrumb */
+.breadcrumb      { color: var(--text-secondary) !important; }
+.breadcrumb-link { color: var(--color-green) !important; }
+.breadcrumb-nav  { color: var(--text-secondary) !important; }
+.breadcrumb-nav span { color: var(--color-green) !important; }
+.breadcrumb-nav em   { color: var(--text-muted) !important; }
+/* Section dividers */
+.ver-section__divider { border-color: var(--border) !important; }
+/* CompraForm / InsumoForm shared panels */
+.compra-form__section { background: var(--bg-surface) !important; border-color: var(--border) !important; }
+.compra-form__label { color: var(--text-secondary) !important; }
+.compra-form__input, .compra-form__select {
+  background: var(--bg-input) !important;
+  border-color: var(--border-input) !important;
+  color: var(--text-primary) !important;
+}

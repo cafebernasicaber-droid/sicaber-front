@@ -1,0 +1,119 @@
+/* ─────────────────────────────────────────────────────────────
+   PedidoBuilder — extras del modo admin (toggle de entrega, chips
+   de local / atendido por / domiciliario) y el contenedor cuando
+   se usa dentro de un modal (Admin).
+   Los estilos base del catálogo y el carrito vienen de
+   CajeroPage.css (clases cj-*), que ya es theme-aware.
+   ───────────────────────────────────────────────────────────── */
+
+/* Contenedor del builder dentro del modal del Admin */
+.pb-modal-overlay {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.pb-modal {
+  width: 100%; max-width: 1100px; height: min(88vh, 820px);
+  background: var(--bg-surface); border-radius: 16px;
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.3);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pb-modal__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.pb-modal__head h2 { font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 0; }
+.pb-modal__x {
+  background: none; border: none; font-size: 20px; line-height: 1;
+  cursor: pointer; color: var(--text-muted); padding: 4px 8px; border-radius: 8px;
+}
+.pb-modal__x:hover { background: var(--bg-surface-2); color: var(--text-primary); }
+.pb-modal__body { flex: 1; min-height: 0; padding: 18px 20px; overflow: hidden; }
+
+/* El builder ocupa todo el alto disponible del modal */
+.pb-modal__body .cj-nuevo { height: 100%; }
+
+/* Toggle tipo de entrega */
+.pb-toggle { display: flex; gap: 8px; }
+.pb-toggle__btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 10px; border-radius: 9px; cursor: pointer;
+  font-size: 12.5px; font-weight: 600;
+  border: 1.5px solid var(--border-input);
+  background: var(--bg-input); color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.pb-toggle__btn--on {
+  border-color: var(--color-green, #4CAF50);
+  background: var(--color-green-glow, rgba(76,175,80,0.14));
+  color: var(--text-primary);
+}
+
+/* Chips de selección (local / atendido / domiciliario) */
+.pb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pb-chip {
+  padding: 6px 12px; border-radius: 20px; cursor: pointer;
+  font-size: 12px; font-weight: 600;
+  border: 1.5px solid var(--border-input);
+  background: var(--bg-input); color: var(--text-secondary);
+  transition: all 0.15s; white-space: nowrap;
+}
+.pb-chip:hover { border-color: var(--color-green, #4CAF50); }
+.pb-chip--on {
+  border-color: var(--color-green, #4CAF50);
+  background: var(--color-green, #4CAF50); color: #fff;
+}
+
+@media (max-width: 820px) {
+  .pb-modal { height: 92vh; max-width: 100%; }
+  .pb-modal__body .cj-nuevo { grid-template-columns: 1fr; overflow-y: auto; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   FIX — el botón "Crear pedido" desaparecía al agregar un producto
+
+   El carrito del modal de Admin tiene MUCHOS más campos que el del
+   Cajero: tipo de entrega, método de pago, local, atendido por y, si es
+   domicilio, domiciliario y dirección. Con el carrito vacío entraban
+   justo dentro del alto del modal.
+
+   Al agregar el primer producto aparecen dos bloques más —el ítem del
+   carrito y el campo "Nota para el bartender"— y el contenido supera el
+   alto disponible. Como .cj-nuevo__cart tiene `overflow: hidden` y el
+   pie (.cj-cart__foot) es el ÚLTIMO hijo del flex, quedaba recortado
+   fuera de la caja: sin scroll que lo alcanzara y sin forma de crear el
+   pedido. Justo al revés de lo esperado — el botón se perdía en el
+   momento en que empezaba a ser útil.
+
+   Solución: el carrito scrollea completo y el pie queda pegado abajo con
+   position:sticky, siempre visible. Va acotado a `.pb-modal__body` a
+   propósito: la vista del Cajero no tiene este problema (menos campos y
+   su propio contenedor) y no se toca.
+   ───────────────────────────────────────────────────────────── */
+.pb-modal__body .cj-nuevo__cart {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Deja de ser la zona con scroll propio: ahora scrollea el carrito entero,
+   así el pie sticky se posiciona respecto a un único contenedor. */
+.pb-modal__body .cj-cart__items {
+  flex: 0 0 auto;
+  overflow: visible;
+  min-height: 60px;
+}
+
+.pb-modal__body .cj-cart__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  flex-shrink: 0;
+  margin-top: auto;              /* lo empuja abajo cuando sobra espacio */
+  background: var(--cj-surface); /* opaco: el contenido pasa por debajo */
+  border-top: 1px solid var(--cj-border);
+  /* Compensa el padding del contenedor para que el fondo llegue a los bordes */
+  padding-bottom: 14px;
+}
