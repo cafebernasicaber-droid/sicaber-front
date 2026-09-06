@@ -213,20 +213,14 @@ const Layout = ({ children }) => {
     <div className="layout-root">
       <aside className={`sidebar ${expanded ? 'sidebar--expanded' : 'sidebar--compact'}`}>
         <div className="sidebar-logo">
-          {/* item 10 — botón de colapsar integrado en el header del sidebar
-              (fila propia alineada al borde), con hover y tooltip; ya no
-              flota sobre el logo. */}
-          <div className="sidebar-toggle-row">
-            <button
-              type="button"
-              className="sidebar-toggle"
-              onClick={() => { toggleExpanded(); hideTip(); }}
-              aria-label={expanded ? 'Contraer menú' : 'Expandir menú'}
-            >
-              <span style={{transform: expanded ? 'rotate(180deg)' : 'none', display:'flex'}}>{icons.chevronRight}</span>
-              <span className="sidebar-toggle__tip">{expanded ? 'Contraer menú' : 'Expandir menú'}</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => { toggleExpanded(); hideTip(); }}
+            title={expanded ? 'Contraer menú' : 'Expandir menú'}
+          >
+            <span style={{transform: expanded ? 'rotate(180deg)' : 'none', display:'flex'}}>{icons.chevronRight}</span>
+          </button>
           <div className="sidebar-logo-circle">
             <img src="/img/Logotipo_blanco.png" alt="Sicaber" style={{width:44,height:44,objectFit:'contain',filter:'none',padding:4}}/>
           </div>

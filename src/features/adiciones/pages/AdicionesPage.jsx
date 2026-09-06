@@ -74,19 +74,6 @@ function AdicionModal({ inicial, insumos, onClose, onSave }) {
   // coco" sí gasta insumo; "Vaso personalizado" quizás no).
   const insumoSel = insumos.find(i => String(i.id) === String(form.insumo_id));
 
-  // Solo se ofrecen los insumos marcados como "es para topping" desde el
-  // módulo de Insumos (columna es_topping). Antes el buscador listaba TODO
-  // el catálogo, así que al crear una adición aparecían insumos que no
-  // tienen ningún sentido como adición (vasos, empaques, materia prima
-  // a granel).
-  //
-  // El insumo ya guardado en esta adición se mantiene siempre en la lista
-  // aunque no esté marcado como topping: si no, editar una adición vieja
-  // haría desaparecer el nombre de su insumo asociado.
-  const insumosParaAdicion = insumos.filter(
-    i => i.esTopping || String(i.id) === String(form.insumo_id)
-  );
-
   // Contador de palabras de la descripción, visible mientras se escribe.
   const palabrasDescripcion = (form.descripcion || '').trim() ? (form.descripcion || '').trim().split(/\s+/) : [];
 
@@ -146,19 +133,14 @@ function AdicionModal({ inicial, insumos, onClose, onSave }) {
           <div className="mod-form-group">
             <label>Insumo asociado <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span></label>
             <p style={{fontSize:12,color:'var(--text-muted)',marginTop:0,marginBottom:8}}>
-              Solo se listan los insumos habilitados como topping o adición. Déjalo vacío si esta adición es solo un extra de precio sin consumo real de insumos.
+              Déjalo vacío si esta adición es solo un extra de precio sin consumo real de insumos.
             </p>
             <InsumoSearchSelect
-              insumos={insumosParaAdicion}
+              insumos={insumos}
               value={form.insumo_id}
               onSelect={found => setForm(f => ({...f, insumo_id: found.id}))}
-              placeholder="Buscar insumo para la adición..."
+              placeholder="Buscar insumo..."
             />
-            {insumosParaAdicion.length === 0 && (
-              <p style={{fontSize:12,color:'#F57F17',marginTop:6,marginBottom:0}}>
-                No hay insumos habilitados como topping. Márcalos con la casilla “es para topping” en el módulo de Insumos.
-              </p>
-            )}
             {insumoSel && (
               <>
                 <div style={{marginTop:10}}>

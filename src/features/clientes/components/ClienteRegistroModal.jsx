@@ -3,16 +3,29 @@ import clientesService from '../services/clientesService';
 import { errorPassword } from '../../../shared/utils/passwordPolicy';
 import PasswordRequisitos from '../../../shared/components/PasswordRequisitos';
 
-// El registro ya NO captura ubicación (departamento, municipio, comuna ni
-// dirección) — por eso también desapareció el catálogo de departamentos que
-// vivía acá. Una cuenta de cliente sirve para ver el catálogo; la dirección
-// se pide, y es obligatoria, recién al registrar un pedido a domicilio.
-// El catálogo sigue existiendo en ClienteEditarModal, que no se tocó: quien
-// ya tenga una comuna guardada puede seguir corrigiéndola desde ahí.
+// ── Datos de ubicación (mismo catálogo usado en Editar cliente) ───────────────
+const DEPARTAMENTOS = {
+  'Antioquia':        ['Medellín','Bello','Itagüí','Envigado','Sabaneta','Rionegro','Apartadó','Turbo'],
+  'Bogotá D.C.':       ['Bogotá'],
+  'Valle del Cauca':   ['Cali','Buenaventura','Palmira','Tuluá','Cartago'],
+  'Cundinamarca':      ['Soacha','Facatativá','Zipaquirá','Chía','Fusagasugá'],
+  'Atlántico':         ['Barranquilla','Soledad','Malambo'],
+  'Bolívar':           ['Cartagena','Magangué','Turbaco'],
+  'Santander':         ['Bucaramanga','Floridablanca','Girón','Piedecuesta'],
+  'Córdoba':           ['Montería','Lorica','Sahagún'],
+  'Nariño':            ['Pasto','Tumaco','Ipiales'],
+  'Risaralda':         ['Pereira','Dosquebradas','Santa Rosa de Cabal'],
+  'Tolima':            ['Ibagué','Espinal','Melgar'],
+  'Huila':             ['Neiva','Pitalito','Garzón'],
+  'Cauca':             ['Popayán','Santander de Quilichao'],
+};
+const COMUNAS_MEDELLIN = ['Comuna 8 - Villa Hermosa', 'Comuna 9 - Buenos Aires'];
+
 const EMPTY = {
   nombre: '', correo: '', telefono: '',
   tipoDoc: 'Cédula de Ciudadanía', tipoDocOtro: '', numeroDoc: '',
-  password: '', confirm: '',
+  departamento: 'Antioquia', municipio: 'Medellín', comuna: '',
+  direccion: '', password: '', confirm: '',
 };
 
 const labelStyle = { fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 };
@@ -30,6 +43,12 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
   const [loading, setLoading] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const municipios = DEPARTAMENTOS[form.departamento] || [];
+
+  const handleDepartamento = (dep) => {
+    setForm(f => ({ ...f, departamento: dep, municipio: (DEPARTAMENTOS[dep] || [])[0] || '', comuna: '' }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault(); setError('');
@@ -129,20 +148,38 @@ const ClienteRegistroModal = ({ onClose, onCreated }) => {
                 </div>
               )}
 
-              {/* Aviso de cobertura en lugar de los campos de ubicación: el
-                  cliente queda registrado y puede ver el catálogo sin
-                  importar dónde viva; la dirección se le pide (obligatoria)
-                  al momento de registrar un pedido a domicilio. */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10, background: 'rgba(93,187,99,0.10)', border: '1px solid rgba(93,187,99,0.32)', color: 'var(--color-green)' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }} aria-hidden="true">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
-                </svg>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <strong style={{ fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.35 }}>El cliente podrá ver todo el catálogo</strong>
-                  <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                    El servicio a domicilio cubre por ahora solo las <b style={{ color: 'var(--text-primary)' }}>comunas 8 y 9 de Medellín</b>. Si está fuera de esa zona podrá navegar el menú, pero no hacer pedidos a domicilio. La dirección se solicita al registrar el pedido.
-                  </span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={labelStyle}>Departamento</label>
+                  <select style={inputStyle} value={form.departamento}
+                    onChange={e => handleDepartamento(e.target.value)}>
+                    {Object.keys(DEPARTAMENTOS).map(d => <option key={d}>{d}</option>)}
+                  </select>
                 </div>
+                <div>
+                  <label style={labelStyle}>Municipio / Ciudad</label>
+                  <select style={inputStyle} value={form.municipio} onChange={e => set('municipio', e.target.value)}>
+                    {municipios.map(m => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {form.municipio === 'Medellín' && (
+                <div>
+                  <label style={labelStyle}>
+                    Comuna <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(domicilios solo en comunas 8 y 9)</span>
+                  </label>
+                  <select style={inputStyle} value={form.comuna} onChange={e => set('comuna', e.target.value)}>
+                    <option value="">Seleccionar comuna...</option>
+                    {COMUNAS_MEDELLIN.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label style={labelStyle}>Dirección</label>
+                <input style={inputStyle} type="text" placeholder="Ej: Calle 10 # 43-20"
+                  value={form.direccion} onChange={e => set('direccion', e.target.value)} />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

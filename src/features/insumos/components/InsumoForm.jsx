@@ -4,7 +4,6 @@ import proveedoresService from '../../proveedores/services/proveedoresService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
 import './InsumoForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
-import { TIPO_USO_OPCIONES, tiposUsoDe, tiposUsoPayload, permiteDecimales, errorCantidad, localesStockPayload, desglosePorLocal } from '../../../shared/constants/insumoTipos';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -18,13 +17,10 @@ const EMPTY_FORM = {
   descripcion: '',
   estado: 'Activo',
   tamanoOz: '',
-  // Cambio 4 — tipo de uso (selección múltiple, al menos uno). Mapean a
-  // los flags es_insumo / es_adicion_sin_costo / es_topping del backend.
-  // `esTopping` se mantiene además por compatibilidad con el código que
-  // aún lo lee (ver tiposUsoPayload en shared/constants/insumoTipos.js).
-  es_insumo: true,
-  es_adicion_sin_costo: false,
-  es_topping: false,
+  // 2 — solo informativo: no cambia ninguna lógica de stock ni de costo,
+  // es para poder filtrar/encontrar más rápido los insumos candidatos a
+  // topping al armar la sección "Toppings" de una ficha técnica.
+  esTopping: false,
 };
 
 // Los vasos ya NO son una categoría especial ni una lista definida en el
@@ -118,32 +114,9 @@ function BuscadorSelect({ value, options, onChange, placeholder, disabled, empty
   );
 }
 
-const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias, locales = [], localActivoId }) => {
+const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
-  // batch 3 item 3 — stock por local
-  //  · CREATE: "Stock actual" arranca en 0; el enlace "¿Ya hay cantidad
-  //    existente?" revela cantidad + a qué local corresponde (el resto en 0).
-  //  · EDIT: una fila por local con su stock actual y su stock mínimo.
-  const [stockInicialAbierto, setStockInicialAbierto] = useState(false);
-  const [stockInicial, setStockInicial] = useState({ cantidad: '', localId: '' });
-  const [localesStock, setLocalesStock] = useState([]);
-  const setLocalRow = (idx, key, val) =>
-    setLocalesStock(prev => prev.map((r, i) => (i === idx ? { ...r, [key]: val } : r)));
-  // batch 4 item 7 — en qué locales EXISTE el insumo (independiente del stock).
-  //  · CREATE: "Todos los locales" por defecto, o elegir específicos.
-  //  · EDIT: casillas por local, editable.
-  const [todosLocales, setTodosLocales] = useState(true);
-  const [localesActivos, setLocalesActivos] = useState([]); // ids (string)
-  const toggleLocalActivo = (id) => {
-    setTodosLocales(false);
-    setLocalesActivos(prev => {
-      const s = String(id);
-      const next = prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s];
-      setErrors(e => ({ ...e, localesActivos: '' }));
-      return next;
-    });
-  };
   // Qué campos ya tocó el usuario (onChange en selects/checkbox, onBlur en
   // texto) — solo esos muestran el check de válido; el mensaje de error, en
   // cambio, se muestra apenas exista (incluido al enviar, para campos que
@@ -165,59 +138,13 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         descripcion:  initialData.descripcion  || '',
         estado:       initialData.estado !== undefined ? initialData.estado : 'Activo',
         tamanoOz:     initialData.tamanoOz     ?? '',
-        ...tiposUsoDe(initialData),
+        esTopping:    !!initialData.esTopping,
       });
       setTamanoOzEsOtro(
         initialData.tamanoOz != null && initialData.tamanoOz !== '' && !TAMANOS_OZ_PRESET.includes(Number(initialData.tamanoOz))
       );
     }
   }, [initialData, isEditing]);
-
-  // Grid de stock por local al editar: una fila por local ACTIVO, prefilada
-  // desde el desglose insumo_local (0 / stock mínimo base si el insumo no
-  // tiene fila en ese local). Se reconstruye si `locales` llega después.
-  useEffect(() => {
-    if (!isEditing || !initialData) return;
-    const desg = initialData.desglose || desglosePorLocal(initialData);
-    const minBase = initialData.stockMinimo != null && initialData.stockMinimo !== '' ? String(initialData.stockMinimo) : '0';
-    setLocalesStock((locales || []).map(l => {
-      const d = desg.find(x => String(x.localId) === String(l.id));
-      return {
-        localId: String(l.id),
-        localNombre: l.nombre,
-        stockActual: d ? String(d.stockActual) : '0',
-        stockMinimo: d && d.stockMinimo != null ? String(d.stockMinimo) : minBase,
-      };
-    }));
-  }, [locales, initialData, isEditing]);
-
-  // Al crear: si el usuario ya eligió un local en las pestañas de la vista
-  // (localActivoId distinto de 'todos'), lo proponemos como destino de la
-  // cantidad inicial.
-  useEffect(() => {
-    if (!isEditing && localActivoId && localActivoId !== 'todos') {
-      setStockInicial(s => (s.localId ? s : { ...s, localId: String(localActivoId) }));
-    }
-  }, [isEditing, localActivoId]);
-
-  // batch 4 item 7 — locales donde el insumo está activo (edición).
-  useEffect(() => {
-    if (!isEditing || !initialData) return;
-    const explicit =
-      initialData.localesActivos || initialData.locales_activos ||
-      initialData.localesIds || initialData.locales_ids || null;
-    let ids;
-    if (Array.isArray(explicit) && explicit.length) {
-      ids = explicit.map(x => String(x.id ?? x));
-    } else {
-      // fallback: locales que tienen fila en el desglose
-      const desg = initialData.desglose || desglosePorLocal(initialData);
-      ids = desg.map(d => String(d.localId));
-      if (!ids.length) ids = (locales || []).map(l => String(l.id)); // sin datos → todos
-    }
-    setLocalesActivos(ids);
-    setTodosLocales(locales.length > 0 && ids.length === locales.length);
-  }, [initialData, isEditing, locales]);
 
   // Solo unidades de medida reales del insumo. "Caja", "paquete", "bolsa" y
   // "docena" NO son unidades de medida — son presentaciones de compra (cómo
@@ -249,28 +176,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       errs.tamanoOz = 'Selecciona o escribe el tamaño del vaso';
     }
     if (!f.unidadMedida)       errs.unidadMedida = 'Selecciona una unidad de medida';
-    if (!f.es_insumo && !f.es_adicion_sin_costo && !f.es_topping) errs.tipoUso = 'Marca al menos un tipo de uso';
-    // batch 4 item 7 — en qué locales existe el insumo
-    if ((locales || []).length > 0) {
-      const elegidos = todosLocales ? locales.map(l => String(l.id)) : localesActivos;
-      if (elegidos.length === 0) errs.localesActivos = 'Elige al menos un local (o "Todos los locales")';
-    }
-    // batch 3 item 3 — stock por local
-    if (!isEditing) {
-      const eMin = errorCantidad(f.stockMinimo, f.unidadMedida, { min: 1 });
-      if (eMin) errs.stockMinimo = eMin === 'Requerido' ? 'El stock mínimo es obligatorio' : eMin.replace('Debe ser 1 o mayor', 'El stock mínimo debe ser 1 o mayor');
-      if (stockInicialAbierto) {
-        const eC = errorCantidad(stockInicial.cantidad, f.unidadMedida, { min: 0 });
-        if (eC) errs.stockInicial = eC === 'Requerido' ? 'Escribe la cantidad existente' : eC;
-        else if (!stockInicial.localId) errs.stockInicial = 'Elige a qué local corresponde esa cantidad';
-      }
-    } else {
-      const filaMala = localesStock.some(r =>
-        errorCantidad(r.stockActual, f.unidadMedida, { min: 0 }) ||
-        errorCantidad(r.stockMinimo, f.unidadMedida, { min: 0 })
-      );
-      if (filaMala) errs.localesStock = 'Corrige los valores de stock por local';
-    }
+    if (f.stockMinimo === '' || isNaN(f.stockMinimo) || Number(f.stockMinimo) < 1) errs.stockMinimo = 'El stock mínimo debe ser 1 o mayor';
     if (proveedoresActivos.length > 0 && !f.proveedor.trim()) errs.proveedor = 'Selecciona un proveedor';
     return errs;
   };
@@ -322,14 +228,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     touchAndValidate('categoria', newForm);
   };
 
-  // Cambio 4 — marca/desmarca un tipo de uso y revalida la regla de
-  // "al menos uno" en vivo.
-  const handleTipoUso = (key) => {
-    const newForm = { ...form, [key]: !form[key] };
-    setForm(newForm);
-    touchAndValidate('tipoUso', newForm);
-  };
-
   const handleProveedorChange = (e) => {
     const selectedId = e.target.value;
     const prov = proveedores.find(p => String(p.id) === String(selectedId));
@@ -346,41 +244,11 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     }
     const errs = validate();
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-    const dec = permiteDecimales(form.unidadMedida);
-    const num = (v) => (dec ? Number(v) : Math.round(Number(v))) || 0;
-    const payload = {
+    onSubmit({
       ...form,
+      stockMinimo: Math.max(1, parseInt(form.stockMinimo, 10) || 1),
       tamanoOz: form.unidadMedida === 'oz' && form.tamanoOz !== '' ? Number(form.tamanoOz) : null,
-      ...tiposUsoPayload(form),
-    };
-    // batch 4 item 7 — locales donde existe el insumo
-    const localesIds = (todosLocales ? (locales || []).map(l => String(l.id)) : localesActivos)
-      .map(id => (isNaN(Number(id)) ? id : Number(id)));
-    if (localesIds.length) {
-      payload.locales_ids = localesIds;
-      payload.localesIds = localesIds;
-      payload.todos_locales = todosLocales;
-    }
-    if (!isEditing) {
-      const min = dec ? Math.max(1, Number(form.stockMinimo) || 1) : Math.max(1, Math.round(Number(form.stockMinimo) || 1));
-      payload.stockMinimo = min;
-      payload.stock_minimo = min;
-      if (stockInicialAbierto && stockInicial.localId) {
-        payload.stockInicial = num(stockInicial.cantidad);
-        payload.stock_inicial = payload.stockInicial;
-        payload.localInicialId = stockInicial.localId;
-        payload.local_inicial_id = stockInicial.localId;
-      } else {
-        payload.stockInicial = 0;
-        payload.stock_inicial = 0;
-      }
-    } else {
-      const filas = localesStock.map(r => ({ localId: r.localId, stockActual: num(r.stockActual), stockMinimo: num(r.stockMinimo) }));
-      Object.assign(payload, localesStockPayload(filas));
-      // valor representativo para cualquier lector antiguo del campo plano
-      payload.stockMinimo = filas.length ? filas[0].stockMinimo : Number(form.stockMinimo) || 0;
-    }
-    onSubmit(payload);
+    });
   };
 
   // "Disponible" significa que existe al menos un proveedor Activo — no basta
@@ -546,146 +414,37 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             : touched.proveedor && form.proveedor.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
-        {/* batch 4 item 7 — en qué locales EXISTE el insumo (no es el stock). */}
-        {locales.length > 0 && (
-          <div className={`fg fg-full ${errors.localesActivos ? 'fg-error' : ''}`}>
-            <label>{isEditing ? 'Locales donde está activo el insumo' : '¿En qué locales existe este insumo?'} <span className="req">*</span></label>
-            {!isEditing && (
-              <div style={{ display:'flex', gap:8, marginTop:4, marginBottom:8, flexWrap:'wrap' }}>
-                <button type="button" onClick={() => { setTodosLocales(true); setLocalesActivos(locales.map(l => String(l.id))); setErrors(e => ({ ...e, localesActivos:'' })); }}
-                  style={{ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${todosLocales ? '#4CAF50' : 'var(--border-input)'}`, background: todosLocales ? 'rgba(76,175,80,0.12)' : 'transparent', color: todosLocales ? '#2E7D32' : 'var(--text-secondary)', fontWeight:700, fontSize:12.5, cursor:'pointer' }}>
-                  Todos los locales
-                </button>
-                <button type="button" onClick={() => setTodosLocales(false)}
-                  style={{ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${!todosLocales ? '#4CAF50' : 'var(--border-input)'}`, background: !todosLocales ? 'rgba(76,175,80,0.12)' : 'transparent', color: !todosLocales ? '#2E7D32' : 'var(--text-secondary)', fontWeight:700, fontSize:12.5, cursor:'pointer' }}>
-                  Locales específicos
-                </button>
-              </div>
-            )}
-            {(isEditing || !todosLocales) && (
-              // batch 6 item 4 — grilla (no una sola fila): se acomoda en
-              // columnas cuando hay muchos locales, sin desbordar.
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:8, marginTop:4 }}>
-                {locales.map(l => {
-                  const checked = todosLocales || localesActivos.includes(String(l.id));
-                  return (
-                    <label key={l.id} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 12px', borderRadius:10, cursor:'pointer', minWidth:0, border:`1.5px solid ${checked ? '#4CAF50' : 'var(--border-input)'}`, background: checked ? 'rgba(76,175,80,0.10)' : 'var(--bg-surface)' }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleLocalActivo(l.id)}
-                        style={{ width:15, height:15, flexShrink:0, accentColor:'#4CAF50', cursor:'pointer' }}/>
-                      <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.nombre}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
-              Este selector solo define en qué locales <strong>existe</strong> el insumo. El stock real se suma después desde <strong>Registrar Compra</strong>, según el local que se elija allí.
+        {isEditing && (
+          <div className="fg">
+            <label>Stock actual</label>
+            <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+              {form.stockActual} {form.unidadMedida}
+            </div>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+              El stock actual solo aumenta al registrar una compra y disminuye al anularla.
             </span>
-            {errors.localesActivos && <span className="err-msg">{errors.localesActivos}</span>}
           </div>
         )}
 
-        {/* batch 3 item 3 — Stock actual + Stock mínimo. Por local. */}
-        {!isEditing ? (
-          <>
-            <div className={`fg ${errors.stockMinimo ? 'fg-error' : ''}`}>
-              <label>Stock mínimo <span className="req">*</span></label>
-              <input
-                type="number" name="stockMinimo" value={form.stockMinimo}
-                step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
-                onChange={e => { const nf = { ...form, stockMinimo: e.target.value }; setForm(nf); touchAndValidate('stockMinimo', nf); }}
-                onBlur={handleBlur}
-                placeholder={permiteDecimales(form.unidadMedida) ? 'Ej: 2.5' : '1'}
-              />
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Se aplica a todos los locales al crear; luego se ajusta por local al editar.
-                {form.unidadMedida && !permiteDecimales(form.unidadMedida) && ' La unidad "unidad" solo admite enteros.'}
-              </span>
-              {errors.stockMinimo
-                ? <span className="err-msg">{errors.stockMinimo}</span>
-                : touched.stockMinimo && form.stockMinimo !== '' && <span className="ok-msg">✓ Válido</span>}
-            </div>
-
-            <div className={`fg ${errors.stockInicial ? 'fg-error' : ''}`}>
-              <label>Stock actual</label>
-              {!stockInicialAbierto ? (
-                <>
-                  <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
-                    0 {form.unidadMedida}
-                  </div>
-                  <button type="button" onClick={() => setStockInicialAbierto(true)}
-                    style={{ marginTop: 6, background: 'none', border: 'none', padding: 0, color: 'var(--color-green,#4CAF50)', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}>
-                    ¿Ya hay cantidad existente?
-                  </button>
-                </>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input
-                    type="number" step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
-                    placeholder={`Cantidad existente (${form.unidadMedida || 'unidad'})`}
-                    value={stockInicial.cantidad}
-                    onChange={e => { setStockInicial(s => ({ ...s, cantidad: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}
-                  />
-                  <select value={stockInicial.localId}
-                    onChange={e => { setStockInicial(s => ({ ...s, localId: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}>
-                    <option value="">— ¿A qué local corresponde? —</option>
-                    {locales.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                  </select>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    Solo este local recibe la cantidad inicial; el resto de locales queda en 0.
-                  </span>
-                  <button type="button" onClick={() => { setStockInicialAbierto(false); setStockInicial({ cantidad: '', localId: '' }); setErrors(prev => ({ ...prev, stockInicial: '' })); }}
-                    style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, color: 'var(--text-muted)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
-                    Cancelar — dejar todo en 0
-                  </button>
-                </div>
-              )}
-              {errors.stockInicial && <span className="err-msg">{errors.stockInicial}</span>}
-            </div>
-          </>
-        ) : (
-          <div className={`fg fg-full ${errors.localesStock ? 'fg-error' : ''}`}>
-            <label>Stock por local</label>
-            {locales.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No hay locales activos registrados.</div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(110px,1.2fr) 1fr 1fr', gap: '6px 10px', alignItems: 'start' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Local</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Stock actual</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Stock mínimo</div>
-                {localesStock.map((row, idx) => {
-                  const eA = errorCantidad(row.stockActual, form.unidadMedida, { min: 0 });
-                  const eM = errorCantidad(row.stockMinimo, form.unidadMedida, { min: 0 });
-                  const stepAttr = permiteDecimales(form.unidadMedida) ? 'any' : '1';
-                  return (
-                    <React.Fragment key={row.localId}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', paddingTop: 9 }}>{row.localNombre}</div>
-                      <div>
-                        <input type="number" step={stepAttr} value={row.stockActual}
-                          onChange={e => setLocalRow(idx, 'stockActual', e.target.value)}
-                          style={eA ? { borderColor: '#EF5350' } : undefined}/>
-                        {eA && <div className="err-msg">{eA}</div>}
-                      </div>
-                      <div>
-                        <input type="number" step={stepAttr} value={row.stockMinimo}
-                          onChange={e => setLocalRow(idx, 'stockMinimo', e.target.value)}
-                          style={eM ? { borderColor: '#EF5350' } : undefined}/>
-                        {eM && <div className="err-msg">{eM}</div>}
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            )}
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
-              El stock actual también cambia al registrar o anular compras.
-              {form.unidadMedida && (permiteDecimales(form.unidadMedida)
-                ? ` La unidad "${form.unidadMedida}" admite decimales.`
-                : ' La unidad "unidad" solo admite enteros.')}
-            </span>
-            {errors.localesStock && <span className="err-msg">{errors.localesStock}</span>}
-          </div>
-        )}
+        <div className={`fg ${errors.stockMinimo ? 'fg-error' : ''}`}>
+          <label>Stock mínimo <span className="req">*</span></label>
+          <input
+            type="number" name="stockMinimo" value={form.stockMinimo}
+            onChange={e => {
+              const val = e.target.value;
+              if (val !== '' && Number(val) < 1) return;
+              handleChange(e);
+            }}
+            onBlur={handleBlur}
+            placeholder="1" step="1"
+          />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+            Se mostrará alerta cuando el stock caiga por debajo de este valor
+          </span>
+          {errors.stockMinimo
+            ? <span className="err-msg">{errors.stockMinimo}</span>
+            : touched.stockMinimo && form.stockMinimo !== '' && <span className="ok-msg">✓ Válido</span>}
+        </div>
 
         <div className="fg fg-estado">
           <label>Estado</label>
@@ -700,35 +459,16 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </div>
         </div>
 
-        {/* Cambio 4 — Tipo de uso (selección múltiple: uno, dos o los tres).
-            Mapea a es_insumo / es_adicion_sin_costo / es_topping. */}
-        <div className={`fg fg-full ${errors.tipoUso ? 'fg-error' : ''}`}>
-          <label>Tipo de uso <span className="req">*</span></label>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginTop:4 }}>
-            {TIPO_USO_OPCIONES.map(op => {
-              const checked = !!form[op.key];
-              return (
-                <label key={op.key}
-                  style={{
-                    display:'flex', alignItems:'flex-start', gap:8, cursor:'pointer',
-                    padding:'10px 12px', borderRadius:10, flex:'1 1 180px',
-                    border:`1.5px solid ${checked ? '#4CAF50' : 'var(--border-input)'}`,
-                    background: checked ? 'rgba(76,175,80,0.10)' : 'var(--bg-surface)',
-                    transition:'all .15s',
-                  }}>
-                  <input type="checkbox" checked={checked} onChange={() => handleTipoUso(op.key)}
-                    style={{ width:16, height:16, marginTop:1, cursor:'pointer', accentColor:'#4CAF50' }}/>
-                  <span>
-                    <span style={{ display:'block', fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>{op.label}</span>
-                    <span style={{ display:'block', fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>{op.hint}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          {errors.tipoUso
-            ? <span className="err-msg">{errors.tipoUso}</span>
-            : (touched.tipoUso && <span className="ok-msg">✓ Válido</span>)}
+        {/* 2 — solo informativo (no toca stock ni costo): facilita
+            encontrar este insumo al armar la sección "Toppings" de una
+            ficha técnica. */}
+        <div className="fg">
+          <label>&nbsp;</label>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'10px 0' }}>
+            <input type="checkbox" name="esTopping" checked={form.esTopping} onChange={handleChange}
+              style={{ width:16, height:16, cursor:'pointer', accentColor:'#4CAF50' }}/>
+            <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>Este insumo se usa como topping</span>
+          </label>
         </div>
 
         <div className="fg fg-full">

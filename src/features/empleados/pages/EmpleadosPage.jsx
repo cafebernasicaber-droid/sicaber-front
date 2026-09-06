@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import Layout from '../../../shared/components/Layout';
 import useEmpleados from '../hooks/useEmpleados';
@@ -282,63 +282,24 @@ function EmpleadoDetalleModal({ empleado: e, onClose, onEditar }) {
   );
 }
 
-// ── Locales — CRUD completo (nombre + dirección obligatoria + teléfono) ──
-// batch 5 item 5 — Dirección pasa a obligatoria; Teléfono opcional con
-// validación de formato. Validación no agresiva (borde neutro al abrir,
-// rojo solo al salir de un obligatorio vacío, verde al completar,
-// autoscroll al primer error) — mismo patrón que InsumoForm / Ficha Técnica.
-const TEL_RE = /^[+()\d][\d\s()+-]{5,17}$/;
-const soloDigitos = s => (s.match(/\d/g) || []).length;
-
+// ── Locales — CRUD completo (nombre + dirección) ─────────────────────────
+// 3 — antes solo se podía activar/desactivar los locales ya existentes
+// (Villa Liliam, 3 Esquinas). El backend ya soportaba crear/editar/borrar
+// (localesService.create/update/remove, ver shared/services/api.js
+// localesApi) — solo faltaba esta interfaz.
 function LocalFormModal({ inicial, onClose, onSave }) {
-  const [form, setForm] = useState({
-    nombre: inicial?.nombre || '',
-    direccion: inicial?.direccion || '',
-    telefono: inicial?.telefono || '',
-  });
-  const [errors, setErrors]   = useState({});
-  const [touched, setTouched] = useState({});
-  const [error, setError]     = useState('');
-  const [saving, setSaving]   = useState(false);
-  const refs = { nombre: useRef(null), direccion: useRef(null), telefono: useRef(null) };
-
-  const validate = (f = form) => {
-    const er = {};
-    if (!f.nombre.trim())    er.nombre    = 'El nombre del local es obligatorio';
-    if (!f.direccion.trim()) er.direccion = 'La dirección es obligatoria';
-    if (f.telefono.trim() && (!TEL_RE.test(f.telefono.trim()) || soloDigitos(f.telefono) < 7 || soloDigitos(f.telefono) > 15)) {
-      er.telefono = 'Teléfono no válido (7 a 15 dígitos)';
-    }
-    return er;
-  };
-  const setField = (k, v) => {
-    const nf = { ...form, [k]: v };
-    setForm(nf);
-    if (errors[k]) setErrors(e => ({ ...e, [k]: validate(nf)[k] || '' }));
-  };
-  const handleBlur = (k) => {
-    setTouched(t => ({ ...t, [k]: true }));
-    setErrors(e => ({ ...e, [k]: validate()[k] || '' }));
-  };
-  const okField = (k) => touched[k] && !errors[k] && form[k].trim();
+  const [form, setForm] = useState({ nombre: inicial?.nombre || '', direccion: inicial?.direccion || '' });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
-    const er = validate();
-    if (Object.keys(er).length) {
-      setErrors(er);
-      setTouched({ nombre: true, direccion: true, telefono: true });
-      const first = ['nombre', 'direccion', 'telefono'].find(k => er[k]);
-      refs[first]?.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      refs[first]?.current?.focus?.();
-      return;
-    }
+    if (!form.nombre.trim()) { setError('El nombre del local es obligatorio.'); return; }
     setSaving(true);
     try {
-      const payload = { nombre: form.nombre.trim(), direccion: form.direccion.trim(), telefono: form.telefono.trim() || null };
       const r = inicial
-        ? await localesService.update(inicial.id, payload)
-        : await localesService.create(payload);
+        ? await localesService.update(inicial.id, form)
+        : await localesService.create(form);
       if (r?.error) { setError(r.error); setSaving(false); return; }
       onSave();
     } catch (err) {
@@ -347,39 +308,22 @@ function LocalFormModal({ inicial, onClose, onSave }) {
     }
   };
 
-  const inputStyle = (k) => ({
-    borderColor: errors[k] ? '#EF5350' : (okField(k) ? '#4CAF50' : undefined),
-  });
-
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{ maxWidth: 460, textAlign: 'left', padding: '32px 36px' }} onClick={e => e.stopPropagation()}>
+      <div className="modal-box" style={{ maxWidth: 440, textAlign: 'left', padding: '32px 36px' }} onClick={e => e.stopPropagation()}>
         <h3 style={{ marginBottom: 4 }}>{inicial ? 'Editar local' : 'Nuevo local'}</h3>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
           {inicial ? `Modificando: ${inicial.nombre}` : 'Agrega un punto físico de recogida'}
         </p>
         {error && <div style={{ background:'rgba(229,57,53,0.12)',color:'var(--color-red)',padding:'10px 14px',borderRadius:8,marginBottom:16,fontSize:13 }}>⚠ {error}</div>}
-        <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:14 }} noValidate>
+        <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
           <div className="emp-form-group">
-            <label>Nombre <span style={{ color:'#EF5350' }}>*</span></label>
-            <input ref={refs.nombre} type="text" value={form.nombre} style={inputStyle('nombre')}
-              onChange={e => setField('nombre', e.target.value)} onBlur={() => handleBlur('nombre')}
-              placeholder="Ej: Local Villa Liliam" />
-            {errors.nombre ? <span className="err-msg">{errors.nombre}</span> : okField('nombre') && <span className="ok-msg">✓ Válido</span>}
+            <label>Nombre *</label>
+            <input type="text" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Local Villa Liliam" />
           </div>
           <div className="emp-form-group">
-            <label>Dirección <span style={{ color:'#EF5350' }}>*</span></label>
-            <input ref={refs.direccion} type="text" value={form.direccion} style={inputStyle('direccion')}
-              onChange={e => setField('direccion', e.target.value)} onBlur={() => handleBlur('direccion')}
-              placeholder="Ej: Cra 45 # 12-30" />
-            {errors.direccion ? <span className="err-msg">{errors.direccion}</span> : okField('direccion') && <span className="ok-msg">✓ Válido</span>}
-          </div>
-          <div className="emp-form-group">
-            <label>Teléfono <span style={{ color:'var(--text-muted)', fontWeight:400, fontSize:12 }}>(opcional)</span></label>
-            <input ref={refs.telefono} type="tel" value={form.telefono} style={inputStyle('telefono')}
-              onChange={e => setField('telefono', e.target.value)} onBlur={() => handleBlur('telefono')}
-              placeholder="Ej: 604 123 4567" />
-            {errors.telefono ? <span className="err-msg">{errors.telefono}</span> : okField('telefono') && <span className="ok-msg">✓ Válido</span>}
+            <label>Dirección</label>
+            <input type="text" value={form.direccion} onChange={e => setForm({ ...form, direccion: e.target.value })} placeholder="Ej: Cra 45 # 12-30" />
           </div>
           <div className="modal-actions" style={{ justifyContent:'flex-end', marginTop:4 }}>
             <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
@@ -414,8 +358,6 @@ function LocalesTab({ showOk }) {
   useEffect(() => { refresh(); }, []);
 
   const esActivo = loc => loc.estado === true || loc.estado === 'Activo';
-  const numEmpleados = loc => loc.empleadosAsignados ?? loc.cantidadEmpleados ?? loc.empleados_count ?? loc.empleados ?? null;
-  const numInsumos   = loc => loc.insumosCount ?? loc.cantidadInsumos ?? loc.insumos_count ?? loc.insumos ?? null;
   const handleToggle = async loc => {
     try {
       await localesService.toggleEstado(loc.id);
@@ -492,74 +434,48 @@ function LocalesTab({ showOk }) {
           <p>Crea el primer local con el botón "Nuevo local" de arriba</p>
         </div>
       ) : (
-        /* item 9 — tarjetas en vez de tabla plana: más contexto (dirección,
-           teléfono, # empleados, # insumos), estado vacío decente para la
-           dirección y botones de acción consistentes con el resto del sistema. */
-        <div className="locales-grid">
-          {locales.map(l => {
-            const activo = esActivo(l);
-            const emps = numEmpleados(l);
-            const insu = numInsumos(l);
-            return (
-              <div key={l.id} className={`local-card ${activo ? '' : 'local-card--inactivo'}`}>
-                <div className="local-card__head">
-                  <div className="local-card__title">
-                    <span className="local-card__icon">🏪</span>
-                    <span className="local-card__name" title={l.nombre}>{l.nombre}</span>
-                  </div>
-                  <span className={`local-card__estado ${activo ? 'is-on' : 'is-off'}`}>
-                    {activo ? 'Activo' : 'Inactivo'}
-                  </span>
-                </div>
-
-                <div className="local-card__rows">
-                  <div className="local-card__row">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                    {l.direccion
-                      ? <span>{l.direccion}</span>
-                      : <span className="local-card__empty">Sin dirección registrada</span>}
-                  </div>
-                  <div className="local-card__row">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13 1 .37 1.94.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.87.35 1.81.59 2.81.72A2 2 0 0 1 22 16.92z"/></svg>
-                    {l.telefono
-                      ? <span>{l.telefono}</span>
-                      : <span className="local-card__empty">Sin teléfono</span>}
-                  </div>
-                  <div className="local-card__stats">
-                    <span><strong>{emps ?? '—'}</strong> empleado{emps === 1 ? '' : 's'}</span>
-                    <span><strong>{insu ?? '—'}</strong> insumo{insu === 1 ? '' : 's'}</span>
-                  </div>
-                </div>
-
-                <div className="local-card__actions">
-                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    {hasPermiso('locales', 'editar') ? (
-                      <button className={`toggle-btn ${activo ? 'toggle-on' : 'toggle-off'}`} onClick={() => handleToggle(l)} title={activo ? 'Desactivar local' : 'Activar local'}>
-                        <span className="toggle-thumb"/>
-                      </button>
-                    ) : (
-                      <span className={`toggle-btn ${activo ? 'toggle-on' : 'toggle-off'}`} style={{ cursor:'default', opacity:0.6 }}>
-                        <span className="toggle-thumb"/>
-                      </span>
-                    )}
-                    <span style={{ fontSize:12, color:'var(--text-muted)' }}>{activo ? 'En operación' : 'Fuera de servicio'}</span>
-                  </div>
-                  <div className="actions-group">
-                    {hasPermiso('locales', 'editar') && (
-                      <Tooltip label="Editar">
-                        <button className="btn-accion btn-accion-editar" onClick={() => setModal(l)}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <div className="table-wrap">
+          <table className="insumos-table">
+            <thead><tr><th>Nombre</th><th>Dirección</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {locales.map(l => (
+                <tr key={l.id}>
+                  <td className="td-nombre">{l.nombre}</td>
+                  <td style={{ fontSize:13, color:'var(--text-secondary)' }}>{l.direccion || '—'}</td>
+                  <td>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      {hasPermiso('locales', 'editar') ? (
+                        <button className={`toggle-btn ${esActivo(l) ? 'toggle-on' : 'toggle-off'}`} onClick={() => handleToggle(l)}>
+                          <span className="toggle-thumb"/>
                         </button>
-                      </Tooltip>
-                    )}
-                    {hasPermiso('locales', 'eliminar') && (
-                      <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Eliminar" onClick={() => { setDeleteError(''); setDeleteTarget(l); }}/>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                      ) : (
+                        <span className={`toggle-btn ${esActivo(l) ? 'toggle-on' : 'toggle-off'}`} style={{ cursor:'default', opacity:0.6 }}>
+                          <span className="toggle-thumb"/>
+                        </span>
+                      )}
+                      <span style={{ fontSize:12, fontWeight:600, color: esActivo(l) ? '#2E7D32' : '#888' }}>
+                        {esActivo(l) ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="actions-group">
+                      {hasPermiso('locales', 'editar') && (
+                        <Tooltip label="Editar">
+                          <button className="btn-editar" onClick={() => setModal(l)}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          </button>
+                        </Tooltip>
+                      )}
+                      {hasPermiso('locales', 'eliminar') && (
+                        <AnularButton size={14} label="Eliminar" onClick={() => { setDeleteError(''); setDeleteTarget(l); }}/>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

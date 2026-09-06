@@ -23,10 +23,7 @@
 }
 .search-group { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 480px; }
 .search-wrap { position: relative; flex: 1; display: flex; align-items: center; }
-/* item 12 — ícono centrado verticalmente dentro de la barra de búsqueda
-   (antes quedaba pegado arriba y "pisaba" el placeholder). */
-.search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: #AAAAAA; display: flex; align-items: center; pointer-events: none; }
-.search-wrap { min-height: 40px; }
+.search-icon { position: absolute; left: 13px; color: #AAAAAA; display: flex; align-items: center; pointer-events: none; }
 .search-input {
   width: 100%; padding: 10px 40px 10px 42px;
   border: 1.5px solid var(--border-input); border-radius: 10px;
@@ -35,7 +32,7 @@
 }
 .search-input::placeholder { color: #555; }
 .search-input:focus { border-color: #4CAF50; box-shadow: 0 0 0 3px rgba(76,175,80,.1); }
-.search-clear { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #AAAAAA; display: flex; align-items: center; padding: 2px; border-radius: 4px; transition: all .2s; }
+.search-clear { position: absolute; right: 12px; background: none; border: none; color: #AAAAAA; display: flex; align-items: center; padding: 2px; border-radius: 4px; transition: all .2s; }
 .search-clear:hover { color: #E53935; }
 
 /* "Limpiar filtros" — botón de toolbar (NO usar .search-clear acá: esa
@@ -121,41 +118,6 @@
 .td-nombre { font-weight: 700; color: var(--text-primary); }
 .td-stock { font-weight: 600; color: #9d5d4f; }
 .td-muted { color: #AAAAAA; font-size: 13px; }
-
-/* ── batch 4 item 2 — tabla de Insumos SIN scroll horizontal ──────────
-   table-layout:fixed reparte el ancho por porcentajes (colgroup en el
-   JSX); los textos largos se truncan con "…" y muestran el valor
-   completo en el title. En pantallas angostas se ocultan las columnas
-   secundarias (Categoría, Unidad, Stock mínimo) y esos datos pasan a un
-   subtítulo bajo el nombre. Nunca hay barra de desplazamiento lateral. */
-.ins-table-scroll { overflow-x: hidden; }
-.insumos-table--fixed { table-layout: fixed; width: 100%; }
-.insumos-table--fixed th,
-.insumos-table--fixed td { padding: 12px 12px; overflow: hidden; }
-.insumos-table--fixed .td-trunc {
-  display: inline-block; max-width: 100%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
-}
-.td-nombre__line { display: flex; align-items: center; gap: 2px; max-width: 100%; }
-.td-nombre__meta {
-  display: none;
-  font-size: 11.5px; font-weight: 600; color: var(--text-muted);
-  margin-top: 3px;
-}
-.insumos-table--fixed .actions-group { gap: 3px; flex-wrap: nowrap; }
-
-@media (max-width: 900px) {
-  .insumos-table--fixed col.col-cat,
-  .insumos-table--fixed col.col-um,
-  .insumos-table--fixed col.col-min,
-  .insumos-table--fixed th.col-cat,
-  .insumos-table--fixed td.col-cat,
-  .insumos-table--fixed th.col-um,
-  .insumos-table--fixed td.col-um,
-  .insumos-table--fixed th.col-min,
-  .insumos-table--fixed td.col-min { display: none; }
-  .td-nombre__meta { display: block; }
-}
 
 /* ── BADGE ───────────────────────────────────────────────────── */
 .badge-cat {

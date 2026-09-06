@@ -13,45 +13,7 @@ import { useAuth } from '../../../shared/contexts/AuthContext';
 import LocalFiltro from '../../../shared/components/LocalFiltro';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
-import NuevoPedidoPanel from '../components/NuevoPedidoPanel';
 import './PedidosPage.css';
-
-// 13 — "Nuevo pedido" del Admin: mismo componente (catálogo + carrito) que
-// el Cajero, presentado como modal amplio con scroll interno propio. Cierra
-// con X / Escape / click en el fondo, pidiendo confirmación si el carrito
-// tiene ítems.
-function ModalNuevoPedidoAdmin({ onClose, onCreated, showToast }) {
-  const [cartLleno, setCartLleno] = useState(false);
-  const intentarCerrar = () => {
-    if (cartLleno && !window.confirm('Tienes productos en el carrito sin confirmar. ¿Cerrar de todas formas?')) return;
-    onClose();
-  };
-  useEffect(() => {
-    const onKey = e => { if (e.key === 'Escape') intentarCerrar(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line
-  }, [cartLleno]);
-  return (
-    <div className="pd-overlay" onClick={intentarCerrar}>
-      <div className="pd-nuevo-modal" onClick={e => e.stopPropagation()}>
-        <div className="pd-nuevo-modal__head">
-          <div>
-            <div className="pd-modal-eyebrow">Nuevo pedido</div>
-            <div className="pd-modal-id" style={{ fontSize: 18 }}>Catálogo y carrito</div>
-          </div>
-          <button className="pd-nuevo-modal__x" onClick={intentarCerrar} aria-label="Cerrar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div className="pd-nuevo-modal__body">
-          <NuevoPedidoPanel modo="admin" showToast={showToast} onCartChange={setCartLleno}
-            onCreated={() => { onCreated(); }} />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const METODOS_PAGO_LABEL = { nequi: 'Nequi', transferencia: 'Transferencia', efectivo: 'Efectivo en caja' };
 
@@ -87,6 +49,7 @@ function ModalDetalle({ pedido, onClose, onCambiarEstado, onAprobarPago, onRecha
             ['Método de pago', pedido.pago          || '—'],
             ['Hora',           pedido.hora || (pedido.created_at ? new Date(pedido.created_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}) : '—')],
             ['Atendido por',   pedido.barista       || '—'],
+            ['Domiciliario',   pedido.tipo === 'domicilio' ? (pedido.domiciliario || '—') : 'N/A'],
           ].map(([label, val, bold], i) => (
             <div className="pd-info-card" key={i}>
               <div className="pd-info-label">{label}</div>
@@ -140,10 +103,8 @@ function ModalDetalle({ pedido, onClose, onCambiarEstado, onAprobarPago, onRecha
         <div className="pd-modal-actions">
           {pedido.estado === 'pendiente_verificacion' && onCambiarEstado && puedeGestionar ? (
             <>
-              {/* Mismo criterio que ModalDetallePedido: en el pie del modal
-                  van los botones de confirmación, no los de acción de tabla. */}
-              <button className="btn-confirm-danger" onClick={() => { onClose(); onRechazarPago ? onRechazarPago(pedido) : onCambiarEstado(pedido.id, 'cancelado'); }}>✕ Rechazar pago</button>
-              <button className="btn-confirm-primary" onClick={() => { onClose(); onAprobarPago ? onAprobarPago(pedido) : onCambiarEstado(pedido.id, 'en_proceso'); }}>✓ Aprobar pago</button>
+              <button className="btn-anular" onClick={() => { onClose(); onRechazarPago ? onRechazarPago(pedido) : onCambiarEstado(pedido.id, 'cancelado'); }}>✕ Rechazar pago</button>
+              <button className="btn-add" onClick={() => { onClose(); onAprobarPago ? onAprobarPago(pedido) : onCambiarEstado(pedido.id, 'en_proceso'); }}>✓ Aprobar pago</button>
             </>
           ) : (
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
@@ -709,9 +670,7 @@ const filtrados = lq
       <div className="pd-root">
         {success && <div className="toast toast-success">✓ {success}</div>}
         {error   && <div className="toast toast-error">⚠ {error}</div>}
-        {modal      && <ModalNuevoPedidoAdmin
-          onClose={() => setModal(false)} showToast={showOk}
-          onCreated={() => { setModal(false); setPagina(1); refresh(); showOk('Pedido creado correctamente'); }} />}
+        {modal      && <ModalPedido onClose={() => setModal(false)} onSave={guardar} />}
         {editTarget && <ModalPedido pedido={editTarget} onClose={() => setEditTarget(null)} onSave={guardar} />}
         {detalle && <ModalDetalle onClose={() => setDetalle(null)} pedido={detalle} onCambiarEstado={cambiarEstado} onAprobarPago={aprobarPago} onRechazarPago={abrirRechazo} />}
         {rechazoTarget && (
@@ -759,52 +718,25 @@ const filtrados = lq
           ))}
         </div>
 
-        {/* item 6 / batch 6 item 2 — pestañas + selector de local y buscador
-            + contador en UN solo card (dos filas con divisor). La tabla va
-            en su propio card aparte. */}
-        <div className="sic-stack">
-          <div className="sic-block sic-filterbar">
-            <div className="sic-filterbar__row">
-              <button
-                onClick={() => { setVista('activos'); setPagina(1); }}
-                className={vista==='activos' ? 'btn-confirm-primary' : 'btn-cancel'}
-              >
-                Pedidos activos ({activos.length})
-              </button>
-              <button
-                onClick={() => { setVista('pagos'); setPagina(1); }}
-                className={vista==='pagos' ? 'btn-confirm-primary' : 'btn-cancel'}
-                style={vista!=='pagos' && pagosPendientes.length>0 ? {borderColor:'#AD1457',color:'#AD1457'} : undefined}
-              >
-                💳 Pagos pendientes {pagosPendientes.length > 0 ? `(${pagosPendientes.length})` : ''}
-              </button>
-              <div style={{flex:1}}/>
-              <LocalFiltro value={localSel} onChange={v => { setLocalSel(v); setPagina(1); }} sedeUsuario={user?.sede}/>
-            </div>
-            {vista !== 'pagos' && (
-              <div className="sic-filterbar__row sic-filterbar__row--sep">
-                <div className="search-group" style={{ flex:'1 1 260px' }}>
-                  <div className="search-wrap">
-                    <span className="search-icon">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    </span>
-                    <input className="search-input" placeholder="Buscar por N.º, cliente, producto, estado o pago..." value={buscar} onChange={e => { setBuscar(e.target.value); setPagina(1); }}/>
-                    {buscar && <button className="search-clear" onClick={() => setBuscar('')}>✕</button>}
-                  </div>
-                </div>
-                {(buscar || localSel !== localSelDefault) && (
-                  <button className="btn-limpiar-filtros" title="Limpiar filtros"
-                    onClick={() => { setBuscar(''); setLocalSel(localSelDefault); setPagina(1); }}>
-                    ✕ Limpiar filtros
-                  </button>
-                )}
-                <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{filtrados.length} pedido{filtrados.length!==1?'s':''}</span>
-              </div>
-            )}
-          </div>
+        <div className="insumos-card"><div style={{display:'flex',gap:8,marginBottom:14}}>
+  <button
+    onClick={() => { setVista('activos'); setPagina(1); }}
+    className={vista==='activos' ? 'btn-confirm-primary' : 'btn-cancel'}
+  >
+    Pedidos activos ({activos.length})
+  </button>
+  <button
+    onClick={() => { setVista('pagos'); setPagina(1); }}
+    className={vista==='pagos' ? 'btn-confirm-primary' : 'btn-cancel'}
+    style={vista!=='pagos' && pagosPendientes.length>0 ? {borderColor:'#AD1457',color:'#AD1457'} : undefined}
+  >
+    💳 Pagos pendientes {pagosPendientes.length > 0 ? `(${pagosPendientes.length})` : ''}
+  </button>
+  <div style={{flex:1}}/>
+  <LocalFiltro value={localSel} onChange={v => { setLocalSel(v); setPagina(1); }} sedeUsuario={user?.sede}/>
+</div>
           {vista === 'pagos' ? (
-            <div className="sic-block sic-block--table">
-            {pagosPendientes.length === 0 ? (
+            pagosPendientes.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">
                   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
@@ -849,13 +781,10 @@ const filtrados = lq
                                   </button>
                                 </Tooltip>
                               )}
-                              {/* Mismos botones de acción estándar que usa
-                                  PagosPendientesPanel: antes "Aprobar" era un
-                                  .btn-add de 44px de alto dentro de la fila. */}
                               {hasPermiso('pedidos', 'gestionar') && (
                                 <>
-                                  <button className="btn-accion-rechazar" title="Rechazar pago" onClick={() => abrirRechazo(p)}>✕ Rechazar</button>
-                                  <button className="btn-accion-aprobar" title="Aprobar pago" onClick={() => aprobarPago(p)}>✓ Aprobar</button>
+                                  <button className="btn-anular" title="Rechazar pago" onClick={() => abrirRechazo(p)}>✕ Rechazar</button>
+                                  <button className="btn-add" title="Aprobar pago" onClick={() => aprobarPago(p)}>✓ Aprobar</button>
                                 </>
                               )}
                             </div>
@@ -866,11 +795,28 @@ const filtrados = lq
                   </tbody>
                 </table>
               </div>
-            )}
-            </div>
+            )
           ) : (
           <>
-          <div className="sic-block sic-block--table">
+          <div className="pd-toolbar">
+            <div className="search-group">
+              <div className="search-wrap">
+                <span className="search-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </span>
+                <input className="search-input" placeholder="Buscar por N.º, cliente, producto, estado o pago..." value={buscar} onChange={e => { setBuscar(e.target.value); setPagina(1); }}/>
+                {buscar && <button className="search-clear" onClick={() => setBuscar('')}>✕</button>}
+              </div>
+            </div>
+            {(buscar || localSel !== localSelDefault) && (
+              <button className="btn-limpiar-filtros" title="Limpiar filtros"
+                onClick={() => { setBuscar(''); setLocalSel(localSelDefault); setPagina(1); }}>
+                ✕ Limpiar filtros
+              </button>
+            )}
+            <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{filtrados.length} pedido{filtrados.length!==1?'s':''}</span>
+          </div>
+
           {paginados.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">
@@ -883,9 +829,7 @@ const filtrados = lq
             <div className="table-wrap">
               <table className="insumos-table">
                 <thead>
-                  {/* 2 — columna "Domiciliario" eliminada (solo mostraba "—"/"N/A").
-                      "Atendido por" se mantiene. */}
-                  <tr><th>#</th><th>Cliente</th><th>Tipo</th><th>Local</th><th>Atendido por</th><th>Productos</th><th>Total</th><th>Hora</th><th>Estado</th><th>Acciones</th></tr>
+                  <tr><th>#</th><th>Cliente</th><th>Tipo</th><th>Local</th><th>Atendido por</th><th>Domiciliario</th><th>Productos</th><th>Total</th><th>Hora</th><th>Estado</th><th>Acciones</th></tr>
                 </thead>
                 <tbody>
                   {paginados.map(p => {
@@ -905,6 +849,7 @@ const filtrados = lq
                         </td>
                         <td>{p.sede ? <span className="badge-cat" style={{background:'rgba(25,118,210,0.12)',color:'#1976D2'}}>{p.sede}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
                         <td>{p.barista ? <span className="pd-pill-barista">{p.barista}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                        <td>{p.tipo==='domicilio' ? (p.domiciliario ? <span className="pd-pill-domi">🛵 {p.domiciliario}</span> : <span style={{color:'var(--text-muted)'}}>—</span>) : <span style={{color:'#ccc'}}>N/A</span>}</td>
                         <td style={{fontSize:12,color:'var(--text-secondary)',maxWidth:180}}>
                           {vis}
                           <button className="btn-ver-mas" onClick={() => setDetalle(p)} style={{marginLeft:4}}>
@@ -989,7 +934,6 @@ const filtrados = lq
               <span style={{fontSize:12,color:'var(--text-muted)',marginLeft:8}}>{ordenados.length} registros · Pág {pagina}/{totalPags}</span>
             </div>
           )}
-          </div>
           </>
           )}
         </div>

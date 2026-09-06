@@ -26,7 +26,7 @@ const SIN_EXCLUIDOS = new Set();
 // (catálogo completo) — la lista filtrada es solo el punto de partida, no
 // un límite de lo que se puede buscar/elegir. Si no se pasa `preferidos`,
 // se usa siempre `insumos`, igual que antes.
-export default function InsumoSearchSelect({ insumos, preferidos, value, onSelect, placeholder, hasError, excludeIds, loading = false }) {
+export default function InsumoSearchSelect({ insumos, preferidos, value, onSelect, placeholder, hasError, excludeIds }) {
   const [query, setQuery] = useState('');
   // La lista de sugerencias se filtra sobre `debouncedQuery`, no sobre
   // `query` directamente — así el <input> sigue respondiendo al instante
@@ -90,10 +90,8 @@ export default function InsumoSearchSelect({ insumos, preferidos, value, onSelec
         // 3 — altura máxima fija con scroll interno: varios ítems visibles
         // a la vez sin empujar el resto del formulario hacia abajo.
         <div style={{position:'absolute',zIndex:30,top:'calc(100% + 3px)',left:0,right:0,maxHeight:280,overflowY:'auto',background:'var(--bg-surface)',border:'1.5px solid var(--border-input)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.25)'}}>
-          {loading ? (
-            <div style={{padding:'10px 12px',fontSize:12,color:'var(--text-muted)'}}>Cargando…</div>
-          ) : filtrados.length === 0 ? (
-            <div style={{padding:'10px 12px',fontSize:12,color:'var(--text-muted)'}}>{q ? 'Sin resultados' : (disponibles.length === 0 ? 'No hay insumos disponibles' : 'Sin coincidencias')}</div>
+          {filtrados.length === 0 ? (
+            <div style={{padding:'10px 12px',fontSize:12,color:'var(--text-muted)'}}>{disponibles.length === 0 ? 'No hay insumos disponibles' : 'Sin coincidencias'}</div>
           ) : filtrados.map(i => (
             // preventDefault: evita que el mousedown/touchstart le quite el
             // foco al <input> ANTES de que el clic se resuelva contra esta

@@ -2,12 +2,9 @@ import React from 'react';
 import './PageTransitionOverlay.css';
 
 /**
- * Overlay de transición de página: difumina el fondo y muestra una taza
- * de café animada mientras se completa una acción (login, registro,
- * verificación, navegación, etc).
- *
- * 6 — se quitó la cortina diagonal verde (.pto__panel / ptoCurtainSweep):
- * ahora solo queda la taza de café con su vapor.
+ * Overlay de transición de página: difumina el fondo, barre una cortina
+ * diagonal verde y muestra una taza de café animada mientras se completa
+ * una acción (login, registro, verificación, navegación, etc).
  *
  * Se monta/desmonta su contenido interno controlado por `active`, y cada
  * vez que `runId` cambia se vuelve a montar (key) para reiniciar todas
@@ -19,6 +16,7 @@ export default function PageTransitionOverlay({ active, runId, label }) {
       {active && (
         <div className="pto__run" key={runId}>
           <div className="pto__blur" />
+          <div className="pto__panel" />
           <div className="pto__content">
             <div className="pto__cup">
               <div className="pto__steam"><span /><span /><span /></div>

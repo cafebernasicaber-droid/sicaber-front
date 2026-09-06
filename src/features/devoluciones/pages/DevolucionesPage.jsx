@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../../../shared/components/Layout';
 import devolucionesService from '../services/devolucionesService';
-import notificacionesService from '../../notificaciones/services/notificacionesService';
 import ventasService from '../../ventas/services/ventasService';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import LocalFiltro from '../../../shared/components/LocalFiltro';
@@ -208,11 +207,6 @@ function ModalRegistrar({ ventaPrefill, onClose, onSave }) {
 // se podía usar. Ahora recibe `venta` como prop, resuelta por el padre.
 function ModalConfirm({ dev, venta, accion, onClose, onConfirm }) {
   const esAprobar = accion === 'aprobar';
-  // El backend exige un motivo de al menos 10 caracteres para rechazar
-  // (PATCH /devoluciones/:id/estado). Este campo no existía, así que el
-  // rechazo siempre se caía con un 400 antes de llegar a cambiar nada.
-  const [motivo, setMotivo] = useState('');
-  const motivoValido = motivo.trim().length >= LIMITES.MOTIVO_MINIMO;
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={e=>e.stopPropagation()}>
@@ -225,34 +219,11 @@ function ModalConfirm({ dev, venta, accion, onClose, onConfirm }) {
           : <>Al rechazar, la venta <strong>#{venta ? venta.id_venta : dev.pedido_id} de {venta?.cliente || 'este cliente'}</strong> recuperará el estado <strong>"Vendida"</strong>.</>
         }</p>
         <div className="modal-detail">Devolución #{getDevId(dev)}</div>
-        {!esAprobar && (
-          <div style={{textAlign:'left',marginBottom:18}}>
-            <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:6}}>
-              Motivo del rechazo <span style={{color:'#E53935'}}>*</span>
-            </label>
-            <p style={{fontSize:12,color:'var(--text-muted)',margin:'0 0 8px'}}>
-              Se le mostrará al cliente y queda guardado en la devolución.
-            </p>
-            <textarea
-              autoFocus
-              value={motivo}
-              onChange={e => setMotivo(e.target.value.replace(/^\s+/, '').slice(0, LIMITES.MOTIVO))}
-              placeholder="Ej: El producto fue devuelto fuera del plazo permitido."
-              rows={3} maxLength={LIMITES.MOTIVO}
-              style={{width:'100%',boxSizing:'border-box',padding:'10px 12px',borderRadius:8,fontSize:13,fontFamily:'inherit',resize:'vertical',background:'var(--bg-input)',color:'var(--text-primary)',border:`1.5px solid ${motivo && !motivoValido ? '#E53935' : 'var(--border-input)'}`}}
-            />
-            <div style={{fontSize:11,color:enElTope(motivo,LIMITES.MOTIVO)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(motivo,LIMITES.MOTIVO)}</div>
-            {motivo && !motivoValido && (
-              <div style={{fontSize:12,color:'#E53935',marginTop:2}}>El motivo debe tener al menos {LIMITES.MOTIVO_MINIMO} caracteres.</div>
-            )}
-          </div>
-        )}
         <div className="modal-actions">
           <button className="btn-cancel" onClick={onClose}>Cancelar</button>
           {esAprobar
-            ? <button className="btn-confirm-primary" onClick={() => onConfirm()}>✅ Sí, aprobar</button>
-            : <button className="btn-confirm-danger" onClick={() => onConfirm(motivo.trim())} disabled={!motivoValido}
-                style={!motivoValido ? {opacity:0.5,cursor:'not-allowed'} : undefined}>❌ Sí, rechazar</button>
+            ? <button className="btn-confirm-primary" onClick={onConfirm}>✅ Sí, aprobar</button>
+            : <button className="btn-confirm-danger" onClick={onConfirm}>❌ Sí, rechazar</button>
           }
         </div>
       </div>
@@ -283,9 +254,6 @@ export default function DevolucionesPage() {
   const [confirm, setConfirm]   = useState(null); // { dev, accion }
   const [prefill, setPrefill]   = useState(null);
   const [success, setSuccess]   = useState('');
-  // Los errores tenían que mostrarse con showOk (toast verde de éxito) porque
-  // no existía un canal de error en esta pantalla. Mismo patrón que Compras.
-  const [errorMsg, setErrorMsg] = useState('');
   const [pagina, setPagina]     = useState(1);
   const POR_PAG = 8;
 
@@ -303,8 +271,7 @@ export default function DevolucionesPage() {
       .then(d => setDevs(Array.isArray(d) ? d : []))
       .catch(() => setDevs([]));
   };
-  const showOk  = msg => { setSuccess(msg); setErrorMsg(''); setTimeout(() => setSuccess(''), 3000); };
-  const showErr = msg => { setErrorMsg(msg); setSuccess(''); setTimeout(() => setErrorMsg(''), 4500); };
+  const showOk = msg => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000); };
   const stats = {
     total:    devs.length,
     pendiente: devs.filter(d => d.estado === 'pendiente').length,
@@ -324,32 +291,16 @@ export default function DevolucionesPage() {
   const totalPags = Math.ceil(ordenadas.length / POR_PAG);
   const paginadas = ordenadas.slice((pagina-1)*POR_PAG, pagina*POR_PAG);
 
-  const handleCambiarEstado = async (dev, accion, motivoRechazo) => {
+  const handleCambiarEstado = async (dev, accion) => {
     const nuevoEstado = accion === 'aprobar' ? 'aprobada' : 'rechazada';
     try {
-      await devolucionesService.cambiarEstado(getDevId(dev), nuevoEstado, motivoRechazo);
-      // Aviso al cliente. Antes no se creaba ninguna notificación al resolver
-      // una devolución: el cliente no se enteraba de nada. `cliente_id` lo
-      // devuelve ahora DEV_SELECT (ver el backend); si la devolución no tiene
-      // pedido asociado, notificacionesService descarta la llamada solo.
-      notificacionesService.create({
-        clienteId: dev.cliente_id,
-        pedidoId: dev.pedido_id,
-        tipo: accion === 'aprobar' ? 'devolucion_aprobada' : 'devolucion_rechazada',
-        mensaje: accion === 'aprobar'
-          ? `✅ Tu solicitud de devolución del pedido #${dev.pedido_id} fue aprobada. Nos pondremos en contacto para gestionar el reembolso.`
-          : `❌ Tu solicitud de devolución del pedido #${dev.pedido_id} fue rechazada. Motivo: ${motivoRechazo}`,
-      });
+      await devolucionesService.cambiarEstado(getDevId(dev), nuevoEstado);
       refresh();
       showOk(accion === 'aprobar' ? 'Devolución aprobada. Venta marcada como devuelta.' : 'Devolución rechazada. Venta recuperó estado "Vendida".');
-      setConfirm(null);
     } catch (e) {
-      // Antes el catch usaba showOk (toast verde de éxito) para mostrar el
-      // error, y además cerraba el modal igual: un fallo se veía como si
-      // hubiera funcionado. Ahora se muestra como error y el modal queda
-      // abierto para poder corregir y reintentar.
-      showErr(e?.message || 'No se pudo actualizar la devolución');
+      showOk(e?.message || 'No se pudo actualizar la devolución');
     }
+    setConfirm(null);
   };
 
   const statCards = [
@@ -363,14 +314,13 @@ export default function DevolucionesPage() {
     <Layout>
       <div className="insumos-root">
         {success && <div className="toast toast-success">✓ {success}</div>}
-        {errorMsg && <div className="toast toast-error">⚠ {errorMsg}</div>}
         {confirm && (
           <ModalConfirm
             dev={confirm.dev}
             venta={ventas.find(v => v.id_pedido === confirm.dev.pedido_id)}
             accion={confirm.accion}
             onClose={() => setConfirm(null)}
-            onConfirm={(motivoRechazo) => handleCambiarEstado(confirm.dev, confirm.accion, motivoRechazo)}/>
+            onConfirm={() => handleCambiarEstado(confirm.dev, confirm.accion)}/>
         )}
         {modal === 'new' && (
           <ModalRegistrar ventaPrefill={prefill} onClose={() => { setModal(null); setPrefill(null); }}

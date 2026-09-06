@@ -21,13 +21,6 @@
 
   --sidebar-width:      210px;
 
-  /* Sistema de espaciado (batch 3, item 6) — separación entre bloques de
-     una vista (pestañas / filtros / tabla). Usar SIEMPRE estos valores,
-     no márgenes sueltos. Iguales en claro y oscuro. */
-  --space-block:   16px;   /* separación vertical entre bloques */
-  --space-inset:   16px;   /* padding interno de un bloque tipo card */
-  --space-inset-sm: 12px;
-
   /* Fondos */
   --bg-body:       #0f0f0f;
   --bg-surface:    #1a1a1a;

@@ -39,7 +39,7 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:660,
         maxHeight:'88vh', overflowY:'auto', overflowX:'hidden',
-        boxShadow:'var(--shadow-lg)', animation:'popIn .22s ease',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
         <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid rgba(255,255,255,.07)' }}>
@@ -473,7 +473,7 @@ const ProveedoresPage = () => {
           <div className="modal-overlay" onClick={closeModal}>
             <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
               background:'var(--bg-surface)',borderRadius:16,width:'90%',maxWidth:680,
-              maxHeight:'calc(100vh - 48px)',overflowY:'auto',overflowX:'hidden',
+              maxHeight:'90vh',overflowY:'auto',overflowX:'hidden',
               boxShadow:'0 24px 64px rgba(0,0,0,0.22)',animation:'slideUp .2s ease',
             }}>
               <div style={{ padding:'28px 32px' }}>

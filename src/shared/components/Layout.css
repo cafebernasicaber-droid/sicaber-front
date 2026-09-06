@@ -39,30 +39,15 @@
 .sidebar--compact .sidebar-logo { padding: 24px 8px 16px; }
 .sidebar--compact .sidebar-logo-circle { width: 44px; height: 44px; }
 .sidebar--compact .sidebar-logo-circle img { width: 30px !important; height: 30px !important; }
-/* item 10 — botón de colapsar: fila propia dentro del header, alineado al
-   borde derecho (expandido) o centrado (compacto). Nunca tapa el logo. */
-.sidebar-toggle-row {
-  width: 100%; display: flex; justify-content: flex-end; margin-bottom: 2px;
-}
-.sidebar--compact .sidebar-toggle-row { justify-content: center; }
 .sidebar-toggle {
-  position: relative;
-  width: 30px; height: 30px; border-radius: 9px;
-  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14);
-  color: rgba(255,255,255,.72); display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: background .18s ease, border-color .18s ease, color .18s ease;
+  position: absolute; top: 10px; right: 10px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.55); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .18s ease;
 }
-.sidebar-toggle:hover { background: rgba(93,187,99,.22); border-color: rgba(93,187,99,.55); color: #fff; }
-.sidebar-toggle:focus-visible { outline: 2px solid rgba(93,187,99,.7); outline-offset: 2px; }
+.sidebar-toggle:hover { background: rgba(93,187,99,.18); border-color: rgba(93,187,99,.4); color: #A5D6A7; }
 .sidebar-toggle svg { transition: transform .25s ease; }
-.sidebar-toggle__tip {
-  position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
-  white-space: nowrap; background: #1e1e1e; color: #fff; font-size: 11px; font-weight: 600;
-  padding: 4px 9px; border-radius: 6px; opacity: 0; pointer-events: none;
-  transition: opacity .14s ease; box-shadow: 0 4px 16px rgba(0,0,0,.45); z-index: 200;
-}
-.sidebar-toggle:hover .sidebar-toggle__tip,
-.sidebar-toggle:focus-visible .sidebar-toggle__tip { opacity: 1; }
 
 /* Texto que se desvanece + colapsa (en vez de display:none instantáneo) —
    mismo tiempo (.25s) que el ancho del sidebar, para que ambos se sientan
@@ -140,22 +125,19 @@
 }
 .sidebar-nav::-webkit-scrollbar { display: none; }
 .sidebar-group { margin-bottom: 6px; }
-/* 7 — títulos de sección legibles: blanco casi opaco, más grandes y con
-   más peso. El sidebar es de fondo oscuro en ambos temas, así que el
-   blanco contrasta bien en claro y oscuro. */
 .sidebar-group-label {
-  font-size:11.5px; font-weight:800; color:rgba(255,255,255,.9);
-  text-transform:uppercase; letter-spacing:1.6px; padding:10px 12px 5px; display:block;
+  font-size:9px; font-weight:800; color:rgba(255,255,255,.2);
+  text-transform:uppercase; letter-spacing:2.5px; padding:8px 12px 4px; display:block;
 }
 .sidebar-group-toggle {
-  font-size:11.5px; font-weight:800; color:rgba(255,255,255,.88) !important;
-  text-transform:uppercase; letter-spacing:1.6px; border-radius:6px; transition:all .18s;
+  font-size:9px; font-weight:800; color:rgba(255,255,255,.25) !important;
+  text-transform:uppercase; letter-spacing:2.5px; border-radius:6px; transition:all .18s;
 }
-.sidebar-group-toggle:hover { background:rgba(255,255,255,.06) !important; color:#fff !important; }
+.sidebar-group-toggle:hover { background:rgba(255,255,255,.03) !important; color:rgba(255,255,255,.45) !important; }
 .sidebar-nav-item {
   display:flex; align-items:center; gap:11px; padding:9px 13px;
   background:transparent; border:none; border-radius:10px;
-  color:rgba(255,255,255,.66); font-size:13px; font-weight:500;
+  color:rgba(255,255,255,.45); font-size:13px; font-weight:500;
   font-family:'Open Sans',sans-serif; width:100%; text-align:left;
   transition:background .18s ease, color .18s ease, border-left-color .18s ease, padding .25s ease;
   cursor:pointer; border-left:2px solid transparent; position:relative;

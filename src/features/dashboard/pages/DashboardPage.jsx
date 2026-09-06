@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../../shared/components/Layout';
 import clientesService from '../../clientes/services/clientesService';
+import insumosService from '../../insumos/services/insumosService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import comprasService from '../../compras/services/comprasService';
 import pedidosService from '../../pedidos/services/pedidosService';
@@ -133,8 +134,8 @@ function DonutChart({ segments }) {
   let offset = 0;
   const circ = 2 * Math.PI * R;
   return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:20, flexWrap:'wrap' }}>
-      <svg width={150} height={150} viewBox="0 0 140 140" style={{ flexShrink:0 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+      <svg width={140} height={140}>
         <circle cx={CX} cy={CY} r={R} fill="none" stroke="#F5F5F5" strokeWidth={STROKE}/>
         {segments.filter(s => s.value > 0).map((seg, i) => {
           const dash = (seg.value / total) * circ;
@@ -179,6 +180,7 @@ export default function DashboardPage() {
 
   // ── Estado para todos los datos async ───────────────────────────────────
   const [clientes,    setClientes]    = useState([]);
+  const [insumos,     setInsumos]     = useState([]);
   const [compras,     setCompras]     = useState([]);
   const [pedidos,     setPedidos]     = useState([]);
   const [empleados,   setEmpleados]   = useState([]);
@@ -190,8 +192,9 @@ export default function DashboardPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [cl, com, ped, emp, prod, ven, dev, usr] = await Promise.allSettled([
+        const [cl, ins, com, ped, emp, prod, ven, dev, usr] = await Promise.allSettled([
           clientesService.getAll(),
+          insumosService.getAll(),
           comprasService.getAll(),
           pedidosService.getAll(),
           empleadosService.getAll(),
@@ -201,6 +204,7 @@ export default function DashboardPage() {
           usuariosService.getAll(),
         ]);
         if (cl.status  === 'fulfilled') setClientes(cl.value  || []);
+        if (ins.status === 'fulfilled') setInsumos(ins.value  || []);
         if (com.status === 'fulfilled') setCompras(com.value  || []);
         if (ped.status === 'fulfilled') setPedidos(ped.value  || []);
         if (emp.status === 'fulfilled') setEmpleados(emp.value|| []);
@@ -240,8 +244,7 @@ export default function DashboardPage() {
   };
 
   // Derived data
-  // item 11 — la lista/alerta de "Insumos con stock bajo" se quitó del
-  // Dashboard: esa información vive en Insumos (filtro "Ver solo stock bajo").
+  const insumosLow       = insumos.filter(i => i.stockActual < i.stockMinimo);
   const comprasPend      = compras.filter(c => c.estado === 'Pendiente');
   const empleadosActivos = empleados.filter(e => e.estado === 'Activo').length;
   const pedidosPendLanding   = pedidosF.filter(p => p.origen === 'landing' && p.estado === 'pendiente').length;
@@ -384,7 +387,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── ALERTS ── */}
-        {(comprasPend.length>0||pedStats.pendiente>0||pedidosPendLanding>0||pedidosPorVerificar>0||devStats.pendiente>0||pedidosDomicilio>0) && (
+        {(insumosLow.length>0||comprasPend.length>0||pedStats.pendiente>0||pedidosPendLanding>0||pedidosPorVerificar>0||devStats.pendiente>0||pedidosDomicilio>0) && (
           <div className="dash-alerts">
             {pedidosPorVerificar>0 && (
               <div className="dash-alert dash-alert--magenta" onClick={()=>navigate('/pedidos')}>
@@ -416,6 +419,12 @@ export default function DashboardPage() {
                 <div><strong>{pedStats.pendiente} pedido{pedStats.pendiente>1?'s':''} pendiente{pedStats.pendiente>1?'s':''}</strong><p>Ventas del día: {fmt(pedStats.ventas)}</p></div>
               </div>
             )}
+            {insumosLow.length>0 && (
+              <div className="dash-alert dash-alert--warn" onClick={()=>navigate('/insumos')}>
+                <Icon d={ICONS.alert_warn} size={18} sw={2}/>
+                <div><strong>{insumosLow.length} insumo{insumosLow.length>1?'s':''} con stock bajo</strong><p>{insumosLow.map(i=>i.nombre).slice(0,3).join(', ')}{insumosLow.length>3?` +${insumosLow.length-3} más`:''}</p></div>
+              </div>
+            )}
           </div>
         )}
 
@@ -432,21 +441,19 @@ export default function DashboardPage() {
                 </p>
               </div>
             </div>
-            <div className="dash-chart-body">
-              {ventasParaGrafico.every(d => d.value === 0)
-                ? <div className="dash-empty">No hay ventas registradas en este rango de fechas.</div>
-                : <BarChartMoney data={ventasParaGrafico} color="#4CAF50"/>}
-            </div>
+            {ventasParaGrafico.every(d => d.value === 0)
+              ? <div className="dash-empty">No hay ventas registradas en este rango de fechas.</div>
+              : <BarChartMoney data={ventasParaGrafico} color="#4CAF50"/>}
           </div>
 
           <div className="dash-card">
             <div className="dash-card__header"><div><h3>Estado de ventas</h3><p style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Distribución actual</p></div></div>
-            <div className="dash-chart-body"><DonutChart segments={ventasDonut}/></div>
+            <DonutChart segments={ventasDonut}/>
           </div>
 
           <div className="dash-card">
             <div className="dash-card__header"><div><h3>Estado de pedidos</h3><p style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>Todos los pedidos</p></div></div>
-            <div className="dash-chart-body"><DonutChart segments={pedidosDonut}/></div>
+            <DonutChart segments={pedidosDonut}/>
           </div>
         </div>
 
@@ -499,6 +506,27 @@ export default function DashboardPage() {
             }
           </div>
 
+          <div className="dash-card">
+            <div className="dash-card__header">
+              <h3>Insumos — stock bajo</h3>
+              <button className="dash-card__link" onClick={()=>navigate('/insumos')}>Ver todos →</button>
+            </div>
+            {insumosLow.length===0
+              ? <div className="dash-empty"><Icon d={ICONS.check} size={20} stroke="#4CAF50" sw={2}/> Todos los insumos tienen stock suficiente.</div>
+              : <div className="dash-list">{insumosLow.slice(0,5).map(i=>(
+                <div className="dash-list__item" key={i.id}>
+                  <div className="dash-list__avatar" style={{background:'rgba(230,115,0,0.15)',color:'#FF8A65'}}>
+                    <Icon d={ICONS.insumos} size={14} stroke="#E65100" sw={2}/>
+                  </div>
+                  <div className="dash-list__info">
+                    <div className="dash-list__name">{i.nombre}</div>
+                    <div className="dash-list__email">{i.stockActual} / {i.stockMinimo} {i.unidadMedida}</div>
+                  </div>
+                  <span className="dash-list__badge dash-list__badge--warn">Stock bajo</span>
+                </div>
+              ))}</div>
+            }
+          </div>
         </div>
 
       </div>

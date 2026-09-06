@@ -156,16 +156,10 @@ export default function PagosPendientesPanel({ pedidos, onChanged, showOk, showE
                             </button>
                           </Tooltip>
                         )}
-                        {/* Antes "Aprobar" usaba .btn-add, que es el botón
-                            grande de la barra de herramientas: 44px de alto
-                            y con `margin-left:auto`, así que dentro de la
-                            celda se descuadraba y quedaba más alto que los
-                            demás. Ahora ambos usan los botones de acción
-                            estándar (ver shared/styles/modales.css). */}
                         {hasPermiso('pedidos', 'gestionar') && (
                           <>
-                            <button className="btn-accion-rechazar" title="Rechazar pago" onClick={() => abrirRechazo(p)}>✕ Rechazar</button>
-                            <button className="btn-accion-aprobar" title="Aprobar pago" onClick={() => aprobarPago(p)}>✓ Aprobar</button>
+                            <button className="btn-anular" title="Rechazar pago" onClick={() => abrirRechazo(p)}>✕ Rechazar</button>
+                            <button className="btn-add" title="Aprobar pago" onClick={() => aprobarPago(p)}>✓ Aprobar</button>
                           </>
                         )}
                       </div>

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import comprasService from '../services/comprasService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import insumosService from '../../insumos/services/insumosService';
-import localesService from '../../../shared/services/localesService';
 import useTiposPresentacion from '../hooks/useTiposPresentacion';
 import { uploadToCloudinary } from '../../../shared/services/cloudinaryService';
 import { validarArchivoComprobante, procesarComprobante, normalizarFechaComprobante } from '../../../shared/services/ocrService';
@@ -45,9 +44,6 @@ const getTodayStr = () => {
 const EMPTY_FORM = {
   proveedorId: '',
   proveedorNombre: '',
-  // batch 5 item 2 — local al que entra el stock comprado (obligatorio).
-  localId: '',
-  localNombre: '',
   fecha: getTodayStr(),
   observaciones: '',
   items: [{ ...EMPTY_ITEM }]
@@ -97,7 +93,7 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
 // opciones en tiempo real en vez de tener que desplazarse por una lista
 // larga. `options` es [{ value, label, sub? }] — `sub` es texto adicional
 // donde también se busca (ej. NIT) sin mostrarse en la opción.
-function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage, onBlur }) {
+function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage }) {
   const [open, setOpen] = useState(false);
   const [texto, setTexto] = useState('');
   const wrapRef = useRef(null);
@@ -106,14 +102,13 @@ function BuscadorSelect({ value, options, onChange, placeholder, disabled, empty
   useEffect(() => {
     const onDocMouseDown = (e) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        if (open) onBlur?.();
         setOpen(false);
         setTexto('');
       }
     };
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [open, onBlur]);
+  }, []);
 
   const selected = options.find(o => String(o.value) === String(value));
   const filtrados = texto.trim()
@@ -161,12 +156,7 @@ function BuscadorSelect({ value, options, onChange, placeholder, disabled, empty
               className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
               onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
             >
-              <div>{o.label}</div>
-              {o.sub
-                ? <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>{o.sub}</div>
-                : o.subPlaceholder
-                  ? <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 1 }}>{o.subPlaceholder}</div>
-                  : null}
+              {o.label}
             </div>
           ))}
         </div>
@@ -179,7 +169,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   const [form, setForm] = useState(EMPTY_FORM);
   const itemRefs = useRef([]);
   const proveedorRef = useRef();
-  const localRef = useRef();
   const fechaRef = useRef();
   const descuentoRef = useRef();
   const comprobanteRef = useRef();
@@ -207,22 +196,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       .then(d => setProveedores(Array.isArray(d) ? d.filter(p => p.estado === 'Activo') : []))
       .catch(() => setProveedores([]));
   }, []);
-  // batch 5 item 2 — locales activos (CRUD de Locales del módulo Empleados).
-  // GET /locales ya devuelve SOLO los activos: no se aplica ningún filtro
-  // extra en el front para no excluir locales por accidente (ej. dirección
-  // vacía) — bug corregido en batch 6.
-  const [locales, setLocales] = useState([]);
-  useEffect(() => {
-    localesService.getActivos()
-      .then(d => setLocales(Array.isArray(d) ? d : []))
-      .catch(() => setLocales([]));
-  }, []);
-  const seleccionarLocal = (value) => {
-    const loc = locales.find(l => String(l.id) === String(value));
-    setForm(prev => ({ ...prev, localId: value, localNombre: loc ? loc.nombre : '' }));
-    setTouched(prev => ({ ...prev, localId: true }));
-    setErrors(prev => ({ ...prev, localId: loc ? '' : 'Selecciona el local' }));
-  };
   // Catálogo real de Tipos de Presentación (Caja, Paquete, Bolsa, y
   // cualquiera que se haya agregado) — solo se muestran los activos.
   // "Unitario" es una excepción fija, siempre presente, que nunca viene
@@ -290,7 +263,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   const validate = () => {
     const errs = {};
     if (!form.proveedorNombre.trim()) errs.proveedorNombre = 'Selecciona un proveedor';
-    if (!form.localId) errs.localId = 'Selecciona el local';
     if (!form.fecha) errs.fecha = 'La fecha es obligatoria';
     else if (form.fecha !== getTodayStr()) errs.fecha = 'Solo puedes registrar la compra con la fecha de hoy.';
     const itemsErr = validateItems(form.items);
@@ -626,9 +598,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       const comprobanteUrl = comprobanteFile ? await uploadToCloudinary(comprobanteFile) : null;
       onSubmit({
         ...form,
-        local_id: form.localId,
-        localId: form.localId,
-        localNombre: form.localNombre,
         items: form.items.map(prepararItemParaEnvio),
         total: totalFinal,
         total_bruto: totalBruto,
@@ -661,8 +630,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       setTimeout(() => {
         if (errs.proveedorNombre) {
           proveedorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else if (errs.localId) {
-          localRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else if (errs.fecha) {
           fechaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else if (errs.items) {
@@ -707,42 +674,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
           {errors.proveedorNombre
             ? <span className="err-msg">{errors.proveedorNombre}</span>
             : touched.proveedorNombre && form.proveedorNombre && <span className="ok-msg">✓ Válido</span>}
-        </div>
-
-        {/* batch 5 item 2 — Local (obligatorio), mismo buscador con lupa
-            que Proveedor. El stock comprado entra solo a este local. */}
-        <div ref={localRef} className={`fg ${errors.localId ? 'fg-error' : ''}`}>
-          <label>Local <span className="req">*</span></label>
-          {locales.length > 0 ? (
-            <BuscadorSelect
-              value={form.localId}
-              options={locales.map(l => ({
-                value: l.id,
-                label: l.nombre,
-                // Solo se usa como dirección real para búsqueda/subtítulo si
-                // NO viene vacía ni con un texto marcador ("PEGAR", "—", …).
-                sub: (l.direccion && !/^(pegar|—|-|n\/a|sin)/i.test(l.direccion.trim())) ? l.direccion.trim() : '',
-                subPlaceholder: 'Sin dirección registrada',
-              }))}
-              onChange={seleccionarLocal}
-              onBlur={() => {
-                setTouched(prev => ({ ...prev, localId: true }));
-                setErrors(prev => ({ ...prev, localId: form.localId ? '' : 'Selecciona el local' }));
-              }}
-              placeholder="Buscar local por nombre o dirección..."
-              emptyMessage="Ningún local activo coincide con esa búsqueda."
-            />
-          ) : (
-            <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
-              ⚠ No hay locales activos registrados. Créalos en Empleados → Locales.
-            </div>
-          )}
-          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-            El stock de esta compra entra únicamente al local seleccionado.
-          </span>
-          {errors.localId
-            ? <span className="err-msg">{errors.localId}</span>
-            : touched.localId && form.localId && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div ref={fechaRef} className={`fg ${errors.fecha ? 'fg-error' : ''}`}>

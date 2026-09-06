@@ -7,6 +7,7 @@ import fichasTecnicasService from '../services/fichasTecnicasService';
 import productosService from '../../productos/services/productosService';
 import insumosService from '../../insumos/services/insumosService';
 import toppingsService from '../../toppings/services/toppingsService';
+import adicionesService from '../../adiciones/services/adicionesService';
 import InsumoSearchSelect from '../../../shared/components/InsumoSearchSelect';
 import '../../insumos/pages/InsumosPage.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
@@ -14,29 +15,6 @@ import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto'
 // del producto — espejo exacto del backend (config/tiposPreparacion.js), que
 // aplica estas mismas reglas al guardar.
 import { CATEGORIAS_PREP, derivarTipoPreparacion, resolverTipoPreparacion } from '../../../shared/utils/tiposPreparacion';
-import { permiteDecimales, errorCantidad } from '../../../shared/constants/insumoTipos';
-
-// batch 4 item 4 — campo de cantidad que se adapta a la unidad de medida del
-// insumo elegido: sufijo visible (g, mL, kg, L, oz, unidad) y validación
-// "unidad → solo enteros, el resto acepta decimales" (misma que Insumos).
-function CantidadUnidadInput({ value, unidad, onChange, invalido }) {
-  const dec = permiteDecimales(unidad);
-  const err = errorCantidad(value, unidad, { min: 0, obligatorio: false }) ||
-    (value !== '' && Number(value) <= 0 ? 'Debe ser mayor a 0' : '');
-  const rojo = invalido || !!err;
-  return (
-    <div>
-      <div style={{ position: 'relative' }}>
-        <input type="number" step={dec ? 'any' : '1'} placeholder="Cant." value={value}
-          onChange={e => onChange(e.target.value)}
-          title={`Cantidad en ${unidad || 'la unidad del insumo'}`}
-          style={{ width: '100%', padding: `9px ${unidad ? 40 : 10}px 9px 10px`, border: `1.5px solid ${rojo ? '#EF5350' : 'var(--border-input)'}`, borderRadius: 8, fontSize: 12, outline: 'none', background: 'var(--bg-input)', color: 'var(--text-primary)' }} />
-        {unidad && <span style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', pointerEvents: 'none' }}>{unidad}</span>}
-      </div>
-      {err && <div style={{ fontSize: 10.5, color: '#E53935', marginTop: 2 }}>{err}</div>}
-    </div>
-  );
-}
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 const fmtPct = n => `${Math.round((n||0)*100)}%`;
@@ -46,27 +24,17 @@ const fmtFecha = iso => iso ? new Intl.DateTimeFormat('es-CO',{dateStyle:'medium
 // advertir al administrador — nunca bloquea el guardado de la ficha.
 const MARGEN_MINIMO = 0.30;
 
-// batch 4 item 6 — el "vaso" ya no se infiere por categoría sino por unidad
-// de medida ("oz"), y el "pitillo" por unidad "unidad". Ver el paso
-// "Vaso y preparación" del asistente.
-
-// Un insumo es "vaso propiamente dicho" si su categoría menciona "vaso"
-// (ej. "Vasos de plástico", "Vasos de cartón"). Se usa SOLO para ordenar el
-// selector de vaso: los vasos reales van primero y el resto de desechables
-// (pitillos, tapas, servilletas — que también pasan `esCategoriaVaso` por la
-// palabra "desechable") van en un segundo grupo aparte, en vez de aparecer
-// todos revueltos en la misma lista.
-const esVasoEstricto = insumo => (insumo?.categoria || '').toLowerCase().includes('vaso');
-
-// Empaques y desechables que NO son vasos: pitillos, tapas, servilletas.
-// Viven en la categoría "Empaques" (ver la siembra de categorias_insumos en
-// el backend), así que hasta ahora se mezclaban con la leche y el café
-// dentro de "Insumos requeridos". Con este predicado la ficha los muestra
-// agrupados aparte, sin cambiar cómo se guardan.
-const esCategoriaEmpaque = insumo => {
+// Un insumo es "vaso" si pertenece a una categoría de insumos cuyo nombre
+// contiene "vaso" o "desechable" (ej. "Insumos desechables (Vasos)" o,
+// igual de válido, simplemente "Insumos desechables") — la categoría se
+// gestiona en Postgres (categorias_insumos), no hay ninguna lista de
+// insumos hardcodeada aquí. Esto separa "Insumos requeridos" (consumibles)
+// de "Vaso utilizado" de forma explícita en vez de inferirlo de la unidad
+// de medida (antes cualquier insumo en "oz" se trataba como vaso, lo que
+// permitía elegir un vaso como ingrediente consumible y viceversa).
+const esCategoriaVaso = insumo => {
   const nombreCat = (insumo?.categoria || '').toLowerCase();
-  if (esVasoEstricto(insumo)) return false;
-  return nombreCat.includes('empaque') || nombreCat.includes('desechable');
+  return nombreCat.includes('vaso') || nombreCat.includes('desechable');
 };
 
 // Íconos reutilizados en todo el módulo (reemplazan los emoji ✏️/💾/📋/💡/⏳
@@ -93,14 +61,10 @@ const getFichaId = f => f?.id_ficha ?? f?.id;
 function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, onEditExisting }) {
   const [productos, setProductos] = useState([]);
   const [insumos, setInsumos]     = useState([]);
-  // Cambio 5 — insumos tipo topping (GET /insumos?tipo=topping), únicos que
-  // se ofrecen en la sección "Toppings" del asistente.
-  const [insumosTopping, setInsumosTopping] = useState([]);
-  // batch 4 item 3 — estados de carga: los buscadores muestran "Cargando…"
-  // mientras llega la lista y "Sin resultados" cuando la API devuelve vacío.
-  // NO hay slice/límite local: se muestra todo lo que devuelve el endpoint.
-  const [insumosLoading, setInsumosLoading] = useState(true);
-  const [toppingLoading, setToppingLoading] = useState(true);
+  // Catálogo de adiciones (universales, aplican a todo el menú) — se usa
+  // solo para la "Vista previa de preparación" de más abajo, ninguna otra
+  // parte de este formulario las necesitaba hasta ahora.
+  const [adiciones, setAdiciones] = useState([]);
   useEffect(() => {
     productosService.getAll().then(d => {
       const lista = Array.isArray(d) ? d : [];
@@ -112,16 +76,8 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
       const idActual = fichaInicial ? Number(fichaInicial.id_producto) : null;
       setProductos(lista.filter(p => p.estado === 'Activo' || (idActual && Number(p.id) === idActual)));
     }).catch(()=>{});
-    insumosService.getAll()
-      .then(d => setInsumos(Array.isArray(d) ? d : []))
-      .catch(()=>setInsumos([]))
-      .finally(()=>setInsumosLoading(false));
-    // Cambio 5 — el selector de la sección Toppings consume SOLO
-    // GET /insumos?tipo=topping (no el catálogo completo de insumos).
-    insumosService.getByTipo('topping')
-      .then(d => setInsumosTopping(Array.isArray(d) ? d : []))
-      .catch(()=>setInsumosTopping([]))
-      .finally(()=>setToppingLoading(false));
+    insumosService.getAll().then(d => setInsumos(Array.isArray(d) ? d : [])).catch(()=>{});
+    adicionesService.getAll().then(d => setAdiciones(Array.isArray(d) ? d.filter(a=>a.estado==='Activo') : [])).catch(()=>{});
   }, []);
   // Al editar, cualquier columna puede venir NULL de fichas guardadas antes
   // de que existieran las validaciones actuales. Sin los respaldos de abajo,
@@ -138,11 +94,6 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     resumen_prep: fichaInicial.resumen_prep || '',
     preparacion: fichaInicial.preparacion || '',
     vaso_id: fichaInicial.vaso_id ? String(fichaInicial.vaso_id) : '',
-    // batch 4 item 6 — pitillo (opcional). `lleva_pitillo` se deriva de que
-    // haya un pitillo_id guardado si el backend no manda el flag.
-    lleva_pitillo: fichaInicial.lleva_pitillo != null ? !!fichaInicial.lleva_pitillo : !!fichaInicial.pitillo_id,
-    pitillo_id: fichaInicial.pitillo_id ? String(fichaInicial.pitillo_id) : '',
-    pitillo_cantidad: fichaInicial.pitillo_cantidad != null ? String(fichaInicial.pitillo_cantidad) : '1',
     // Antes: fichaInicial.insumos.map(...) — si el backend no traía el
     // arreglo `insumos` en la ficha, esto tronaba al abrir "Editar".
     insumos: (fichaInicial.insumos || [])
@@ -159,17 +110,14 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   } : {
     id_producto:'', categoria_prep:'Caliente', porciones:'1', tiempo_prep:'5',
     costo_estimado:'', estado:true, notas:'', resumen_prep:'', preparacion:'', vaso_id:'',
-    lleva_pitillo:false, pitillo_id:'', pitillo_cantidad:'1',
-    // Toda cantidad nueva arranca en 1 (no vacía): 1 es el valor válido
-    // más probable y evita que el usuario tenga que escribirlo cada vez.
-    insumos:[{ id_insumo:'', cantidad:'1', unidad:'g' }],
+    insumos:[{ id_insumo:'', cantidad:'', unidad:'g' }],
     toppings:[],
   };
 
   // Si una ficha antigua quedó guardada sin insumos (algo que la API ya no
   // permite), el formulario abre igual con una fila vacía lista para llenar
   // en vez de una sección en blanco sin nada donde escribir.
-  if (def.insumos.length === 0) def.insumos = [{ id_insumo:'', cantidad:'1', unidad:'g' }];
+  if (def.insumos.length === 0) def.insumos = [{ id_insumo:'', cantidad:'', unidad:'g' }];
 
   const [form, setForm] = useState(def);
   const [errors, setErrors] = useState({});
@@ -239,30 +187,9 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   // requeridos", y vasos activos (categoría "…Vasos…") para "Vaso
   // utilizado" — ambas listas vienen del mismo `insumos` ya cargado desde
   // Postgres, solo separadas por categoría para que nunca se mezclen.
-  // batch 4 item 6 — vaso = insumo con unidad de medida "oz"; pitillo =
-  // insumo con unidad "unidad". Son insumos normales del catálogo, solo se
-  // filtran por unidad (ya no por categoría "vaso/desechable").
-  const insumosConsumibles = insumos.filter(i => i.unidadMedida !== 'oz');
-  // Cambio 5 — la sección "Toppings" solo ofrece insumos tipo topping
-  // (GET /insumos?tipo=topping). Se añaden los que ya estén elegidos en la
-  // ficha aunque hoy no tengan el flag, para no perder la selección guardada.
-  const insumosToppingOpc = [
-    ...insumosTopping,
-    ...insumos.filter(i =>
-      form.toppings.some(t => String(t.id_insumo) === String(i.id)) &&
-      !insumosTopping.some(x => String(x.id) === String(i.id))
-    ),
-  ];
-  // Vasos = insumos activos con unidad "oz" (+ el ya elegido aunque cambie).
-  const vasosDisponibles = insumos.filter(i =>
-    (i.unidadMedida === 'oz' && i.estado === 'Activo') || String(i.id) === String(form.vaso_id)
-  );
+  const insumosConsumibles = insumos.filter(i => !esCategoriaVaso(i));
+  const vasosDisponibles = insumos.filter(i => esCategoriaVaso(i) && i.estado === 'Activo');
   const vasoSel = insumos.find(i => String(i.id) === String(form.vaso_id));
-  // Pitillos = insumos activos con unidad "unidad" (+ el ya elegido).
-  const pitillosDisponibles = insumos.filter(i =>
-    (i.unidadMedida === 'unidad' && i.estado === 'Activo') || String(i.id) === String(form.pitillo_id)
-  );
-  const pitilloSel = insumos.find(i => String(i.id) === String(form.pitillo_id));
 
   // Un producto solo puede tener UNA ficha técnica, activa o inactiva. Si
   // estamos creando (no editando) y el producto elegido ya tiene ficha,
@@ -330,13 +257,13 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   const costoEstimadoSuperaPrecio = !!(prodSel && form.costo_estimado && !isNaN(form.costo_estimado) && Number(form.costo_estimado) >= prodSel.precio);
 
   const setF = (k, v) => { setForm(f => ({...f, [k]:v})); setErrors(e => ({...e, [k]:''})); };
-  const addIns = () => setForm(f => ({...f, insumos:[...f.insumos, {id_insumo:'',cantidad:'1',unidad:'g'}]}));
+  const addIns = () => setForm(f => ({...f, insumos:[...f.insumos, {id_insumo:'',cantidad:'',unidad:'g'}]}));
   const removeIns = i => setForm(f => ({...f, insumos:f.insumos.filter((_,idx)=>idx!==i)}));
   const setIns = (i,k,v) => setForm(f => { const ins=[...f.insumos]; ins[i]={...ins[i],[k]:v}; return {...f,insumos:ins}; });
 
   // 2 — mismos handlers que los de "Insumos requeridos", para la sección
   // de Toppings del formulario.
-  const addTop = () => setForm(f => ({...f, toppings:[...f.toppings, {id_insumo:'',cantidad:'1',unidad:'g'}]}));
+  const addTop = () => setForm(f => ({...f, toppings:[...f.toppings, {id_insumo:'',cantidad:'',unidad:'g'}]}));
   const removeTop = i => setForm(f => ({...f, toppings:f.toppings.filter((_,idx)=>idx!==i)}));
   const setTop = (i,k,v) => setForm(f => { const t=[...f.toppings]; t[i]={...t[i],[k]:v}; return {...f,toppings:t}; });
 
@@ -347,8 +274,48 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   const idsUsadosEnOtrasFilas = (lista, idx) =>
     new Set(lista.filter((_,j) => j!==idx).map(r => r.id_insumo).filter(Boolean).map(String));
 
-  // batch 4 item 5 — la sección "Vista previa de preparación" ("Simular
-  // receta") se eliminó del asistente. Su estado y helpers se quitaron.
+  // ── Vista previa de preparación ("Simular receta") ──────────────────────
+  // Puramente visual: no guarda nada ni llama al backend, solo combina lo
+  // que ya está cargado en el formulario (form.insumos, form.toppings) con
+  // el catálogo de adiciones para simular cómo quedaría la receta con una
+  // combinación elegida por el administrador.
+  const [previewAbierto, setPreviewAbierto] = useState(false);
+  // Los toppings de la ficha aparecen todos marcados por defecto (igual que
+  // le llegan al cliente); acá solo se guardan los que el admin DESmarcó.
+  const [previewToppingsFuera, setPreviewToppingsFuera] = useState(() => new Set());
+  const [previewAdicionesSel, setPreviewAdicionesSel] = useState(() => new Set());
+  const previewToggleTopping = idx => setPreviewToppingsFuera(prev => {
+    const next = new Set(prev);
+    next.has(idx) ? next.delete(idx) : next.add(idx);
+    return next;
+  });
+  const previewToggleAdicion = id => setPreviewAdicionesSel(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const nombreInsumoPreview = id => insumos.find(x => String(x.id) === String(id))?.nombre || `Insumo #${id}`;
+  const previewToppingsIncluidos = form.toppings
+    .map((t, idx) => ({ ...t, _idx: idx }))
+    .filter(t => t.id_insumo && !previewToppingsFuera.has(t._idx));
+  const previewAdicionesIncluidas = adiciones.filter(a => previewAdicionesSel.has(a.id));
+  // Combina insumos base + los que aportan los toppings marcados + los que
+  // aportan las adiciones seleccionadas, sumando cantidades cuando se
+  // repite el mismo insumo (ej. la ficha ya usa leche y una adición también).
+  const previewInsumosCombinados = (() => {
+    const mapa = new Map();
+    const agregar = (idInsumo, cantidad, unidad) => {
+      if (!idInsumo || !cantidad || isNaN(cantidad)) return;
+      const key = String(idInsumo);
+      const previo = mapa.get(key);
+      if (previo) mapa.set(key, { ...previo, cantidad: previo.cantidad + Number(cantidad) });
+      else mapa.set(key, { nombre: nombreInsumoPreview(idInsumo), cantidad: Number(cantidad), unidad: unidad || insumos.find(x=>String(x.id)===String(idInsumo))?.unidadMedida || '' });
+    };
+    form.insumos.forEach(i => agregar(i.id_insumo, i.cantidad, i.unidad));
+    previewToppingsIncluidos.forEach(t => agregar(t.id_insumo, t.cantidad, t.unidad));
+    previewAdicionesIncluidas.forEach(a => agregar(a.insumo_id, a.cantidad, a.unidad));
+    return Array.from(mapa.values());
+  })();
 
   // Reglas de los parámetros numéricos, en un solo lugar para que
   // `validate()` (guardar) y `validarPaso1()` (botón Siguiente) no puedan
@@ -371,13 +338,6 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     return new Set(ids).size !== ids.length;
   };
 
-  // batch 4 item 4 — cantidad no entera para un insumo cuya unidad es "unidad".
-  const unidadDeInsumo = (id) => insumos.find(x => String(x.id) === String(id))?.unidadMedida || '';
-  const cantidadMalPorUnidad = (fila) => {
-    if (!fila.id_insumo || fila.cantidad === '' || isNaN(fila.cantidad)) return false;
-    return !permiteDecimales(unidadDeInsumo(fila.id_insumo)) && !Number.isInteger(Number(fila.cantidad));
-  };
-
   const validate = () => {
     const er = {};
     if (!form.id_producto) er.id_producto = 'Selecciona un producto';
@@ -392,20 +352,12 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     if (!form.preparacion.trim()) er.preparacion = 'La preparación es obligatoria y no puede contener solo espacios en blanco';
     if (form.insumos.length === 0) er.insumos = 'Agrega al menos un insumo a la ficha técnica';
     else if (form.insumos.some(i => !i.id_insumo || i.cantidad === '' || isNaN(i.cantidad) || Number(i.cantidad) <= 0)) er.insumos = 'Completa todos los insumos con una cantidad mayor a 0';
-    else if (form.insumos.some(cantidadMalPorUnidad)) er.insumos = 'La unidad "unidad" solo admite cantidades enteras';
     else if (hayInsumosRepetidos(form.insumos)) er.insumos = 'No puedes repetir el mismo insumo dos veces';
     if (!form.vaso_id) er.vaso_id = 'Selecciona el vaso utilizado para este producto';
-    // batch 4 item 6 — si el producto lleva pitillo, hay que elegir cuál.
-    if (form.lleva_pitillo && !form.pitillo_id) er.pitillo_id = 'Selecciona el pitillo, o marca "No"';
-    else if (form.lleva_pitillo && (form.pitillo_cantidad === '' || isNaN(form.pitillo_cantidad) || Number(form.pitillo_cantidad) <= 0 || !Number.isInteger(Number(form.pitillo_cantidad)))) {
-      er.pitillo_id = 'La cantidad de pitillo debe ser un entero mayor a 0';
-    }
     // 2 — los toppings son opcionales (la ficha puede no tener ninguno),
     // pero una fila que ya se empezó a llenar debe completarse o quitarse.
     if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || t.cantidad === '' || isNaN(t.cantidad) || Number(t.cantidad) <= 0))) {
       er.toppings = 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)';
-    } else if (form.toppings.some(cantidadMalPorUnidad)) {
-      er.toppings = 'La unidad "unidad" solo admite cantidades enteras';
     } else if (hayInsumosRepetidos(form.toppings)) {
       er.toppings = 'No puedes repetir el mismo insumo dos veces en los toppings';
     }
@@ -451,7 +403,6 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     let mensaje = '';
     if (form.insumos.length === 0) mensaje = 'Agrega al menos un insumo a la ficha técnica';
     else if (form.insumos.some(i => !i.id_insumo || i.cantidad === '' || isNaN(i.cantidad) || Number(i.cantidad) <= 0)) mensaje = 'Completa todos los insumos con una cantidad mayor a 0';
-    else if (form.insumos.some(cantidadMalPorUnidad)) mensaje = 'La unidad "unidad" solo admite cantidades enteras';
     else if (hayInsumosRepetidos(form.insumos)) mensaje = 'No puedes repetir el mismo insumo dos veces';
     setErrors(e => ({ ...e, insumos: mensaje }));
     return !mensaje;
@@ -460,7 +411,6 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
   const validarPaso3 = () => {
     let mensaje = '';
     if (form.toppings.some(t => (t.id_insumo || t.cantidad) && (!t.id_insumo || t.cantidad === '' || isNaN(t.cantidad) || Number(t.cantidad) <= 0))) mensaje = 'Completa o quita las filas de toppings incompletas (cantidad mayor a 0)';
-    else if (form.toppings.some(cantidadMalPorUnidad)) mensaje = 'La unidad "unidad" solo admite cantidades enteras';
     else if (hayInsumosRepetidos(form.toppings)) mensaje = 'No puedes repetir el mismo insumo dos veces en los toppings';
     setErrors(e => ({ ...e, toppings: mensaje }));
     return !mensaje;
@@ -504,11 +454,7 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     // `toppings` (crudo, con _toppingId de uso interno) no se manda tal
     // cual — se excluye del spread para no confundir al backend con dos
     // campos de toppings a la vez; lo que se envía es `toppings_ficha`.
-    const { toppings: _formTopRaw, pitillo_id: _pid, pitillo_cantidad: _pcant, lleva_pitillo: _lp, ...formSinToppingsRaw } = form;
-    // batch 4 item 6 — el pitillo solo se envía si el toggle está en "Sí".
-    const pitilloData = form.lleva_pitillo && form.pitillo_id
-      ? { lleva_pitillo: true, pitillo_id: Number(form.pitillo_id), pitillo_cantidad: Number(form.pitillo_cantidad) || 1 }
-      : { lleva_pitillo: false, pitillo_id: null, pitillo_cantidad: null };
+    const { toppings: _formTopRaw, ...formSinToppingsRaw } = form;
     const data = {
       ...formSinToppingsRaw,
       id_producto: Number(form.id_producto),
@@ -516,7 +462,6 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
       tiempo_prep: Number(form.tiempo_prep),
       costo_estimado: Number(form.costo_estimado),
       vaso_id: Number(form.vaso_id),
-      ...pitilloData,
       // Se recortan los textos antes de enviarlos para que no se guarden
       // espacios sobrantes al inicio/final (el backend hace lo mismo, pero
       // así lo que se ve en pantalla y lo que se guarda coinciden).
@@ -589,8 +534,8 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:720,
-        maxHeight:'calc(100vh - 48px)', overflowY:'auto',
-        boxShadow:'var(--shadow-lg)', animation:'popIn .22s ease',
+        maxHeight:'92vh', overflowY:'auto',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 28px 16px',borderBottom:'1px solid var(--border)'}}>
@@ -805,24 +750,31 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
           <div className="insumos-card" style={{padding:'20px 24px',marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:14}}>3. Insumos requeridos</div>
             {errors.insumos && <div style={{fontSize:12,color:'#E53935',marginBottom:10}}>{errors.insumos}</div>}
-            <div style={{display:'grid',gridTemplateColumns:'2.6fr 1.4fr auto',gap:8,marginBottom:6}}>
-              {['Insumo','Cantidad',''].map((h,i) => <div key={i} style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:0.5}}>{h}</div>)}
+            <div style={{display:'grid',gridTemplateColumns:'3fr 1fr 1fr auto',gap:8,marginBottom:6}}>
+              {['Insumo','Cantidad','Unidad',''].map((h,i) => <div key={i} style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:0.5}}>{h}</div>)}
             </div>
             {form.insumos.map((ins, i) => {
               const insumoSel = insumos.find(s => String(s.id) === String(ins.id_insumo));
               return (
-              <div key={i} style={{display:'grid',gridTemplateColumns:'2.6fr 1.4fr auto',gap:8,marginBottom:8,alignItems:'start'}}>
-                {/* buscador con lupa; muestra todo lo que devuelve la API
-                    (sin slice local) + estado de carga / sin resultados. */}
-                <InsumoSearchSelect insumos={insumosConsumibles} value={ins.id_insumo} loading={insumosLoading}
+              <div key={i} style={{display:'grid',gridTemplateColumns:'3fr 1fr 1fr auto',gap:8,marginBottom:8}}>
+                {/* 1 — buscador con lupa en vez del <select> plano: filtra
+                    por nombre en tiempo real sobre la lista de insumos ya
+                    cargada (no hace falta un ?q= al backend por cada tecla,
+                    la lista de insumos no es tan grande como para paginar). */}
+                <InsumoSearchSelect insumos={insumosConsumibles} value={ins.id_insumo}
                   excludeIds={idsUsadosEnOtrasFilas(form.insumos, i)}
                   onSelect={found => { setIns(i,'id_insumo',String(found.id)); setIns(i,'unidad',found.unidadMedida||'g'); }}
                   placeholder="Buscar insumo..." hasError={!!errors.insumos && !ins.id_insumo}/>
-                {/* batch 4 item 4 — cantidad adaptada a la unidad del insumo */}
-                <CantidadUnidadInput value={ins.cantidad}
-                  unidad={insumoSel?.unidadMedida || ins.unidad || ''}
-                  onChange={v => setIns(i,'cantidad',v)}
-                  invalido={!!errors.insumos && (!ins.id_insumo || ins.cantidad === '')}/>
+                <input type="number" step="0.1" placeholder="Cant." value={ins.cantidad} onChange={e => setIns(i,'cantidad',e.target.value)}
+                  title="Cantidad a utilizar, en la unidad del insumo"
+                  style={{padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
+                {/* 16.4 — la unidad no es editable: siempre es la registrada en
+                    Postgres para el insumo elegido (insumos.unidad), para que
+                    nunca se pueda guardar una unidad distinta a la real. */}
+                <span title="Unidad de medida registrada para este insumo — no se puede cambiar aquí"
+                  style={{padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12,background:'var(--bg-hover)',color:'var(--text-secondary)',display:'flex',alignItems:'center'}}>
+                  {insumoSel?.unidadMedida || ins.unidad || '—'}
+                </span>
                 <button type="button" title="Quitar este insumo" onClick={() => removeIns(i)} disabled={form.insumos.length===1}
                   style={{padding:'6px 10px',borderRadius:8,border:'1.5px solid #ffcdd2',background:'rgba(229,57,53,0.12)',color:'#EF5350',cursor:'pointer',fontSize:12,opacity:form.insumos.length===1?0.4:1,display:'flex',alignItems:'center',justifyContent:'center'}}><IconX/></button>
               </div>
@@ -854,22 +806,24 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
               <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:10}}>Esta ficha no tiene toppings propios todavía.</p>
             ) : (
               <>
-                <div style={{display:'grid',gridTemplateColumns:'2.6fr 1.4fr auto',gap:8,marginBottom:6}}>
-                  {['Insumo','Cantidad',''].map((h,i) => <div key={i} style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:0.5}}>{h}</div>)}
+                <div style={{display:'grid',gridTemplateColumns:'3fr 1fr 1fr auto',gap:8,marginBottom:6}}>
+                  {['Insumo','Cantidad','Unidad',''].map((h,i) => <div key={i} style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:0.5}}>{h}</div>)}
                 </div>
                 {form.toppings.map((top, i) => {
                   const insumoSel = insumos.find(s => String(s.id) === String(top.id_insumo));
                   return (
-                    <div key={i} style={{display:'grid',gridTemplateColumns:'2.6fr 1.4fr auto',gap:8,marginBottom:8,alignItems:'start'}}>
-                      <InsumoSearchSelect insumos={insumosToppingOpc} value={top.id_insumo} loading={toppingLoading}
+                    <div key={i} style={{display:'grid',gridTemplateColumns:'3fr 1fr 1fr auto',gap:8,marginBottom:8}}>
+                      <InsumoSearchSelect insumos={insumosConsumibles} value={top.id_insumo}
                         excludeIds={idsUsadosEnOtrasFilas(form.toppings, i)}
                         onSelect={found => { setTop(i,'id_insumo',String(found.id)); setTop(i,'unidad',found.unidadMedida||'g'); }}
-                        placeholder="Buscar topping..." hasError={!!errors.toppings && !top.id_insumo}/>
-                      {/* batch 4 item 4 — cantidad adaptada a la unidad del topping */}
-                      <CantidadUnidadInput value={top.cantidad}
-                        unidad={insumoSel?.unidadMedida || top.unidad || ''}
-                        onChange={v => setTop(i,'cantidad',v)}
-                        invalido={!!errors.toppings && !!(top.id_insumo || top.cantidad) && (!top.id_insumo || top.cantidad === '')}/>
+                        placeholder="Buscar insumo para el topping..." hasError={!!errors.toppings && !top.id_insumo}/>
+                      <input type="number" step="0.1" placeholder="Cant." value={top.cantidad} onChange={e => setTop(i,'cantidad',e.target.value)}
+                        title="Cantidad de este insumo que lleva el topping"
+                        style={{padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}/>
+                      <span title="Unidad de medida registrada para este insumo — no se puede cambiar aquí"
+                        style={{padding:'9px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12,background:'var(--bg-hover)',color:'var(--text-secondary)',display:'flex',alignItems:'center'}}>
+                        {insumoSel?.unidadMedida || top.unidad || '—'}
+                      </span>
                       <button type="button" title="Quitar este topping" onClick={() => removeTop(i)}
                         style={{padding:'6px 10px',borderRadius:8,border:'1.5px solid #ffcdd2',background:'rgba(229,57,53,0.12)',color:'#EF5350',cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}><IconX/></button>
                     </div>
@@ -887,67 +841,116 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
 
           {paso === 4 && <>
 
-          {/* batch 4 item 6 — Vaso y pitillo: sección dedicada. Vaso = insumo
-              con unidad "oz"; pitillo = insumo con unidad "unidad". Ambos son
-              insumos normales del catálogo, el selector solo filtra por unidad. */}
-          <div className="insumos-card" style={{padding:'20px 24px',marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:14}}>Vaso y pitillo</div>
+          {/* Vista previa de preparación — bloque colapsable, solo lectura/
+              simulación: no guarda nada ni llama al backend, combina lo que
+              ya está cargado en el formulario en el momento. */}
+          <div className="insumos-card" style={{padding:'0',marginBottom:14,overflow:'hidden'}}>
+            <button type="button" onClick={() => setPreviewAbierto(v => !v)}
+              style={{width:'100%',padding:'16px 24px',background:'transparent',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',textAlign:'left'}}>
+              <span style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,display:'flex',alignItems:'center',gap:8}}>
+                <IconInfo/> Vista previa de preparación
+              </span>
+              <span style={{fontSize:12,color:'var(--text-muted)'}}>{previewAbierto ? '▲ Ocultar' : '▼ Simular receta'}</span>
+            </button>
+            {previewAbierto && (
+              <div style={{padding:'0 24px 20px'}}>
+                <p style={{fontSize:12,color:'var(--text-muted)',fontStyle:'italic',margin:'0 0 16px',display:'flex',alignItems:'flex-start',gap:6}}>
+                  <IconAlerta width="13" height="13" style={{flexShrink:0,marginTop:1,color:'#F57F17'}}/>
+                  Esto no guarda nada, es solo para ver cómo quedaría la preparación con esta combinación — no se envía al backend ni se persiste.
+                </p>
 
-            <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Vaso principal de este producto *</label>
-            <InsumoSearchSelect
-              insumos={vasosDisponibles}
-              value={form.vaso_id}
-              loading={insumosLoading}
-              onSelect={found => setF('vaso_id', String(found.id))}
-              placeholder="Buscar vaso (insumos en onzas)..."
-              hasError={!!errors.vaso_id}
-            />
-            {vasoSel && <div style={{fontSize:11.5,color:'var(--text-muted)',marginTop:4}}>Seleccionado: <strong>{vasoSel.nombre}</strong>{vasoSel.tamanoOz ? ` · ${vasoSel.tamanoOz} oz` : ''}</div>}
-            {errors.vaso_id && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>{errors.vaso_id}</div>}
-            {vasosDisponibles.length === 0 && !insumosLoading && (
-              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:6}}>
-                No hay insumos con unidad de medida "oz". Regístralos en Insumos.
-              </div>
-            )}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,marginBottom:16}}>
+                  {/* Toppings de esta ficha — todos marcados por defecto,
+                      igual que le aparecen al cliente. */}
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Toppings incluidos</div>
+                    {form.toppings.filter(t=>t.id_insumo).length === 0 ? (
+                      <p style={{fontSize:12,color:'var(--text-muted)'}}>Esta ficha no tiene toppings.</p>
+                    ) : (
+                      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                        {form.toppings.map((t, idx) => t.id_insumo && (
+                          <label key={idx} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',color:'var(--text-primary)'}}>
+                            <input type="checkbox" checked={!previewToppingsFuera.has(idx)} onChange={() => previewToggleTopping(idx)}/>
+                            🧋 {nombreInsumoPreview(t.id_insumo)}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
-            {/* Toggle: ¿lleva pitillo? */}
-            <div style={{display:'flex',alignItems:'center',gap:10,marginTop:18}}>
-              <button type="button"
-                title={form.lleva_pitillo ? 'Este producto lleva pitillo' : 'Este producto no lleva pitillo'}
-                className={`toggle-btn ${form.lleva_pitillo ? 'toggle-on' : 'toggle-off'}`}
-                onClick={() => setForm(f => ({ ...f, lleva_pitillo: !f.lleva_pitillo }))}>
-                <span className="toggle-thumb"/>
-              </button>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--text-primary)'}}>¿Este producto lleva pitillo?</span>
-              <span style={{fontSize:12,fontWeight:600,color:form.lleva_pitillo?'var(--color-green)':'var(--text-muted)'}}>{form.lleva_pitillo ? 'Sí' : 'No'}</span>
-            </div>
+                  {/* Adiciones universales — ninguna marcada por defecto,
+                      el admin simula cuáles pudo haber elegido el cliente. */}
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Adiciones a simular</div>
+                    {adiciones.length === 0 ? (
+                      <p style={{fontSize:12,color:'var(--text-muted)'}}>No hay adiciones activas registradas.</p>
+                    ) : (
+                      <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+                        {adiciones.map(a => {
+                          const sel = previewAdicionesSel.has(a.id);
+                          return (
+                            <button type="button" key={a.id} onClick={() => previewToggleAdicion(a.id)}
+                              style={{padding:'6px 12px',borderRadius:100,fontSize:12,fontWeight:600,cursor:'pointer',border:`1.5px solid ${sel?'var(--color-green,#2E7D32)':'var(--border)'}`,background:sel?'rgba(46,125,50,0.12)':'transparent',color:sel?'#2E7D32':'var(--text-secondary)'}}>
+                              {a.nombre}{sel && ' ✓'}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-            {form.lleva_pitillo && (
-              <div style={{marginTop:12,display:'grid',gridTemplateColumns:'2.6fr 1.4fr',gap:8,alignItems:'start'}}>
-                <div>
-                  <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Pitillo *</label>
-                  <InsumoSearchSelect
-                    insumos={pitillosDisponibles}
-                    value={form.pitillo_id}
-                    loading={insumosLoading}
-                    onSelect={found => setF('pitillo_id', String(found.id))}
-                    placeholder="Buscar pitillo (insumos por unidad)..."
-                    hasError={!!errors.pitillo_id}
-                  />
-                  {pitillosDisponibles.length === 0 && !insumosLoading && (
-                    <div style={{fontSize:11.5,color:'var(--text-muted)',marginTop:4}}>No hay insumos con unidad "unidad".</div>
+                {/* Resultado combinado en vivo */}
+                <div style={{background:'var(--bg-hover)',borderRadius:10,padding:'14px 16px',marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Insumos combinados de esta simulación</div>
+                  {previewInsumosCombinados.length === 0 ? (
+                    <p style={{fontSize:12,color:'var(--text-muted)',margin:0}}>Agrega insumos a la ficha para ver el combinado.</p>
+                  ) : (
+                    <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                      {previewInsumosCombinados.map((r, i) => (
+                        <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'5px 8px',borderRadius:6,background:i%2===0?'var(--bg-surface)':'transparent'}}>
+                          <span style={{color:'var(--text-primary)'}}>{r.nombre}</span>
+                          <strong style={{color:'var(--text-secondary)'}}>{r.cantidad} {r.unidad}</strong>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
+
+                {/* Preparación — igual para cualquier variante, solo cambian
+                    los insumos de arriba. */}
                 <div>
-                  <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Cantidad</label>
-                  <CantidadUnidadInput value={form.pitillo_cantidad}
-                    unidad={pitilloSel?.unidadMedida || 'unidad'}
-                    onChange={v => setF('pitillo_cantidad', v)}
-                    invalido={!!errors.pitillo_id && !form.pitillo_id}/>
+                  <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Preparación</div>
+                  {form.preparacion.trim() ? (
+                    <ol style={{paddingLeft:20,margin:0}}>
+                      {form.preparacion.split('\n').filter(s=>s.trim()).map((paso,i) => (
+                        <li key={i} style={{fontSize:13,color:'var(--text-primary)',marginBottom:6,lineHeight:1.6}}>{paso.replace(/^\d+\.\s*/,'')}</li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p style={{fontSize:12,color:'var(--text-muted)',margin:0}}>Todavía no escribiste los pasos de preparación.</p>
+                  )}
                 </div>
               </div>
             )}
-            {errors.pitillo_id && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>{errors.pitillo_id}</div>}
+          </div>
+
+          {/* Vaso utilizado */}
+          <div className="insumos-card" style={{padding:'20px 24px',marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,marginBottom:14}}>Vaso utilizado</div>
+            <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Vaso principal de este producto *</label>
+            <select value={form.vaso_id} onChange={e => setF('vaso_id', e.target.value)}
+              title="Insumo tipo vaso (unidad de medida 'oz') en el que se sirve el producto"
+              style={{width:'100%',padding:'10px 12px',border:`1.5px solid ${errors.vaso_id?'#EF5350':'var(--border-input)'}`,borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-input)',color:'var(--text-primary)'}}>
+              <option value="">— Seleccionar —</option>
+              {vasosDisponibles.map(v => <option key={v.id} value={v.id}>{v.nombre}{v.tamanoOz ? ` - ${v.tamanoOz} oz` : ''}</option>)}
+            </select>
+            {errors.vaso_id && <div style={{fontSize:11,color:'#E53935',marginTop:3}}>{errors.vaso_id}</div>}
+            {vasosDisponibles.length === 0 && (
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:6}}>
+                No hay vasos activos registrados. Ve a Insumos y registra uno con unidad de medida "oz".
+              </div>
+            )}
           </div>
 
           {/* 5. Preparación */}
@@ -1025,9 +1028,8 @@ function ModalFichaForm({ fichaInicial, fichasExistentes = [], onSave, onClose, 
 }
 
 // ── DETALLE MODAL ────────────────────────────────────────────────────────────
-// Solo lectura: ya no recibe onEditar/onAnular (ni necesita `hasPermiso`)
-// porque esas acciones quedaron exclusivamente en la tabla del módulo.
-function ModalDetalleFicha({ ficha, onClose }) {
+function ModalDetalleFicha({ ficha, onClose, onEditar, onAnular }) {
+  const { hasPermiso } = useAuth();
   const [productos, setProductos] = useState([]);
   const [insumos, setInsumos]     = useState([]);
   useEffect(() => {
@@ -1046,14 +1048,6 @@ function ModalDetalleFicha({ ficha, onClose }) {
   // arreglo, tronaba al abrir el detalle de esa ficha.
   const fichaInsumos = ficha.insumos || [];
 
-  // Partición visual de los insumos de la ficha: consumibles (leche, café…)
-  // por un lado y desechables/empaques (pitillos, tapas) por otro. La unión
-  // de ambas listas es exactamente `fichaInsumos`, así que el costo y todo
-  // lo demás se siguen calculando sobre el total, sin cambios.
-  const categoriaDeInsumo = idInsumo => insumos.find(s => String(s.id) === String(idInsumo));
-  const insumosConsumiblesFicha = fichaInsumos.filter(i => !esCategoriaEmpaque(categoriaDeInsumo(i.id_insumo)));
-  const desechablesFicha        = fichaInsumos.filter(i =>  esCategoriaEmpaque(categoriaDeInsumo(i.id_insumo)));
-
   // 16.6 — mismo cálculo de costo/margen que en el formulario (insumos +
   // vaso), para que la advertencia siga visible al ver el detalle de una
   // ficha ya guardada.
@@ -1070,8 +1064,8 @@ function ModalDetalleFicha({ ficha, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:680,
-        maxHeight:'calc(100vh - 48px)', overflowY:'auto',
-        boxShadow:'var(--shadow-lg)', animation:'popIn .22s ease',
+        maxHeight:'92vh', overflowY:'auto',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid var(--border)'}}>
@@ -1084,11 +1078,16 @@ function ModalDetalleFicha({ ficha, onClose }) {
               <div style={{fontSize:12,color:'var(--text-secondary)',marginTop:2}}>{ficha.categoria_prep} · {ficha.porciones} unidad{ficha.porciones>1?'es':''} · {ficha.tiempo_prep} min</div>
             </div>
           </div>
-          {/* "Ver detalle" es solo lectura: Editar y Anular viven únicamente
-              en la tabla principal del módulo. Tenerlos también acá duplicaba
-              acciones destructivas dentro de una vista de consulta. */}
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
-            <button onClick={onClose} title="Cerrar" className="modal-close-btn">
+            {hasPermiso('fichas', 'editar') && (
+              <Tooltip label="Editar">
+                <button className="btn-add" onClick={onEditar} style={{padding:'8px',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}><IconEditar/></button>
+              </Tooltip>
+            )}
+            {hasPermiso('fichas', 'eliminar') && (
+              <AnularButton onClick={onAnular} className="btn-confirm-danger" style={{padding:'8px',fontSize:12,borderRadius:8}}/>
+            )}
+            <button onClick={onClose} title="Cerrar" style={{width:34,height:34,borderRadius:'50%',border:'none',background:'var(--bg-hover)',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}}>
               <IconX width="15" height="15"/>
             </button>
           </div>
@@ -1127,16 +1126,12 @@ function ModalDetalleFicha({ ficha, onClose }) {
             </div>
           </div>
 
-          {/* Insumos consumibles y desechables se listan por separado: antes
-              iban todos en un mismo bloque, así que un pitillo o una tapa
-              aparecía entre la leche y el café sin distinguirse. La partición
-              es solo visual — los datos guardados no cambian. */}
           <div style={{background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)',marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10}}>Insumos requeridos ({insumosConsumiblesFicha.length})</div>
-            {insumosConsumiblesFicha.length === 0 && (
-              <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Esta ficha no tiene insumos consumibles registrados.</p>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10}}>Insumos requeridos ({fichaInsumos.length})</div>
+            {fichaInsumos.length === 0 && (
+              <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Esta ficha no tiene insumos registrados.</p>
             )}
-            {insumosConsumiblesFicha.map((ins, i) => {
+            {fichaInsumos.map((ins, i) => {
               const insumo = insumos.find(s => String(s.id) === String(ins.id_insumo));
               return (
                 <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',borderRadius:6,background:i%2===0?'var(--bg-hover)':'transparent',fontSize:13}}>
@@ -1145,31 +1140,6 @@ function ModalDetalleFicha({ ficha, onClose }) {
                 </div>
               );
             })}
-          </div>
-
-          {/* Vaso y desechables — el vaso elegido no se mostraba en ninguna
-              parte del detalle, pese a ser obligatorio en la ficha y sumar
-              al costo de producción. */}
-          <div style={{background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)',marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'0.6px',marginBottom:10}}>Vaso y desechables</div>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',borderRadius:6,background:'var(--bg-hover)',fontSize:13}}>
-              <span style={{fontWeight:600,color:'var(--text-primary)'}}>Vaso utilizado</span>
-              <span style={{color: vasoSel ? 'var(--text-secondary)' : 'var(--text-muted)'}}>
-                {vasoSel ? `${vasoSel.nombre}${vasoSel.tamanoOz ? ` · ${vasoSel.tamanoOz} oz` : ''}` : 'Sin vaso registrado'}
-              </span>
-            </div>
-            {desechablesFicha.map((ins, i) => {
-              const insumo = insumos.find(s => String(s.id) === String(ins.id_insumo));
-              return (
-                <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',borderRadius:6,background:i%2===0?'transparent':'var(--bg-hover)',fontSize:13}}>
-                  <span style={{fontWeight:600,color:'var(--text-primary)'}}>{insumo?.nombre||`Insumo #${ins.id_insumo}`}</span>
-                  <span style={{color:'var(--text-secondary)'}}>{ins.cantidad} {ins.unidad}</span>
-                </div>
-              );
-            })}
-            {desechablesFicha.length === 0 && (
-              <p style={{fontSize:12,color:'var(--text-muted)',margin:'8px 0 0'}}>Sin pitillos, tapas ni otros empaques en esta ficha.</p>
-            )}
           </div>
 
           <div style={{background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)',marginBottom:ficha.notas?14:0}}>
@@ -1311,6 +1281,8 @@ export default function FichasTecnicasPage() {
           <ModalDetalleFicha
             ficha={fichaActual}
             onClose={closeModal}
+            onEditar={() => setModal('editar')}
+            onAnular={() => setDel(fichaActual)}
           />
         )}
         {(modal === 'nuevo' || modal === 'editar') && (

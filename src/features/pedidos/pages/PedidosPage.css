@@ -1,11 +1,6 @@
 ﻿.pd-root { position: relative; }
-/* 1 — 5 tarjetas de resumen en una sola fila responsiva. auto-fit +
-   minmax reparte el ancho disponible; los breakpoints de abajo fijan
-   3 → 2 → 1 columnas para que nunca quede una tarjeta huérfana estirada
-   ni haya desborde horizontal. align-items:stretch + flex en .pd-stat
-   igualan la altura de todas. */
-.pd-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; align-items: stretch; }
-.pd-stat { background: var(--bg-surface); border-radius: 10px; padding: 18px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.pd-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 20px; }
+.pd-stat { background: var(--bg-surface); border-radius: 10px; padding: 18px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 .pd-stat-label { font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
 .pd-stat-value { font-size: 28px; font-weight: 800; font-family: 'Montserrat', sans-serif; line-height: 1; }
 
@@ -139,11 +134,8 @@
 .pd-resumen { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: -4px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-secondary); }
 .pd-resumen strong { font-size: 15px; color: #2E7D32; font-family: 'Montserrat', sans-serif; }
 
-@media (max-width: 1080px) { .pd-stats { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 680px)  { .pd-stats { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 420px)  { .pd-stats { grid-template-columns: 1fr; } }
-
 @media (max-width: 600px) {
+  .pd-stats { grid-template-columns: 1fr 1fr; }
   .pd-personal-cols { grid-template-columns: 1fr; }
   .pd-form-row { grid-template-columns: 1fr; }
 }
@@ -152,12 +144,9 @@
 .pd-prod-search-wrap {
   position: relative; display: flex; align-items: center; margin-bottom: 8px;
 }
-/* item 12 — ícono centrado; antes quedaba arriba pisando el placeholder */
 .pd-prod-search-wrap svg {
-  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
-  color: var(--text-muted); pointer-events: none;
+  position: absolute; left: 10px; color: var(--text-muted); pointer-events: none;
 }
-.pd-prod-search-clear { top: 50%; transform: translateY(-50%); }
 .pd-prod-search-input {
   width: 100%; padding: 8px 32px;
   border-radius: 8px; border: 1.5px solid var(--border-input);
@@ -475,56 +464,3 @@
 [data-theme="light"] .data-table tbody tr:hover {
   background: rgba(58,158,66,0.05) !important;
 }
-
-/* 13 / bug 1 — Modal de "Nuevo pedido" del Admin: ventana con ALTURA
-   DEFINIDA acotada al viewport (nunca depende del scroll de la página de
-   fondo). Cada columna scrollea por su lado; el pie del carrito ("Crear
-   pedido") y su encabezado quedan fijos. */
-.pd-nuevo-modal {
-  background: var(--bg-surface);
-  border-radius: 16px;
-  width: min(1120px, 96vw);
-  height: min(90vh, 880px);   /* altura definida → los scroll internos resuelven */
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: var(--shadow-lg, 0 24px 64px rgba(0,0,0,.35));
-  animation: popIn .2s ease;
-}
-.pd-nuevo-modal__head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 22px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
-.pd-nuevo-modal__x {
-  width: 34px; height: 34px; border-radius: 50%; border: none;
-  background: var(--bg-hover); color: var(--text-secondary);
-  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
-}
-.pd-nuevo-modal__x:hover { background: var(--bg-surface-3); color: var(--text-primary); }
-.pd-nuevo-modal__body {
-  flex: 1; min-height: 0; padding: 16px 18px; display: flex; overflow: hidden;
-}
-.pd-nuevo-modal__body > .cj-nuevo { flex: 1; min-height: 0; height: 100%; width: 100%; }
-
-/* ── Overrides SOLO dentro del modal (no afectan la página del Cajero) ── */
-/* Catálogo: la grilla de productos scrollea sola; el sub-panel de
-   toppings/adiciones es visible y scrolleable, nunca lo tapa el borde. */
-.pd-nuevo-modal .cj-nuevo__catalog { min-height: 0; }
-.pd-nuevo-modal .cj-prod-grid { flex: 1 1 0; min-height: 100px; }
-.pd-nuevo-modal .cj-add-panel {
-  flex-shrink: 0; max-height: 46%; overflow-y: auto; margin-top: 10px;
-}
-/* Carrito: encabezado y pie fijos; el medio (selectores + ítems + notas)
-   scrollea en un solo bloque. Local + Atendido por quedan pegados arriba. */
-.pd-nuevo-modal .cj-nuevo__cart { min-height: 0; }
-.pd-nuevo-modal .np-cart-body { overflow-y: auto; }
-.pd-nuevo-modal .cj-cart__items { flex: 0 0 auto; overflow: visible; min-height: 0; }
-.pd-nuevo-modal .cj-cart__head,
-.pd-nuevo-modal .cj-cart__foot { flex-shrink: 0; }
-
-@media (max-width: 860px) {
-  .pd-nuevo-modal__body > .cj-nuevo { grid-template-columns: 1fr; grid-auto-rows: minmax(0, 1fr); }
-}
-/* (los estilos base de .np-cart-body / .np-cart-sticky viven en
-   CajeroPage.css, que sí cargan ambas vistas) */

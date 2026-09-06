@@ -211,18 +211,7 @@ export const proveedoresApi = {
 
 // ── INSUMOS ──────────────────────────────────────────────────
 export const insumosApi = {
-  // `opts.local` → GET /insumos?local=<id>: la API devuelve stockActual/
-  // stockMinimo/estadoStock referidos a ese local (cambio 2). Sin él, valores
-  // consolidados. `opts.tipo` → GET /insumos?tipo=topping|adicion_sin_costo
-  // para los selectores filtrados de Ficha Técnica/Toppings/Adiciones (cambio 5).
-  getAll:  (opts = {})  => {
-    const qs = new URLSearchParams();
-    if (opts.local != null && opts.local !== '' && opts.local !== 'todos') qs.set('local', opts.local);
-    if (opts.tipo) qs.set('tipo', opts.tipo);
-    const q = qs.toString();
-    return get(`/insumos${q ? `?${q}` : ''}`);
-  },
-  getByTipo: (tipo)     => get (`/insumos?tipo=${encodeURIComponent(tipo)}`),
+  getAll:  ()       => get ('/insumos'),
   getById: (id)     => get (`/insumos/${id}`),
   create:  (data)   => post('/insumos', data),
   update:  (id, d)  => put (`/insumos/${id}`, d),
@@ -322,15 +311,7 @@ export const devolucionesApi = {
   // sede opcional: mismo criterio que ventasApi.getAll.
   getAll:        (sede)       => get (sede ? `/devoluciones?sede=${encodeURIComponent(sede)}` : '/devoluciones'),
   create:        (data)       => post('/devoluciones', data),
-  // El backend exige `motivo_rechazo` (mínimo 10 caracteres) cuando el estado
-  // es 'rechazada' — ver PATCH /devoluciones/:id/estado. Antes esta función
-  // solo mandaba { estado }, así que TODO rechazo de devolución moría con un
-  // 400 y la devolución nunca cambiaba de estado. Al aprobar no se envía el
-  // campo, igual que antes.
-  cambiarEstado: (id, estado, motivoRechazo) =>
-    patch(`/devoluciones/${id}/estado`, motivoRechazo
-      ? { estado, motivo_rechazo: motivoRechazo }
-      : { estado }),
+  cambiarEstado: (id, estado) => patch(`/devoluciones/${id}/estado`, { estado }),
 };
 
 // ── FICHAS TÉCNICAS ──────────────────────────────────────────

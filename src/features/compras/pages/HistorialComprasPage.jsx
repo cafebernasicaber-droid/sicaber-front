@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import comprasService from '../services/comprasService';
-import localesService from '../../../shared/services/localesService';
 import './ComprasPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
@@ -30,8 +29,8 @@ function ModalVerCompra({ compra, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:680,
-        maxHeight:'calc(100vh - 48px)', overflowY:'auto', overflowX:'hidden',
-        boxShadow:'var(--shadow-lg)', animation:'popIn .22s ease',
+        maxHeight:'90vh', overflowY:'auto', overflowX:'hidden',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
         <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid rgba(255,255,255,.07)' }}>
@@ -237,12 +236,6 @@ const HistorialComprasPage = () => {
   const [verCompra, setVerCompra] = useState(null);
   const [historial, setHistorial] = useState([]);
   const [loading, setLoading]     = useState(true);
-  // batch 5 item 2 — filtro por local en el historial de anuladas.
-  const [locales, setLocales]     = useState([]);
-  const [localFiltro, setLocalFiltro] = useState('todos');
-  useEffect(() => {
-    localesService.getActivos().then(d => setLocales(Array.isArray(d) ? d : [])).catch(() => setLocales([]));
-  }, []);
 
   useEffect(() => {
     let activo = true;
@@ -255,19 +248,13 @@ const HistorialComprasPage = () => {
   }, []);
 
   const filtrado = useMemo(() => {
-    const locSel = locales.find(l => String(l.id) === String(localFiltro));
     return (Array.isArray(historial) ? historial : []).filter(c => {
       const fecha = (c.fecha || c.fechaCreacion || '').substring(0, 10);
       if (desde && fecha < desde) return false;
       if (hasta && fecha > hasta) return false;
-      if (localFiltro !== 'todos') {
-        const cid = String(c.localId ?? c.local_id ?? '');
-        const nom = c.localNombre ?? c.local ?? '';
-        if (cid !== String(localFiltro) && !(locSel && nom === locSel.nombre)) return false;
-      }
       return true;
     });
-  }, [historial, desde, hasta, localFiltro, locales]);
+  }, [historial, desde, hasta]);
 
   const totalHistorial   = filtrado.length;
   const totalAnuladas    = filtrado.filter(c => c.estado === 'anulada').length;
@@ -327,18 +314,8 @@ const HistorialComprasPage = () => {
               onChange={e => { setHasta(e.target.value); }}
               style={{ padding:'6px 10px',borderRadius:8,border:'1px solid var(--border)',fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)' }} />
           </div>
-          {locales.length > 0 && (
-            <div style={{ display:'flex',alignItems:'center',gap:8 }}>
-              <label style={{ fontSize:13,fontWeight:600,color:'var(--text-secondary)' }}>Local:</label>
-              <select value={localFiltro} onChange={e => setLocalFiltro(e.target.value)}
-                style={{ padding:'6px 10px',borderRadius:8,border:'1px solid var(--border)',fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)' }}>
-                <option value="todos">Todos</option>
-                {locales.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-              </select>
-            </div>
-          )}
-          {(desde || hasta || localFiltro !== 'todos') && (
-            <button onClick={() => { setDesde(''); setHasta(''); setLocalFiltro('todos'); }}
+          {(desde || hasta) && (
+            <button onClick={() => { setDesde(''); setHasta(''); }}
               style={{ padding:'6px 14px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg-surface)',color:'var(--text-secondary)',fontSize:13,cursor:'pointer' }}>
               Limpiar filtros
             </button>

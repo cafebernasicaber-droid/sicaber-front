@@ -371,23 +371,6 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .lx-modal__tabs button.on { color: var(--lx-green); border-bottom-color: var(--lx-green); font-weight: 700; }
 .lx-modal__err { background: rgba(198,40,40,.15); color: #EF9A9A; border: 1px solid rgba(198,40,40,.2); padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
 .lx-modal__ok { background: rgba(46,125,50,.2); color: #81C784; border: 1px solid rgba(46,125,50,.2); padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; text-align: center; }
-
-/* Aviso de cobertura del formulario de registro. Sustituye a los campos de
-   Comuna/Dirección: al registrarse ya no se pide ubicación, solo se informa
-   el alcance del domicilio. */
-.lx-reg-cobertura {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 14px; border-radius: 10px;
-  background: rgba(129,199,132,.10);
-  border: 1px solid rgba(129,199,132,.32);
-  color: var(--lx-green);
-}
-.lx-reg-cobertura svg { flex-shrink: 0; margin-top: 1px; }
-.lx-reg-cobertura > div { display: flex; flex-direction: column; gap: 3px; }
-.lx-reg-cobertura strong { font-size: 12.5px; font-weight: 700; color: var(--lx-text); line-height: 1.35; }
-.lx-reg-cobertura span { font-size: 11.5px; color: var(--lx-muted); line-height: 1.45; }
-.lx-reg-cobertura b { color: var(--lx-text); font-weight: 700; }
-
 .lx-form { display: flex; flex-direction: column; gap: 14px; }
 .lx-form__2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .lx-field { display: flex; flex-direction: column; gap: 5px; }
@@ -885,33 +868,6 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .lx-hero__h1 em { color: #5DBB63 !important; text-shadow: 0 0 28px rgba(93,187,99,0.5), 0 0 60px rgba(93,187,99,0.2) !important; font-style: normal; }
 .lx-hero__p { color: rgba(255,255,255,0.72) !important; }
 .lx-hero__pill { color: #A5D6A7 !important; border-color: rgba(93,187,99,0.5) !important; }
-
-/* ── item 3 — Cerrar sesión: botón circular independiente, mismo
-   tratamiento que .lx-theme-toggle, hover en rojo ─────────── */
-.lx-icon-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 50%;
-  border: 1.5px solid rgba(255,255,255,0.22);
-  background: rgba(255,255,255,0.09);
-  color: rgba(255,255,255,0.78);
-  cursor: pointer; flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-.lx-logout-btn:hover {
-  background: rgba(239,83,80,0.18);
-  border-color: #EF5350;
-  color: #EF9A9A;
-}
-[data-theme="light"] .lx-nav--solid .lx-icon-btn {
-  border-color: rgba(0,0,0,0.15);
-  background: rgba(0,0,0,0.04);
-  color: #444;
-}
-[data-theme="light"] .lx-nav--solid .lx-logout-btn:hover {
-  background: rgba(239,83,80,0.12);
-  border-color: #EF5350;
-  color: #C62828;
-}
 
 /* ── THEME TOGGLE en navbar ──────────────────────────────── */
 .lx-theme-toggle {

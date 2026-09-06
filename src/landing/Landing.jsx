@@ -181,12 +181,6 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
   const [step, setStep] = useState(1);
   const [tipoEntrega, setTipoEntrega] = useState('');
   const [direccionAlternativa, setDireccionAlternativa] = useState('');
-  // La dirección dejó de venir del perfil del cliente (el registro ya no la
-  // pide), así que se captura acá y es obligatoria para todo pedido a
-  // domicilio. `direccionTocada` evita mostrar el error antes de que el
-  // usuario haya interactuado con el campo.
-  const [direccionTocada, setDireccionTocada] = useState(false);
-  const direccionValida = direccionAlternativa.trim().length >= 8;
   // Local físico donde el cliente recogerá su pedido (GET /locales) —
   // solo aplica cuando tipoEntrega === 'local'. Se carga una sola vez al
   // abrir la pasarela, igual que el resto de catálogos de este flujo.
@@ -268,10 +262,8 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     const filas = generarFilasFactura();
     const lineas = filas.map(f => f.precio > 0 ? `${f.desc}: ${fmt(f.precio)}` : f.desc).join('\n');
     const entregaTxt = tipoEntrega === 'domicilio' ? 'A domicilio 🛵' : `Recoger en el local 🏠${localSel ? ` — ${localSel.nombre}` : ''}`;
-    // El perfil del cliente ya no guarda dirección (el registro no la pide):
-    // la única fuente es la que se capturó en el paso 2, que es obligatoria.
     const direccionTxt = tipoEntrega === 'domicilio'
-      ? (direccionAlternativa.trim() || 'No especificada')
+      ? (direccionAlternativa || cliente?.direccion || 'No especificada')
       : null;
     return encodeURIComponent(
       `*Nuevo pedido — Café Don Berna*\n` +
@@ -370,15 +362,6 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     // 2 — respaldo: el botón "Continuar" del paso 2 ya bloquea avanzar sin
     // local elegido, esto es solo defensa adicional antes de confirmar.
     if (tipoEntrega === 'local' && !localId) return;
-    // Mismo respaldo para el domicilio: sin dirección no se registra el
-    // pedido. El paso 2 ya lo impide, esto cubre el caso de que se llegue
-    // acá por otro camino (ej. volver atrás y cambiar el tipo de entrega).
-    if (tipoEntrega === 'domicilio' && !direccionValida) {
-      setDireccionTocada(true);
-      setErrorPedido('Falta la dirección de entrega. Vuelve al paso "Dirección" y complétala.');
-      setStep(2);
-      return;
-    }
     if (metodo !== 'efectivo' && modoComprobante === 'archivo' && !archivo) return;
     if (metodo !== 'efectivo' && modoComprobante === 'archivo' && !ocrOk) return;
     if (metodo !== 'efectivo' && modoComprobante === 'whatsapp' && !waSent) return;
@@ -418,7 +401,7 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
         comprobanteVerificadoOcr: modoComprobante === 'archivo' ? ocrOk : false,
         comprobanteTotalOcr: modoComprobante === 'archivo' ? ocrTotalDetectado : null,
         origen: 'landing',
-        direccionAlternativa: tipoEntrega === 'domicilio' ? (direccionAlternativa.trim() || null) : null,
+        direccionAlternativa: tipoEntrega === 'domicilio' ? (direccionAlternativa || null) : null,
         // 3 — local elegido (solo aplica a tipo:'local'), va junto al
         // resto de datos del pedido.
         localId: tipoEntrega === 'local' ? localId : null,
@@ -600,35 +583,14 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                   <span className="pay-coverage-alert__icon">📍</span>
                   <p>Recuerda que por el momento nuestro servicio de domicilios <strong>solo cubre la comuna 8 y 9 de Medellín</strong>.</p>
                 </div>
-                {/* La dirección pasa a ser OBLIGATORIA acá. Antes era
-                    opcional porque el registro ya guardaba una dirección y
-                    esto solo servía para cambiarla; ahora el registro no
-                    pide ubicación, así que este es el único punto donde se
-                    captura y sin ella el domicilio no se puede entregar. */}
                 <div className="pay-alt-address">
-                  <label className="pay-alt-address__label">Dirección de entrega <span style={{color:'#EF5350'}}>*</span></label>
-                  <p className="pay-alt-address__hint">Escribe la dirección exacta donde quieres recibir tu pedido. Incluye barrio, apartamento o punto de referencia si aplica.</p>
-                  <input
-                    type="text"
-                    className="pay-alt-address__input"
-                    style={direccionTocada && !direccionValida ? {borderColor:'#EF5350'} : undefined}
-                    placeholder="Ej: Calle 45 #23-10, apto 301, Villa Hermosa"
-                    value={direccionAlternativa}
-                    onChange={e => setDireccionAlternativa(e.target.value)}
-                    onBlur={() => setDireccionTocada(true)}
-                  />
-                  {direccionTocada && !direccionValida && (
-                    <p style={{fontSize:12,color:'#EF5350',marginTop:6,marginBottom:0,fontWeight:600}}>
-                      La dirección es obligatoria y debe tener al menos 8 caracteres.
-                    </p>
-                  )}
+                  <label className="pay-alt-address__label">¿Deseas recibir el pedido en otra dirección? <span style={{fontWeight:400,color:'var(--lx-muted)'}}>(Opcional)</span></label>
+                  <p className="pay-alt-address__hint">Si tu pedido debe entregarse en una dirección diferente a la que tienes registrada, puedes escribirla aquí.</p>
+                  <input type="text" className="pay-alt-address__input" placeholder="Ej: Calle 45 #23-10, apto 301" value={direccionAlternativa} onChange={e => setDireccionAlternativa(e.target.value)}/>
                 </div>
                 <div style={{display:"flex",gap:12,marginTop:8}}>
                   <button className="btn-cancel" onClick={() => setStep(1)}>← Atrás</button>
-                  <button className="lx-btn" style={{flex:1,justifyContent:"center"}}
-                    disabled={!direccionValida}
-                    title={!direccionValida ? 'Escribe la dirección de entrega para continuar' : undefined}
-                    onClick={() => { setDireccionTocada(true); if (direccionValida) setStep(3); }}>Continuar →</button>
+                  <button className="lx-btn" style={{flex:1,justifyContent:"center"}} onClick={() => setStep(3)}>Continuar →</button>
                 </div>
               </div>
             )}
@@ -943,13 +905,7 @@ export default function Landing() {
   const [modal, setModal] = useState(null);
   const [authTab, setAuthTab] = useState("login");
   const [loginData, setLoginData] = useState({ correo:"", password:"" });
-  // Registro: ya NO se piden datos de ubicación (departamento, municipio,
-  // comuna ni dirección). Crear la cuenta solo sirve para navegar el
-  // catálogo, así que pedir la dirección acá era pedirla antes de tiempo —
-  // y dejaba fuera a quien vive fuera de la zona de cobertura pero igual
-  // quiere ver el menú o recoger en el local. La dirección se pide UNA vez,
-  // y obligatoria, al momento de hacer el pedido a domicilio (ver PasarelaPago).
-  const [regData, setRegData] = useState({ nombre:"", correo:"", telefono:"", tipoDoc:"Cédula de Ciudadanía", tipoDocOtro:"", numeroDoc:"", password:"", confirm:"" });
+  const [regData, setRegData] = useState({ nombre:"", correo:"", telefono:"", tipoDoc:"Cédula de Ciudadanía", tipoDocOtro:"", numeroDoc:"", departamento:"Antioquia", municipio:"Medellín", comuna:"", direccion:"", password:"", confirm:"" });
   const [authError, setAuthError] = useState("");
   const [authSuccess, setAuthSuccess] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -967,11 +923,10 @@ export default function Landing() {
   const { playTransition } = useTransition();
   const [modalPersonalizar, setModalPersonalizar] = useState(null);
   const [modalDuplicar, setModalDuplicar] = useState(null);
-  // batch 5 item 4 — perfilTab persiste mientras el modal siga abierto
-  // (info | historial | editar). El dropdown se eliminó por completo.
   const [perfilTab, setPerfilTab] = useState("info");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
   const [editData, setEditData] = useState({});
-  const [editDataOrig, setEditDataOrig] = useState({});
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
   const [editLoading, setEditLoading] = useState(false);
@@ -1102,16 +1057,12 @@ export default function Landing() {
     return () => clearTimeout(t);
   }, [pagoNotif]);
 
-  // batch 5 item 4 — cerrar el modal de perfil con Escape (X y click en el
-  // fondo ya existen). Si hay cambios sin guardar en "Editar datos", pide
-  // confirmación (misma lógica que cerrarPerfil).
   useEffect(() => {
-    if (modal !== "perfil") return;
-    const onKey = (e) => { if (e.key === "Escape") cerrarPerfil(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line
-  }, [modal, perfilTab, editData, editDataOrig]);
+    if (!userMenuOpen) return;
+    const onDocClick = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [userMenuOpen]);
 
   useEffect(() => {
     if (!clienteSession) { setPedidosCliente([]); setClienteData(null); return; }
@@ -1440,28 +1391,16 @@ export default function Landing() {
     }
   };
 
-  // `tab` opcional: si no se pasa, se respeta la sección en la que estaba
-  // (item 4 — "recordar en qué sección estaba mientras el modal siga abierto").
-  const abrirPerfil = async (tab) => {
-    playTransition(() => { if (tab) setPerfilTab(tab); setEditError(""); setEditSuccess(""); setModal("perfil"); });
+  const abrirPerfil = async (tab = "info") => {
+    playTransition(() => { setPerfilTab(tab); setEditError(""); setEditSuccess(""); setModal("perfil"); setUserMenuOpen(false); });
     try {
       const c = await clientesService.getById(clienteSession.id);
       if (c) {
         setClienteData(c);
-        const ed = { nombre: c.nombre, telefono: c.telefono||"", direccion: c.direccion||"", comuna: c.comuna||"", departamento: "Antioquia", municipio: "Medellín" };
-        setEditData(ed);
-        setEditDataOrig(ed);
+        setEditData({ nombre: c.nombre, telefono: c.telefono||"", direccion: c.direccion||"", comuna: c.comuna||"", departamento: "Antioquia", municipio: "Medellín" });
       }
     } catch {}
-  };
-
-  // item 4 — cierre con confirmación si hay cambios sin guardar en "Editar".
-  const perfilTieneCambios = () =>
-    perfilTab === "editar" && JSON.stringify(editData) !== JSON.stringify(editDataOrig);
-  const cerrarPerfil = () => {
-    if (perfilTieneCambios() && !window.confirm("Tienes cambios sin guardar en tus datos. ¿Cerrar de todas formas?")) return;
-    setModal(null);
-  };
+};
 
   const handleEditPerfil = async e => {
     e.preventDefault(); setEditError(""); setEditSuccess("");
@@ -1472,7 +1411,6 @@ export default function Landing() {
       const updated = { ...clienteSession, nombre: r.nombre || editData.nombre };
       setClienteSession(updated);
       localStorage.setItem("sicaber_cliente_session", JSON.stringify(updated));
-      setEditDataOrig(editData);
       setEditSuccess("¡Datos actualizados correctamente!"); setEditLoading(false);
     } catch(e) {
       setEditError(e.message || "Error al actualizar."); setEditLoading(false);
@@ -1530,14 +1468,13 @@ const handleLogin = async e => {
     if (errPw) { setAuthError(errPw); return; }
     if (!regData.confirm) { setAuthError("Debes confirmar la contraseña."); return; }
     if (regData.password !== regData.confirm) { setAuthError("Las contraseñas no coinciden."); return; }
-    // Ya no se valida la comuna acá: el registro no pide ubicación. La
-    // restricción de cobertura se aplica donde de verdad importa — al
-    // pedir a domicilio (PasarelaPago, paso "Dirección").
+    if (regData.municipio === 'Medellín' && regData.comuna && regData.comuna !== 'Comuna 8 - Villa Hermosa' && regData.comuna !== 'Comuna 9 - Buenos Aires') {
+      setAuthError('Lo sentimos, el servicio de domicilios solo está disponible para las comunas 8 y 9 de Medellín. Si tu dirección es de otra zona, puedes visitarnos en nuestro punto físico.');
+      return;
+    }
     const tipoDocFinal = regData.tipoDoc === 'Otros' ? regData.tipoDocOtro.trim() : regData.tipoDoc;
     setAuthLoading(true);
-    // departamento/municipio/comuna/direccion ya no se envían: el backend
-    // los inserta como NULL (todos son opcionales en POST /auth/cliente/registro).
-    const r = await clientesService.register({ nombre:regData.nombre, correo:regData.correo, telefono:regData.telefono, tipoDoc:tipoDocFinal, numeroDoc:regData.numeroDoc, password:regData.password });
+    const r = await clientesService.register({ nombre:regData.nombre, correo:regData.correo, telefono:regData.telefono, tipoDoc:tipoDocFinal, numeroDoc:regData.numeroDoc, departamento:regData.departamento, municipio:regData.municipio, comuna:regData.comuna, direccion:regData.direccion, password:regData.password });
     if (r.error) { setAuthError(r.error); setAuthLoading(false); return; }
     setAuthLoading(false);
     playTransition(() => { setModal(null); navigate('/verificar-cuenta', { state: { correo: regData.correo } }); }, { message: '¡Cuenta creada!' });
@@ -1557,39 +1494,24 @@ const handleLogin = async e => {
   return (
     <div className="lx">
       {toast && <div className="lx-toast">{toast}</div>}
-      {pagoNotif && (() => {
-        // Antes esto era un encadenado de ternarios sobre `tipo` con un
-        // respaldo a "¡Pago confirmado!", así que CUALQUIER tipo que no
-        // estuviera contemplado —incluidos los de devolución— se le mostraba
-        // al cliente como si le hubieran confirmado un pago. Ahora cada tipo
-        // trae su propio título y solo los negativos usan el estilo en rojo.
-        const NOTIF_CFG = {
-          pago_aprobado:        { titulo: '¡Pago confirmado!',     negativo: false },
-          pago_rechazado:       { titulo: 'Pago rechazado',        negativo: true  },
-          pedido_anulado:       { titulo: 'Pedido anulado',        negativo: true  },
-          devolucion_aprobada:  { titulo: 'Devolución aprobada',   negativo: false },
-          devolucion_rechazada: { titulo: 'Devolución rechazada',  negativo: true  },
-        };
-        const cfg = NOTIF_CFG[pagoNotif.tipo] || { titulo: 'Novedad en tu pedido', negativo: false };
-        return (
+      {pagoNotif && (
         <div className="lx-paynotif" role="alert">
-          <div className="lx-paynotif__icon" style={cfg.negativo?{background:'#FFEBEE',color:'#EF5350'}:{background:'#E8F5E9',color:'#2E7D32'}}>
-            {cfg.negativo ? (
+          <div className="lx-paynotif__icon" style={(pagoNotif.tipo==='pago_rechazado'||pagoNotif.tipo==='pedido_anulado')?{background:'#FFEBEE',color:'#EF5350'}:{background:'#E8F5E9',color:'#2E7D32'}}>
+            {(pagoNotif.tipo==='pago_rechazado'||pagoNotif.tipo==='pedido_anulado') ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             ) : (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             )}
           </div>
           <div className="lx-paynotif__body">
-            <strong>{cfg.titulo}</strong>
+            <strong>{pagoNotif.tipo==='pago_rechazado' ? 'Pago rechazado' : pagoNotif.tipo==='pedido_anulado' ? 'Pedido anulado' : '¡Pago confirmado!'}</strong>
             <p>{pagoNotif.mensaje}</p>
           </div>
           <button className="lx-paynotif__x" onClick={() => setPagoNotif(null)} aria-label="Cerrar">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
-        );
-      })()}
+      )}
       {showPasarela && clienteSession && (
         <PasarelaPago cart={cart} total={cartTotal} cliente={clienteSession} onClose={() => setShowPasarela(false)} onSuccess={onPedidoSuccess} onCerrarFinal={() => playTransition(() => onPedidoSuccess())}/>
       )}
@@ -1624,28 +1546,44 @@ const handleLogin = async e => {
           </div>
           <div className="lx-nav__right">
             {clienteSession ? (
-              <>
-                {/* item 4 — el bloque de perfil abre el modal con las 3
-                    secciones (sin dropdown). */}
-                <div className="lx-user-info" role="button" tabIndex={0}
-                  style={{cursor:"pointer"}}
-                  onClick={() => abrirPerfil()}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirPerfil(); } }}
-                  aria-label="Abrir mi perfil">
-                  <span className="lx-user-avatar">{clienteSession.nombre.charAt(0).toUpperCase()}</span>
-                  <div className="lx-user-text">
-                    <span className="lx-user-welcome">Hola,</span>
-                    <span className="lx-user-name">{clienteSession.nombre.split(" ")[0]}</span>
-                  </div>
+              <div className="lx-user-info" ref={userMenuRef} style={{position:'relative'}}>
+                <button className="lx-user-avatar lx-user-avatar--btn" onClick={() => setUserMenuOpen(o => !o)}>{clienteSession.nombre.charAt(0).toUpperCase()}</button>
+                <div className="lx-user-text" style={{cursor:"pointer"}} onClick={() => setUserMenuOpen(o => !o)}>
+                  <span className="lx-user-welcome">Hola,</span>
+                  <span className="lx-user-name">{clienteSession.nombre.split(" ")[0]}</span>
                 </div>
-                {/* item 3 — Cerrar sesión: botón independiente a la derecha del
-                    perfil, solo ícono (puerta con flecha), mismo tratamiento
-                    que los botones circulares de al lado. */}
-                <button className="lx-icon-btn lx-logout-btn" onClick={() => setModal("logout")}
-                  title="Cerrar sesión" aria-label="Cerrar sesión">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                </button>
-              </>
+                <svg className="lx-user-chevron" style={{transform: userMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform .2s'}} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" onClick={() => setUserMenuOpen(o => !o)}><polyline points="6 9 12 15 18 9"/></svg>
+
+                {userMenuOpen && (
+                  <div className="lx-user-dropdown" onClick={e => e.stopPropagation()}>
+                    <div className="lx-user-dropdown__head">
+                      <div className="lx-user-dropdown__avatar">{clienteSession.nombre.charAt(0).toUpperCase()}</div>
+                      <div>
+                        <div className="lx-user-dropdown__name">{clienteSession.nombre}</div>
+                        <div className="lx-user-dropdown__email">{clienteSession.correo}</div>
+                      </div>
+                    </div>
+                    <div className="lx-user-dropdown__divider"/>
+                    <button className="lx-user-dropdown__item" onClick={() => abrirPerfil("info")}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                      <span>Mi perfil</span>
+                    </button>
+                    <button className="lx-user-dropdown__item" onClick={() => { setUserMenuOpen(false); navigate('/mis-pedidos'); }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                      <span>Historial</span>
+                    </button>
+                    <button className="lx-user-dropdown__item" onClick={() => abrirPerfil("editar")}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      <span>Editar datos</span>
+                    </button>
+                    <div className="lx-user-dropdown__divider"/>
+                    <button className="lx-user-dropdown__item lx-user-dropdown__item--danger" onClick={() => { setUserMenuOpen(false); setModal("logout"); }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                      <span>Cerrar sesión</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <button className="lx-nav__ghost" onClick={() => { setModal("auth"); setAuthTab("login"); }}>Ingresar</button>
@@ -2222,18 +2160,24 @@ const handleLogin = async e => {
                   <div className="lx-field"><label>Teléfono</label><input type="tel" inputMode="numeric" placeholder="Solo números" value={regData.telefono} onChange={e=>setRegData({...regData,telefono:e.target.value.replace(/[^0-9]/g,'').slice(0, 10)})}/></div>
                 </div>
                 <div className="lx-field"><label>Correo *</label><input type="text" value={regData.correo} onChange={e=>setRegData({...regData,correo:e.target.value})}/></div>
-                {/* Aviso de cobertura. Reemplaza a los campos de Comuna y
-                    Dirección, que ya no se piden al registrarse: cualquiera
-                    puede crear su cuenta y ver el catálogo completo, y la
-                    dirección se pide (obligatoria) recién al hacer un pedido
-                    a domicilio. */}
-                <div className="lx-reg-cobertura">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                  <div>
-                    <strong>Puedes registrarte y ver todo nuestro catálogo</strong>
-                    <span>Nuestro servicio a domicilio cubre por ahora solo las <b>comunas 8 y 9 de Medellín</b>. Si estás fuera de esa zona podrás navegar el menú, pero no realizar pedidos a domicilio — siempre puedes recoger en el local.</span>
-                  </div>
+                <div style={{display:'flex',alignItems:'flex-start',gap:8,padding:'10px 12px',borderRadius:8,background:'rgba(129,199,132,0.12)',border:'1px solid rgba(129,199,132,0.35)',marginBottom:4}}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#66BB6A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  <span style={{fontSize:11.5,color:'var(--lx-text)',lineHeight:1.4}}>Actualmente solo prestamos servicio en Medellín, específicamente en las comunas 8 y 9.</span>
                 </div>
+                <div className="lx-form__2">
+                  <div className="lx-field">
+                    <label>Comuna <span style={{fontSize:11,color:'var(--lx-muted)',fontWeight:400}}>(domicilios solo comunas 8 y 9)</span></label>
+                    <select value={regData.comuna} onChange={e=>setRegData({...regData,comuna:e.target.value})}>
+                      <option value="">Seleccionar comuna...</option>
+                      <option value="Comuna 8 - Villa Hermosa">Comuna 8 - Villa Hermosa</option>
+                      <option value="Comuna 9 - Buenos Aires">Comuna 9 - Buenos Aires</option>
+                    </select>
+                  </div>
+                  <div className="lx-field"><label>Dirección</label><input type="text" value={regData.direccion} placeholder="Ej: Calle 10 # 43-20" onChange={e=>setRegData({...regData,direccion:e.target.value})}/></div>
+                </div>
+                {(regData.comuna === 'Comuna 8 - Villa Hermosa' || regData.comuna === 'Comuna 9 - Buenos Aires') && (
+                  <p style={{fontSize:12,color:'#81C784',marginTop:-8,marginBottom:4,fontWeight:600}}>✓ ¡Perfecto! Hacemos domicilios a tu zona.</p>
+                )}
                 <div className="lx-form__2">
                   <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Contraseña segura" value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div><PasswordRequisitos password={regData.password} mostrarSiempre compacto /></div>
                   <div className="lx-field"><label>Confirmar *</label><div className="lx-pass-wrap"><input type={showRegConf?'text':'password'} placeholder="••••••••" value={regData.confirm} onChange={e=>setRegData({...regData,confirm:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegConf(v=>!v)}>{showRegConf?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
@@ -2263,63 +2207,22 @@ const handleLogin = async e => {
         const fmt2 = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
         const cliente = clienteData;        const estadoColor = { pendiente_verificacion:'#F57F17', pendiente:'#f59e0b', en_proceso:'#3b82f6', listo:'#10b981', entregado:'#6b7280', cancelado:'#ef4444' };
         const estadoLabel = { pendiente_verificacion:'Verificando pago', pendiente:'Pendiente', en_proceso:'En proceso', listo:'Listo', entregado:'Entregado', cancelado:'Cancelado' };
-        const perfilTabs = [
-          { key:'info',      label:'Mi perfil' },
-          { key:'historial', label:'Historial' },
-          { key:'editar',    label:'Editar datos' },
-        ];
         return (
-          <div className="lx-modal-mask" onClick={cerrarPerfil}>
-            <div className="lx-modal lx-perfil-modal" onClick={e => e.stopPropagation()} style={{maxWidth:560,width:'95%',maxHeight:'90vh',overflowY:'auto',padding:'32px 28px'}}>
-              <button className="lx-modal__x" onClick={cerrarPerfil}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-              <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:18}}>
+          <div className="lx-modal-mask" onClick={() => setModal(null)}>
+            <div className="lx-modal lx-perfil-modal" onClick={e => e.stopPropagation()} style={{maxWidth:520,width:'95%',maxHeight:'90vh',overflowY:'auto',padding:'32px 28px'}}>
+              <button className="lx-modal__x" onClick={() => setModal(null)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+              <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:20}}>
                 <div style={{width:60,height:60,borderRadius:'50%',background:'linear-gradient(135deg,#4CAF50,#2e7d32)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,fontWeight:700,color:'white',flexShrink:0}}>{clienteSession.nombre.charAt(0).toUpperCase()}</div>
-                <div style={{minWidth:0}}>
+                <div>
                   <div style={{fontWeight:700,fontSize:18,color:'var(--lx-text)'}}>{clienteSession.nombre}</div>
-                  <div style={{fontSize:13,color:'var(--lx-muted)',wordBreak:'break-all'}}>{cliente?.correo || clienteSession.correo}</div>
+                  <div style={{fontSize:13,color:'var(--lx-muted)'}}>{cliente?.correo}</div>
                   <div style={{fontSize:11,color:'#4CAF50',fontWeight:600,marginTop:2}}>● Cliente activo</div>
                 </div>
               </div>
-              {/* item 4 — pestañas navegables dentro del mismo modal */}
-              <div className="lx-perfil-tabs" style={{display:'flex',gap:4,marginBottom:20,borderBottom:'2px solid var(--lx-border)'}}>
-                {perfilTabs.map(t => (
-                  <button key={t.key} type="button" onClick={() => setPerfilTab(t.key)}
-                    style={{
-                      flex:1, padding:'10px 6px', background:'none', border:'none', cursor:'pointer',
-                      fontSize:13, fontWeight:700,
-                      color: perfilTab === t.key ? 'var(--lx-green)' : 'var(--lx-muted)',
-                      borderBottom: perfilTab === t.key ? '2px solid var(--lx-green)' : '2px solid transparent',
-                      marginBottom:-2,
-                    }}>
-                    {t.label}
-                  </button>
-                ))}
+              <div style={{display:'flex',alignItems:'center',gap:8,paddingBottom:14,marginBottom:20,borderBottom:'2px solid var(--lx-border)'}}>
+                {perfilTab==='info' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--lx-green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span style={{fontSize:15,fontWeight:700,color:'var(--lx-text)'}}>Mi perfil</span></>}
+                {perfilTab==='editar' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--lx-green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg><span style={{fontSize:15,fontWeight:700,color:'var(--lx-text)'}}>Editar mis datos</span></>}
               </div>
-              {perfilTab === "historial" && (
-                <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                  {(pedidosCliente || []).length === 0 ? (
-                    <div style={{textAlign:'center',padding:'24px 0',color:'var(--lx-muted)',fontSize:13}}>Todavía no tienes pedidos.</div>
-                  ) : (
-                    <>
-                      {pedidosCliente.slice(0,8).map(p => (
-                        <div key={p.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'12px 14px',background:'rgba(128,128,128,.06)',borderRadius:10,border:'1px solid var(--lx-border)'}}>
-                          <div style={{minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>Pedido #{p.id}</div>
-                            <div style={{fontSize:11.5,color:'var(--lx-muted)'}}>{p.created_at ? new Date(p.created_at).toLocaleDateString('es-CO',{day:'numeric',month:'short',year:'numeric'}) : '—'}</div>
-                          </div>
-                          <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
-                            <span style={{fontSize:11,fontWeight:700,color: estadoColor[p.estado] || '#6b7280'}}>{estadoLabel[p.estado] || p.estado}</span>
-                            <span style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>{fmt2(p.total)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      <button className="lx-btn lx-btn--sm" style={{justifyContent:'center',marginTop:4}} onClick={() => { setModal(null); navigate('/mis-pedidos'); }}>
-                        Ver historial completo →
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
               {perfilTab === "info" && (
                 <div style={{display:'flex',flexDirection:'column',gap:14}}>
                   {[

@@ -1,7 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
 import useInsumos from '../hooks/useInsumos';
-import localesService from '../../../shared/services/localesService';
 import useCategoriasInsumos from '../hooks/useCategoriasInsumos';
 import comprasService from '../../compras/services/comprasService';
 import InsumoForm from '../components/InsumoForm';
@@ -11,83 +9,6 @@ import './InsumosPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
-import { estadoStockDe, tiposUsoDe, TIPO_USO_LABELS, STOCK_BAJO, STOCK_SIN, STOCK_OK, insumoEnLocal } from '../../../shared/constants/insumoTipos';
-
-const fmtNum = n => {
-  const v = Number(n) || 0;
-  return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
-};
-
-// Desglose por local completo: todos los locales ACTIVOS, con 0/0 para los
-// que el insumo no tiene fila insumo_local (nunca ausentes).
-function desgloseCompleto(insumo, locales) {
-  const filas = insumo?.desglose || [];
-  return (locales || []).map(l => {
-    const row = filas.find(d => String(d.localId) === String(l.id));
-    return {
-      localId: String(l.id),
-      localNombre: l.nombre,
-      stockActual: row ? row.stockActual : 0,
-      stockMinimo: row ? row.stockMinimo : 0,
-      estadoStock: row ? (row.estadoStock || estadoStockDe(row)) : STOCK_SIN,
-    };
-  });
-}
-
-const ESTADO_STOCK_META = {
-  [STOCK_SIN]:  { label: 'Agotado',      fg: '#EF5350', bg: 'rgba(229,57,53,0.12)',  bd: '#EF9A9A' },
-  [STOCK_BAJO]: { label: 'Por agotarse', fg: '#E65100', bg: 'rgba(230,115,0,0.15)',  bd: '#FFCC80' },
-  [STOCK_OK]:   { label: 'Disponible',   fg: '#2E7D32', bg: 'rgba(76,175,80,0.14)',  bd: 'rgba(76,175,80,0.45)' },
-};
-function EstadoStockBadge({ estado }) {
-  const m = ESTADO_STOCK_META[estado] || ESTADO_STOCK_META[STOCK_OK];
-  return (
-    <span style={{ padding:'1px 8px', borderRadius:20, fontSize:11, fontWeight:700, background:m.bg, color:m.fg, border:`1px solid ${m.bd}` }}>
-      {m.label}
-    </span>
-  );
-}
-
-// Cambio 4 — badges de tipo de uso (Insumo normal / Adición sin costo / Topping)
-// para el listado. Colores propios, legibles en claro y oscuro.
-// Nota: la etiqueta que ve el usuario está en TIPO_USO_LABELS (es_adicion_sin_costo
-// → "Topping" gratis; es_topping → "Adición" con costo). Los colores siguen a la
-// etiqueta: morado = Topping, azul = Adición.
-const TIPO_BADGE_STYLE = {
-  es_insumo:            { bg:'rgba(76,175,80,0.14)',  fg:'#2E7D32', bd:'rgba(76,175,80,0.45)' },
-  es_adicion_sin_costo: { bg:'rgba(142,36,170,0.14)', fg:'#8E24AA', bd:'rgba(142,36,170,0.45)' },
-  es_topping:           { bg:'rgba(3,155,229,0.14)',  fg:'#0277BD', bd:'rgba(3,155,229,0.45)' },
-};
-function TiposUsoBadges({ insumo }) {
-  const t = tiposUsoDe(insumo);
-  const activos = Object.keys(TIPO_USO_LABELS).filter(k => t[k]);
-  if (activos.length === 0) return null;
-  return (
-    <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginTop:4 }}>
-      {activos.map(k => {
-        const s = TIPO_BADGE_STYLE[k];
-        return (
-          <span key={k} style={{
-            padding:'1px 7px', borderRadius:20, fontSize:10.5, fontWeight:700,
-            background:s.bg, color:s.fg, border:`1px solid ${s.bd}`,
-          }}>{TIPO_USO_LABELS[k]}</span>
-        );
-      })}
-    </div>
-  );
-}
-
-// Emoji ⚠️ antes del nombre cuando el estado de stock que devuelve la API es
-// "bajo". El tooltip nativo (title) se ve bien en claro y oscuro sin CSS extra.
-function AvisoStockBajo({ insumo }) {
-  return (
-    <span
-      title={`Quedan ${Math.max(0, Number(insumo.stockActual) || 0)} ${insumo.unidadMedida || ''} (mínimo: ${insumo.stockMinimo})`}
-      aria-label={`Stock bajo: quedan ${Math.max(0, Number(insumo.stockActual) || 0)} (mínimo ${insumo.stockMinimo})`}
-      style={{ cursor:'help', marginRight:6, fontSize:14, lineHeight:1 }}
-    >⚠️</span>
-  );
-}
 
 const formatCOP = v =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(v || 0);
@@ -95,23 +16,14 @@ const formatDate = iso =>
   iso ? new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso)) : '—';
 
 // ── Modal: Ver insumo ─────────────────────────────────────────────────────────
-function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, onToggle, deshabilitarEliminar }) {
-  // Cambio 1 — estado de stock según la API. Rojo solo para "sin_stock";
-  // "bajo" se muestra en naranja (nunca rojo).
-  const estadoStk = estadoStockDe(insumo);
-  const esSin  = estadoStk === STOCK_SIN;
-  const esBajo = estadoStk === STOCK_BAJO;
-  const stockOk = !esSin && !esBajo;
-  const stockColor = stockOk ? '#81C784' : (esSin ? '#EF5350' : '#E65100');
-  // batch 3 item 4 — desglose de stock por local (local, actual, mínimo,
-  // estado). El estado de cada fila se evalúa por local, nunca sumando.
-  const desglose = desgloseCompleto(insumo, locales);
+function ModalVerInsumo({ insumo, onClose, onEditar, onEliminar, onToggle, deshabilitarEliminar }) {
+  const stockOk = insumo.stockActual >= insumo.stockMinimo;
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:640,
         maxHeight:'88vh', overflowY:'auto', overflowX:'hidden',
-        boxShadow:'var(--shadow-lg)', animation:'popIn .22s ease',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px 16px', borderBottom:'1px solid var(--border)' }}>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
@@ -125,10 +37,8 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
               <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
                 <span className="badge-cat">{insumo.categoria}</span>
                 <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:insumo.estado==='Activo'?'#E8F5E9':'#F5F5F5',color:insumo.estado==='Activo'?'#2E7D32':'#888',border:`1px solid ${insumo.estado==='Activo'?'#A5D6A7':'#ccc'}` }}>{insumo.estado==='Activo'?'Activo':'Inactivo'}</span>
-                {esSin && <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>Sin stock</span>}
-                {esBajo && <span title={`Quedan ${Math.max(0, Number(insumo.stockActual)||0)} ${insumo.unidadMedida||''} (mínimo: ${insumo.stockMinimo})`} style={{ cursor:'help',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(230,115,0,0.15)',color:'#E65100',border:'1px solid #FFCC80' }}>⚠️ Stock bajo</span>}
+                {!stockOk && <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(230,115,0,0.15)',color:'#FF8A65',border:'1px solid #FFCC80' }}>⚠ Stock bajo</span>}
               </div>
-              <TiposUsoBadges insumo={insumo} />
             </div>
           </div>
           <button onClick={onClose} style={{ width:34,height:34,borderRadius:'50%',border:'none',background:'var(--bg-hover)',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0 }}>
@@ -160,8 +70,8 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
             <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Stock & Precio</div>
               {[
-                ['Stock actual', <span style={{ fontWeight:800,fontSize:15,color:stockColor }}>{insumo._consolidado ? 'Total ' : ''}{fmtNum(insumo.stockActual)} {insumo.unidadMedida}</span>],
-                ['Stock mínimo', insumo._consolidado ? <span style={{ color:'var(--text-muted)' }}>ver desglose ↓</span> : `${fmtNum(insumo.stockMinimo)} ${insumo.unidadMedida}`],
+                ['Stock actual', <span style={{ fontWeight:800,fontSize:15,color:stockOk?'#81C784':'#EF5350' }}>{insumo.stockActual} {insumo.unidadMedida}</span>],
+                ['Stock mínimo', `${insumo.stockMinimo} ${insumo.unidadMedida}`],
                 ['Último precio pagado', insumo.precioUnitario ? <span style={{ fontWeight:700,color:'#FFCC80' }}>{formatCOP(insumo.precioUnitario)}</span> : <span style={{ color:'var(--text-secondary)' }}>Sin compras aún</span>],
               ].map(([label, val], idx, arr) => (
                 <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom: idx === arr.length - 1 ? 'none' : '1px solid var(--border)',fontSize:13 }}>
@@ -171,47 +81,15 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
               ))}
             </div>
           </div>
-          {/* batch 3 item 4 — Stock por local */}
-          <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:10 }}>Stock por local</div>
-            {desglose.length === 0 ? (
-              <p style={{ fontSize:12, color:'var(--text-muted)', margin:0 }}>No hay locales activos registrados.</p>
-            ) : (
-              <div style={{ display:'grid', gridTemplateColumns:'minmax(110px,1.4fr) 1fr 1fr auto', gap:'6px 10px', fontSize:12.5, alignItems:'center' }}>
-                <div style={{ fontWeight:700, color:'var(--text-muted)' }}>Local</div>
-                <div style={{ fontWeight:700, color:'var(--text-muted)' }}>Actual</div>
-                <div style={{ fontWeight:700, color:'var(--text-muted)' }}>Mínimo</div>
-                <div style={{ fontWeight:700, color:'var(--text-muted)' }}>Estado</div>
-                {desglose.map(d => {
-                  const est = estadoStockDe(d);
-                  return (
-                    <React.Fragment key={d.localId}>
-                      <div style={{ color:'var(--text-primary)', fontWeight:600 }}>{d.localNombre}</div>
-                      <div title={`Quedan ${fmtNum(d.stockActual)} ${insumo.unidadMedida||''} (mínimo: ${fmtNum(d.stockMinimo)})`}
-                        style={{ cursor:'help', color: est===STOCK_SIN ? '#EF5350' : est===STOCK_BAJO ? '#E65100' : 'var(--text-primary)', fontWeight:700 }}>
-                        {est===STOCK_BAJO && '⚠️ '}{fmtNum(d.stockActual)} {insumo.unidadMedida}
-                      </div>
-                      <div>{fmtNum(d.stockMinimo)} {insumo.unidadMedida}</div>
-                      <div><EstadoStockBadge estado={est} /></div>
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:6 }}>Descripción</div>
             <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0,wordBreak:'break-word',overflowWrap:'anywhere' }}>{insumo.descripcion || 'Sin descripción registrada.'}</p>
             <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(insumo.fechaCreacion)}</div>
           </div>
           {!stockOk && (
-            <div style={{ display:'flex',alignItems:'center',gap:10,padding:'12px 16px',
-              background: esSin ? 'rgba(229,57,53,0.10)' : 'rgba(230,115,0,0.10)',
-              border: `1px solid ${esSin ? 'rgba(229,57,53,0.28)' : 'rgba(230,115,0,0.28)'}`,
-              borderRadius:10,marginBottom:14,fontSize:13,color: esSin ? '#C62828' : '#E65100' }}>
+            <div style={{ display:'flex',alignItems:'center',gap:10,padding:'12px 16px',background:'rgba(230,115,0,0.10)',border:'1px solid rgba(230,115,0,0.28)',borderRadius:10,marginBottom:14,fontSize:13,color:'#E65100' }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              <span><strong>{esSin ? 'Sin stock:' : 'Alerta de stock:'}</strong> {esSin ? 'Este insumo está agotado.' : 'El stock actual está por debajo del mínimo requerido.'}</span>
+              <span><strong>Alerta de stock:</strong> El stock actual está por debajo del mínimo requerido.</span>
             </div>
           )}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
@@ -230,7 +108,7 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
 }
 
 // ── Modal: Agregar / Editar insumo ────────────────────────────────────────────
-function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManageCategorias, locales = [], localActivoId }) {
+function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManageCategorias }) {
   const isEdit = !!insumo;
   const [serverError, setServerError] = useState('');
 
@@ -243,8 +121,8 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background:'var(--bg-surface)',borderRadius:18,width:'100%',maxWidth:680,
-        maxHeight:'calc(100vh - 48px)',overflowY:'auto',
-        boxShadow:'var(--shadow-lg)',animation:'popIn .22s ease',
+        maxHeight:'90vh',overflowY:'auto',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)',animation:'popIn .22s ease',
       }}>
         <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid var(--border)' }}>
           <div style={{ display:'flex',alignItems:'center',gap:12 }}>
@@ -268,8 +146,6 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
             initialData={insumo || prefill || undefined}
             isEditing={isEdit}
             serverError={serverError}
-            locales={locales}
-            localActivoId={localActivoId}
             onSubmit={handleSubmit}
             onCancel={onClose}
             onManageCategorias={onManageCategorias}
@@ -380,7 +256,7 @@ function ModalCategoriasInsumo({ onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
-        maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', overflowX: 'hidden', boxShadow: 'var(--shadow-lg)', animation: 'popIn .22s ease',
+        maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar categorías de insumos</div>
@@ -527,7 +403,7 @@ function ModalRecategorizar({ target, categorias, onRecategorizar, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
         background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 460,
-        boxShadow: 'var(--shadow-lg)', animation: 'popIn .22s ease',
+        boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
       }}>
         <div style={{ padding: '22px 24px 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
@@ -609,49 +485,8 @@ const InsumosPage = () => {
   const insumoTieneCompras = (ins) => comprasTodas.some(c => (c.items || []).some(it =>
     it.insumoId ? String(it.insumoId) === String(ins.id) : it.insumo === ins.nombre
   ));
-
-  // ── Pestañas por local (batch 3 item 1 / batch 4 item 1) ──────────────
-  // Locales ACTIVOS desde el CRUD de Locales (módulo Empleados). Si se crea
-  // un local allá, su pestaña aparece sola. Ya NO hay pestaña "Todos": se
-  // trabaja siempre sobre un local concreto. El seleccionado se persiste
-  // en el query param ?local=<id> y en localStorage; por defecto, el
-  // último usado o el primer local activo.
-  const LOCAL_LS_KEY = 'sicaber_insumos_local';
-  const [locales, setLocales] = useState([]);
-  useEffect(() => {
-    // GET /locales ya devuelve solo activos — sin filtro extra en el front
-    // (evita excluir locales por dirección vacía; bug corregido en batch 6).
-    localesService.getActivos()
-      .then(d => setLocales(Array.isArray(d) ? d : []))
-      .catch(() => setLocales([]));
-  }, []);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const lsLocal = (() => { try { return localStorage.getItem(LOCAL_LS_KEY); } catch { return null; } })();
-  const localSel = String(
-    searchParams.get('local') ||
-    (locales.some(l => String(l.id) === String(lsLocal)) ? lsLocal : '') ||
-    locales[0]?.id || ''
-  );
-  const setLocalSel = (id) => {
-    try { localStorage.setItem(LOCAL_LS_KEY, String(id)); } catch { /* noop */ }
-    setSearchParams(prev => {
-      const next = new URLSearchParams(prev);
-      if (!id) next.delete('local'); else next.set('local', String(id));
-      return next;
-    }, { replace: true });
-    setPage(1);
-  };
-  // Al cargar los locales, si el seleccionado no es válido, cae al primero.
-  useEffect(() => {
-    if (!locales.length) return;
-    if (!locales.some(l => String(l.id) === String(localSel))) {
-      setLocalSel(String(locales[0].id));
-    }
-    // eslint-disable-next-line
-  }, [locales]);
-  const localActivoNombre = locales.find(l => String(l.id) === String(localSel))?.nombre || 'Local';
-
   const [query, setQuery]           = useState('');
+  const [filtered, setFiltered]     = useState(null);
   const [tabFiltro, setTabFiltro]   = useState('todos');
   const [soloStockBajo, setSoloStockBajo] = useState(false);
   const [page, setPage]             = useState(1);
@@ -664,30 +499,10 @@ const InsumosPage = () => {
   const [errorMsg, setErrorMsg]     = useState('');
   const searchRef = useRef();
 
-  // Cada insumo, "visto" desde el local activo: stock actual / mínimo /
-  // estado de ESE local (0 / 0 / sin_stock si no tiene movimientos ahí),
-  // o el consolidado en la pestaña "Todos". Todo el pipeline de abajo
-  // (búsqueda, filtros, paginación, alertas, contadores) opera sobre esta
-  // vista, así que respeta el local activo automáticamente.
-  const insumosVista = useMemo(
-    () => (insumos || []).map(i => insumoEnLocal(i, localSel)),
-    [insumos, localSel]
-  );
-
+  const base     = filtered !== null ? filtered : insumos;
   const searched = query.trim() !== '';
-  const q = query.trim().toLowerCase();
-  const base = q
-    ? insumosVista.filter(i =>
-        (i.nombre || '').toLowerCase().includes(q) ||
-        (i.categoria || '').toLowerCase().includes(q))
-    : insumosVista;
 
-  // Cambio 1 / batch 3 item 5 — el estado de stock lo calcula la API POR
-  // LOCAL (estadoStockDe lee ese campo, con fallback a stockActual/
-  // stockMinimo). Nunca se suman locales: 30 kg en uno y 0 en otro → el
-  // segundo aparece en alerta. "bajo" → emoji ⚠️; "sin_stock" → etiqueta roja.
-  const esStockBajo = i => i.estado === 'Activo' && estadoStockDe(i) === STOCK_BAJO;
-  const esSinStock  = i => estadoStockDe(i) === STOCK_SIN;
+  const esStockBajo = i => i.estado === 'Activo' && Number(i.stockActual) <= Number(i.stockMinimo);
 
   const displayedBase = (tabFiltro === 'activos'
     ? base.filter(i => i.estado === 'Activo')
@@ -701,21 +516,31 @@ const InsumosPage = () => {
   const paginated  = displayed.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   useEffect(() => { if (page > 1 && page > totalPages) setPage(Math.max(1, totalPages)); }, [totalPages, page]);
 
-  // Contadores: reflejan el local activo (mismo largo, pero "stock bajo" sí varía).
-  const totalActivos   = insumosVista.filter(i => i.estado === 'Activo').length;
-  const totalInactivos = insumosVista.filter(i => i.estado !== 'Activo').length;
-  const stockBajoList  = insumosVista.filter(esStockBajo);
+  const totalActivos   = insumos.filter(i => i.estado === 'Activo').length;
+  const totalInactivos = insumos.filter(i => i.estado !== 'Activo').length;
+
+  const stockBajoList = insumos.filter(esStockBajo);
 
   const showOk  = msg => { setSuccessMsg(msg); setErrorMsg('');  setTimeout(() => setSuccessMsg(''), 3500); };
   const showErr = msg => { setErrorMsg(msg);  setSuccessMsg(''); setTimeout(() => setErrorMsg(''), 4500); };
   const closeModal = () => { setModal(null); setTarget(null); };
 
+  const buscarInsumos = (texto) => {
+    const term = texto.toLowerCase();
+    return insumos.filter(i =>
+      (i.nombre || '').toLowerCase().includes(term) ||
+      (i.categoria || '').toLowerCase().includes(term)
+    );
+  };
+
   const handleSearch = e => {
     const val = filtrarBusqueda(e.target.value);
     setQuery(val);
+    if (!val.trim()) setFiltered(null);
+    else setFiltered(buscarInsumos(val));
     setPage(1);
   };
-  const clearSearch = () => { setQuery(''); setPage(1); searchRef.current?.focus(); };
+  const clearSearch = () => { setQuery(''); setFiltered(null); setPage(1); searchRef.current?.focus(); };
 
   const handleCreate = async data => {
     const r = await create(data);
@@ -730,6 +555,7 @@ const InsumosPage = () => {
     if (r?.error) return r;
     showOk('Insumo actualizado correctamente.');
     closeModal();
+    if (query.trim()) setFiltered(buscarInsumos(query));
     return r;
   };
 
@@ -740,6 +566,8 @@ const InsumosPage = () => {
       setDeleteTarget(null);
       return;
     }
+    if (query.trim()) setFiltered(buscarInsumos(query));
+    else setFiltered(null);
     showOk(`Insumo "${deleteTarget.nombre}" anulado correctamente.`);
     setDeleteTarget(null);
     if (modal === 'ver') closeModal();
@@ -755,6 +583,7 @@ const InsumosPage = () => {
 
   const handleToggle = async id => {
     await toggleEstado(id);
+    if (query.trim()) setFiltered(buscarInsumos(query));
     if (modal === 'ver' && targetInsumo?.id === id) {
       setTarget(prev => ({ ...prev, estado: prev.estado === 'Activo' ? 'Inactivo' : 'Activo' }));
     }
@@ -770,13 +599,6 @@ const InsumosPage = () => {
     background: tabFiltro === key ? '#388E3C' : '#f0f0f0',
     color: tabFiltro === key ? 'white' : '#555',
     transition: 'all .2s',
-  });
-
-  const localTabStyle = (activo) => ({
-    padding: '8px 16px', borderRadius: 10, border: '1.5px solid ' + (activo ? 'var(--color-green,#388E3C)' : 'var(--border-input)'),
-    cursor: 'pointer', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap',
-    background: activo ? 'var(--color-green,#388E3C)' : 'var(--bg-surface)',
-    color: activo ? '#fff' : 'var(--text-secondary)', transition: 'all .15s',
   });
 
   return (
@@ -802,7 +624,6 @@ const InsumosPage = () => {
         {modal === 'ver' && targetInsumo && (
           <ModalVerInsumo
             insumo={targetInsumo}
-            locales={locales}
             onClose={closeModal}
             onEditar={() => setModal('editar')}
             onEliminar={() => handleEliminarClick(targetInsumo)}
@@ -814,8 +635,6 @@ const InsumosPage = () => {
           <ModalFormInsumo
             insumo={modal === 'editar' ? targetInsumo : null}
             prefill={null}
-            locales={locales}
-            localActivoId={localSel}
             onCreate={handleCreate}
             onUpdate={handleUpdate}
             onClose={closeModal}
@@ -874,95 +693,92 @@ const InsumosPage = () => {
 
         <div className="page-header">
           <h1 className="page-title">Gestión de Insumos</h1>
-          <p className="page-subtitle">
-            Administra los insumos del sistema
-            {locales.length > 0 && <> · <strong>{localActivoNombre}</strong></>}
-          </p>
+          <p className="page-subtitle">Administra los insumos del sistema</p>
         </div>
 
-        {/* item 6 — cada bloque (pestañas / filtros / tabla) en su propia
-            card, con separación vertical del sistema de espaciado. */}
-        <div className="sic-stack">
+        {stockBajoList.length > 0 && (
+          <div style={{
+            marginBottom: 18, borderRadius: 12, padding: '14px 18px',
+            background: 'rgba(230,115,0,0.12)', border: '1.5px solid rgba(230,115,0,0.4)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: 14, fontWeight: 800, color: '#E65100' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>{stockBajoList.length} insumo{stockBajoList.length !== 1 ? 's' : ''} con stock bajo — revisa antes de que se agoten</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {stockBajoList.map(i => (
+                <div key={i.id} style={{
+                  display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 14px', borderRadius: 10,
+                  background: 'var(--bg-surface)', border: '1px solid rgba(230,115,0,0.35)', fontSize: 12, color: '#E65100',
+                }}>
+                  <span style={{ fontWeight: 700 }}>{i.nombre}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>Quedan: <strong style={{ color:'#E65100' }}>{i.stockActual} {i.unidadMedida || ''}</strong> (mínimo: {i.stockMinimo})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-          {/* batch 6 item 2 — pestañas por local (fila superior) + filtros y
-              buscador (fila inferior) en UN solo card, con divisor. */}
-          <div className="sic-block sic-filterbar">
-          <div className="sic-filterbar__row">
-            {locales.map(l => (
-              <button key={l.id} style={localTabStyle(String(localSel) === String(l.id))}
-                onClick={() => setLocalSel(String(l.id))}>
-                {l.nombre}
+        <div style={{ display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center' }}>
+          <button style={tabStyle('todos')} onClick={() => { setTabFiltro('todos'); setPage(1); }}>
+            Todos ({insumos.length})
+          </button>
+          <button style={tabStyle('activos')} onClick={() => { setTabFiltro('activos'); setPage(1); }}>
+            Activos ({totalActivos})
+          </button>
+          <button style={tabStyle('inactivos')} onClick={() => { setTabFiltro('inactivos'); setPage(1); }}>
+            Inactivos ({totalInactivos})
+          </button>
+          <button
+            onClick={() => { setSoloStockBajo(v => !v); setPage(1); }}
+            title={soloStockBajo ? 'Quitar filtro de stock bajo' : 'Mostrar solo insumos con stock bajo'}
+            style={{
+              padding:'7px 18px', borderRadius:20, border:'none', cursor:'pointer', fontWeight:600, fontSize:13,
+              display:'flex', alignItems:'center', gap:6, marginLeft:'auto', transition:'all .2s',
+              background: soloStockBajo ? '#E65100' : '#f0f0f0',
+              color: soloStockBajo ? 'white' : '#555',
+            }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {soloStockBajo ? 'Viendo solo stock bajo' : 'Ver solo stock bajo'} ({stockBajoList.length})
+          </button>
+        </div>
+
+        <div className="insumos-toolbar">
+          <div className="search-wrap" style={{ flex:1,maxWidth:480 }}>
+            <span className="search-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </span>
+            <input
+              ref={searchRef} type="text"
+              placeholder="Buscar por nombre o categoría..." maxLength={70}
+              value={query} onChange={handleSearch}
+              className="search-input"
+            />
+            {query && (
+              <button className="search-clear" onClick={clearSearch} title="Limpiar búsqueda">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
               </button>
-            ))}
-            {locales.length === 0 && (
-              <span style={{ fontSize:12, color:'var(--text-muted)' }}>
-                No hay locales activos. Créalos en Empleados → Locales.
-              </span>
             )}
           </div>
-
-          <div className="sic-filterbar__row sic-filterbar__row--sep">
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-              <button style={tabStyle('todos')} onClick={() => { setTabFiltro('todos'); setPage(1); }}>
-                Todos ({insumosVista.length})
-              </button>
-              <button style={tabStyle('activos')} onClick={() => { setTabFiltro('activos'); setPage(1); }}>
-                Activos ({totalActivos})
-              </button>
-              <button style={tabStyle('inactivos')} onClick={() => { setTabFiltro('inactivos'); setPage(1); }}>
-                Inactivos ({totalInactivos})
-              </button>
-              <button
-                onClick={() => { setSoloStockBajo(v => !v); setPage(1); }}
-                title={soloStockBajo ? 'Quitar filtro de stock bajo' : 'Mostrar solo insumos con stock bajo'}
-                style={{
-                  padding:'7px 18px', borderRadius:20, border:'none', cursor:'pointer', fontWeight:600, fontSize:13,
-                  display:'flex', alignItems:'center', gap:6, transition:'all .2s',
-                  background: soloStockBajo ? '#E65100' : '#f0f0f0',
-                  color: soloStockBajo ? 'white' : '#555',
-                }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                {soloStockBajo ? 'Viendo solo stock bajo' : 'Ver solo stock bajo'} ({stockBajoList.length})
-              </button>
-            </div>
-
-            <div className="search-wrap" style={{ flex:'1 1 240px', minWidth:200, maxWidth:480 }}>
-              <span className="search-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-              </span>
-              <input
-                ref={searchRef} type="text"
-                placeholder="Buscar por nombre o categoría..." maxLength={70}
-                value={query} onChange={handleSearch}
-                className="search-input"
-              />
-              {query && (
-                <button className="search-clear" onClick={clearSearch} title="Limpiar búsqueda">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: 12, marginLeft: 'auto', flexWrap:'wrap' }}>
-              <button className="btn-add" style={{ margin: 0 }} onClick={() => setModal('categorias')}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v4H4z"/><path d="M4 10h10v4H4z"/><path d="M4 16h6v4H4z"/></svg>
-                Gestionar categorías
-              </button>
-              <button className="btn-add" style={{ margin: 0 }} onClick={() => { setTarget(null); setModal('nuevo'); }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                Agregar insumo
-              </button>
-            </div>
+          <div style={{ display: 'flex', gap: 12, marginLeft: 'auto' }}>
+            <button className="btn-add" style={{ margin: 0 }} onClick={() => setModal('categorias')}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v4H4z"/><path d="M4 10h10v4H4z"/><path d="M4 16h6v4H4z"/></svg>
+              Gestionar categorías
+            </button>
+            <button className="btn-add" style={{ margin: 0 }} onClick={() => { setTarget(null); setModal('nuevo'); }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Agregar insumo
+            </button>
           </div>
-          </div>
+        </div>
 
-        <div className="sic-block sic-block--table">
+        <div className="insumos-card">
           {displayed.length === 0 ? (
             <div className="empty-state">
               {searched ? (
@@ -1012,7 +828,7 @@ const InsumosPage = () => {
               )}
             </div>
           ) : (
-            <div className="ins-table-scroll">
+            <div className="table-wrap">
               {searched && (
                 <div className="search-results-info">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1021,61 +837,48 @@ const InsumosPage = () => {
                   {displayed.length} resultado{displayed.length !== 1 ? 's' : ''} para "{query}"
                 </div>
               )}
-              {/* batch 4 item 2 — table-layout:fixed + anchos relativos + truncado;
-                  en angosto se ocultan columnas secundarias (ver InsumosPage.css). */}
-              <table className="insumos-table insumos-table--fixed">
-                <colgroup>
-                  <col style={{ width:'26%' }} />
-                  <col className="col-cat" style={{ width:'16%' }} />
-                  <col className="col-um" style={{ width:'11%' }} />
-                  <col style={{ width:'16%' }} />
-                  <col className="col-min" style={{ width:'13%' }} />
-                  <col style={{ width:'8%' }} />
-                  <col style={{ width:'10%' }} />
-                </colgroup>
+              <table className="insumos-table">
                 <thead>
                   <tr>
-                    <th>Nombre</th><th className="col-cat">Categoría</th>
-                    <th className="col-um">Unidad</th><th>Stock actual</th><th className="col-min">Stock mínimo</th><th>Estado</th><th>Acciones</th>
+                    <th>Nombre</th><th>Categoría</th>
+                    <th>Unidad/Medida</th><th>Stock</th><th>Estado</th><th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginated.map(ins => {
-                    const stockReal = Math.max(0, Number(ins.stockActual) || 0);
-                    const sinStock  = esSinStock(ins);
+                    const stockReal = Math.max(0, ins.stockActual);
+                    const sinStock  = stockReal === 0;
                     const stockBajo = esStockBajo(ins);
                     return (
                       <tr key={ins.id}>
                         <td className="td-nombre">
-                          <span className="td-nombre__line" title={ins.nombre}>
-                            {stockBajo && <AvisoStockBajo insumo={ins} />}
-                            <span className="td-trunc">{ins.nombre}</span>
-                          </span>
-                          <TiposUsoBadges insumo={ins} />
-                          {/* en móvil, la categoría/unidad ocultas se muestran aquí */}
-                          <span className="td-nombre__meta">{ins.categoria} · {ins.unidadMedida}</span>
+                          {ins.nombre}
                         </td>
-                        <td className="col-cat"><span className="badge-cat td-trunc" title={ins.categoria}>{ins.categoria}</span></td>
-                        <td className="col-um">{ins.unidadMedida}</td>
+                        <td><span className="badge-cat">{ins.categoria}</span></td>
+                        <td>{ins.unidadMedida}</td>
                         <td className="td-stock">
                           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-                            <span>{fmtNum(stockReal)} {ins.unidadMedida}</span>
-                            {sinStock && (
+                            <span>{stockReal} {ins.unidadMedida}</span>
+                            {sinStock ? (
                               <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                                 Sin stock
                               </span>
+                            ) : stockBajo && (
+                              <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(230,115,0,0.15)',color:'#E65100',border:'1px solid #FFCC80' }}>
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                Stock bajo
+                              </span>
                             )}
                           </div>
                         </td>
-                        <td className="td-stock col-min"><span>{fmtNum(ins.stockMinimo)} {ins.unidadMedida}</span></td>
-                        <td>
+                        <td >
                           <button className={`toggle-btn ${ins.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
                             onClick={() => handleToggle(ins.id)}>
                             <span className="toggle-thumb"/>
                           </button>
                         </td>
-                        <td>
+                        <td >
                           <div className="actions-group">
                             <Tooltip label="Ver detalle">
                               <button className="btn-accion btn-accion-ver"
@@ -1104,9 +907,9 @@ const InsumosPage = () => {
           )}
 
           {totalPages > 1 && (
-            <div className="sic-pagination" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderTop:'1px solid #f0f0f0', marginTop:4 }}>
               <span style={{ fontSize:13, color:'var(--text-muted)' }}>Mostrando {(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, displayed.length)} de {displayed.length}</span>
-              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+              <div style={{ display:'flex', gap:6 }}>
                 <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1}
                   style={{ padding:'6px 12px', borderRadius:8, border:'1.5px solid var(--border)', background:page===1?'#f5f5f5':'white', color:page===1?'#bbb':'#333', cursor:page===1?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>← Ant.</button>
                 {Array.from({length:totalPages},(_,i)=>i+1).map(n => (
@@ -1120,7 +923,6 @@ const InsumosPage = () => {
               </div>
             </div>
           )}
-        </div>
         </div>
       </div>
     </Layout>

@@ -5,12 +5,6 @@ import { ThemeProvider } from './shared/contexts/ThemeContext';
 import { TransitionProvider } from './shared/contexts/TransitionContext';
 import AppRoutes from './routes';
 import './shared/styles/global.css';
-// Se importa DESPUÉS de global.css a propósito: es la hoja que fija el
-// aspecto final de modales y botones de acción, y necesita quedar de última
-// en el bundle para ganarle a las definiciones repetidas que cada módulo
-// trae en su propio CSS. Ver el encabezado del archivo.
-import './shared/styles/modales.css';
-import './shared/styles/blocks.css';
 
 const ScrollManager = () => {
   const { pathname } = useLocation();

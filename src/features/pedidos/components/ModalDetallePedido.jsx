@@ -147,11 +147,8 @@ export default function ModalDetallePedido({ pedido, onClose, onCambiarEstado, o
         <div className="pd-modal-actions">
           {pedido.estado === 'pendiente_verificacion' && onCambiarEstado && puedeGestionar ? (
             <>
-              {/* Pie de modal: se usan los botones de confirmación estándar
-                  (los mismos de Insumos, Compras, Ventas…), no los de acción
-                  de tabla — .btn-anular y .btn-add pertenecen a las filas. */}
-              <button className="btn-confirm-danger" onClick={() => { onClose(); onRechazarPago ? onRechazarPago(pedido) : onCambiarEstado(pedido.id, 'cancelado'); }}>✕ Rechazar pago</button>
-              <button className="btn-confirm-primary" onClick={() => { onClose(); onAprobarPago ? onAprobarPago(pedido) : onCambiarEstado(pedido.id, 'en_proceso'); }}>✓ Aprobar pago</button>
+              <button className="btn-anular" onClick={() => { onClose(); onRechazarPago ? onRechazarPago(pedido) : onCambiarEstado(pedido.id, 'cancelado'); }}>✕ Rechazar pago</button>
+              <button className="btn-add" onClick={() => { onClose(); onAprobarPago ? onAprobarPago(pedido) : onCambiarEstado(pedido.id, 'en_proceso'); }}>✓ Aprobar pago</button>
             </>
           ) : (
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>

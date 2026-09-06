@@ -1,7 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useCompras from '../hooks/useCompras';
-import localesService from '../../../shared/services/localesService';
 import useTiposPresentacion from '../hooks/useTiposPresentacion';
 import CompraForm from '../components/CompraForm';
 import { filtrarBusqueda } from '../../../shared/utils/busqueda';
@@ -32,13 +31,15 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
   const descuento  = Number(compra.descuento) || 0;
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="modal-box modal-scroll-suave" style={{
-        width:'100%', maxWidth:680, padding:0, textAlign:'left',
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
+        background:'var(--bg-surface)', borderRadius:18, width:'100%', maxWidth:680,
+        maxHeight:'90vh', overflowY:'auto', overflowX:'hidden',
+        boxShadow:'0 24px 64px rgba(0,0,0,.5)', animation:'popIn .22s ease',
       }}>
         {/* Header */}
-        <div className="modal-head">
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 24px 16px',borderBottom:'1px solid rgba(255,255,255,.07)' }}>
           <div style={{ display:'flex',alignItems:'center',gap:12 }}>
-            <div className="modal-head__icon">
+            <div style={{ width:44,height:44,borderRadius:12,flexShrink:0,background:'linear-gradient(135deg,#4CAF50,#388E3C)',display:'flex',alignItems:'center',justifyContent:'center',color:'white' }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
                 <line x1="3" y1="6" x2="21" y2="6"/>
@@ -46,7 +47,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
               </svg>
             </div>
             <div>
-              <div className="modal-head__title">Compra #{compra.id}</div>
+              <div style={{ fontWeight:800,fontSize:16,color:'var(--text-primary)' }}>Compra #{compra.id}</div>
               <div style={{ display:'flex',gap:6,marginTop:4,flexWrap:'wrap' }}>
                 <span className="badge-cat">{formatoTitulo(compra.proveedorNombre)}</span>
                 {esAnulada
@@ -56,7 +57,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
               </div>
             </div>
           </div>
-          <button onClick={onClose} title="Cerrar" className="modal-close-btn">
+          <button onClick={onClose} style={{ width:34,height:34,borderRadius:'50%',border:'none',background:'var(--bg-hover,rgba(128,128,128,.12))',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0 }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -64,14 +65,14 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
         {/* Body */}
         <div style={{ padding:'20px 24px' }}>
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14 }}>
-            <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
+            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Información general</div>
               {[
                 ['ID', <span style={{ fontFamily:'monospace',fontSize:12,color:'#81C784',background:'rgba(76,175,80,.12)',padding:'2px 8px',borderRadius:6 }}>{compra.id}</span>],
                 ['Proveedor',    formatoTitulo(compra.proveedorNombre)],
                 ['Fecha',        compra.fecha],
                 ...(descuento > 0 && totalBruto != null ? [['Subtotal', formatCOP(totalBruto)]] : []),
-                ['Total',        <span className="modal-monto">{formatCOP(compra.total)}</span>],
+                ['Total',        <span style={{ fontWeight:800,color:'#FFCC80' }}>{formatCOP(compra.total)}</span>],
                 ['Descuento',    descuento > 0
                   ? <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP((totalBruto ?? compra.total) - compra.total)})</span>
                   : <span style={{ color:'var(--text-secondary)' }}>Sin descuento</span>],
@@ -84,7 +85,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                 </div>
               ))}
             </div>
-            <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
+            <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'16px 18px',border:'1px solid var(--border)' }}>
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Resumen</div>
               {[
                 ['Cantidad de ítems', compra.items?.length || 0],
@@ -107,12 +108,12 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
           </div>
 
           {/* Tabla insumos */}
-          <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
+          <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:10 }}>Detalle de insumos</div>
             {compra.items && compra.items.length > 0 ? (
               <table style={{ width:'100%',borderCollapse:'collapse',fontSize:13 }}>
                 <thead>
-                  <tr style={{ borderBottom:'2px solid var(--border)' }}>
+                  <tr style={{ borderBottom:'2px solid rgba(255,255,255,.1)' }}>
                     {['Insumo','Unidad','Cantidad','Subtotal'].map(h => (
                       <th key={h} style={{ padding:'6px 8px',textAlign:'left',fontWeight:700,color:'var(--text-secondary)',fontSize:12 }}>{h}</th>
                     ))}
@@ -135,7 +136,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                       </td>
                       <td style={{ padding:'7px 8px',color:'var(--text-secondary)' }}>{item.unidad || '—'}</td>
                       <td style={{ padding:'7px 8px',color:'var(--text-primary)' }}>{item.cantidad}</td>
-                      <td style={{ padding:'7px 8px' }} className="modal-monto">{formatCOP(item.cantidad * item.precioUnitario)}</td>
+                      <td style={{ padding:'7px 8px',fontWeight:700,color:'#FFCC80' }}>{formatCOP(item.cantidad * item.precioUnitario)}</td>
                     </tr>
                   ))}
                   {!insumosExpandidos && compra.items.length > LIMITE_INSUMOS_VISIBLES && (
@@ -152,7 +153,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                 <tfoot>
                   <tr style={{ borderTop:'2px solid var(--border)',background:'var(--bg-hover)' }}>
                     <td colSpan="4" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
-                    <td style={{ padding:'8px',fontSize:15 }} className="modal-monto">{formatCOP(compra.total)}</td>
+                    <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15 }}>{formatCOP(compra.total)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -170,7 +171,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
             const estadoTexto = hayAdvertencias ? 'Válido con advertencias' : (totalOcr != null ? 'Válido' : 'Sin verificar');
             const estadoColor = hayAdvertencias ? '#C9A227' : (totalOcr != null ? '#4CAF50' : 'var(--text-secondary)');
             return (
-              <div style={{ background:'var(--bg-surface-2)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14,display:'grid',gridTemplateColumns:'1fr auto',gap:20 }}>
+              <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14,display:'grid',gridTemplateColumns:'1fr auto',gap:20 }}>
                 <div>
                   <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Resultado de validación OCR</div>
                   {[
@@ -301,7 +302,7 @@ function ModalTiposPresentacion({ onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
-        maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', overflowX: 'hidden', boxShadow: 'var(--shadow-lg)', animation: 'popIn .22s ease',
+        maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar tipos de presentación</div>
@@ -410,21 +411,7 @@ const ComprasPage = () => {
   const [errorMsg, setErrorMsg]         = useState('');
   const searchRef = useRef();
 
-  // batch 5 item 2 — filtro por local en el listado de compras.
-  const [locales, setLocales] = useState([]);
-  const [localFiltro, setLocalFiltro] = useState('todos');
-  useEffect(() => {
-    localesService.getActivos().then(d => setLocales(Array.isArray(d) ? d : [])).catch(() => setLocales([]));
-  }, []);
-  const compraEsDeLocal = (c) => {
-    if (localFiltro === 'todos') return true;
-    const cid = String(c.localId ?? c.local_id ?? '');
-    const nom = c.localNombre ?? c.local ?? '';
-    const loc = locales.find(l => String(l.id) === String(localFiltro));
-    return cid === String(localFiltro) || (loc && nom === loc.nombre);
-  };
-
-  const displayed = (filtered !== null ? filtered : compras).filter(compraEsDeLocal);
+  const displayed = filtered !== null ? filtered : compras;
   const searched  = query.trim() !== '';
 
   // Búsqueda local sobre las compras ya cargadas por useCompras. Antes
@@ -550,7 +537,7 @@ const ComprasPage = () => {
                   }}
                   placeholder="Describe el motivo de la anulación..."
                   rows={3} maxLength={500}
-                  style={{ width:'100%',boxSizing:'border-box',padding:'8px 12px',borderRadius:8,border:`1px solid ${motivoError?'#E53935':'var(--border-input)'}`,fontSize:13,resize:'vertical' }}
+                  style={{ width:'100%',boxSizing:'border-box',padding:'8px 12px',borderRadius:8,border:`1px solid ${motivoError?'#E53935':'#ddd'}`,fontSize:13,resize:'vertical' }}
                 />
                 <div style={{ fontSize:11,color: motivoAnulacion.length >= 500 ? '#E53935' : 'var(--text-muted)',textAlign:'right',marginTop:3 }}>{motivoAnulacion.length} / 500</div>
                 {motivoError && <span style={{ color:'#E53935',fontSize:12 }}>{motivoError}</span>}
@@ -568,67 +555,48 @@ const ComprasPage = () => {
           <p className="page-subtitle">Registro de compras realizadas — últimos 30 días</p>
         </div>
 
-        {/* item 6 / batch 6 item 2 — selector de local + acciones (fila
-            superior) y buscador + contador (fila inferior) en UN card,
-            igual que Pedidos e Insumos. */}
-        <div className="sic-stack">
-        <div className="sic-block sic-filterbar">
-          <div className="sic-filterbar__row">
-            {locales.length > 0 && (
-              <select value={localFiltro} onChange={e => setLocalFiltro(e.target.value)}
-                title="Filtrar compras por local"
-                style={{ padding:'9px 14px', border:'1.5px solid var(--border-input)', borderRadius:8, fontSize:13, background:'var(--bg-surface)', color:'var(--text-primary)' }}>
-                <option value="todos">Todos los locales</option>
-                {locales.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-              </select>
-            )}
-            <div style={{ display:'flex',gap:8,marginLeft:'auto',flexWrap:'wrap' }}>
-              <button
-                className="btn-toolbar-secundario"
-                onClick={() => navigate('/compras/historial')}
-              >
+        <div className="insumos-toolbar">
+          <div className="search-wrap" style={{ flex:1,maxWidth:480 }}>
+            <span className="search-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </span>
+            <input
+              ref={searchRef} type="text"
+              placeholder="Buscar por proveedor o fecha..." maxLength={70}
+              value={query} onChange={handleSearch}
+              className="search-input"
+            />
+            {query && (
+              <button className="search-clear" onClick={clearSearch} title="Limpiar búsqueda">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
-                Historial
               </button>
-              <button className="btn-add" onClick={() => setShowAddModal(true)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                Registrar compra
-              </button>
-            </div>
+            )}
           </div>
 
-          <div className="sic-filterbar__row sic-filterbar__row--sep">
-            <div className="search-wrap" style={{ flex:'1 1 240px',minWidth:200,maxWidth:480 }}>
-              <span className="search-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-              </span>
-              <input
-                ref={searchRef} type="text"
-                placeholder="Buscar por proveedor o fecha..." maxLength={70}
-                value={query} onChange={handleSearch}
-                className="search-input"
-              />
-              {query && (
-                <button className="search-clear" onClick={clearSearch} title="Limpiar búsqueda">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              )}
-            </div>
-            <span style={{ fontSize:13, color:'var(--text-muted)', marginLeft:'auto' }}>
-              {displayed.length} compra{displayed.length !== 1 ? 's' : ''}
-            </span>
+          <div style={{ display:'flex',gap:8,marginLeft:'auto' }}>
+            <button
+              style={{ padding:'10px 18px',borderRadius:10,border:'1px solid var(--border)',background:'var(--bg-surface-3)',color:'var(--text-secondary)',fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6 }}
+              onClick={() => navigate('/compras/historial')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              Historial
+            </button>
+            <button className="btn-add" onClick={() => setShowAddModal(true)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Registrar compra
+            </button>
           </div>
         </div>
 
-        <div className="sic-block sic-block--table">
+        <div className="insumos-card">
           {displayed.length === 0 ? (
             <div className="empty-state">
               {searched ? (
@@ -724,7 +692,6 @@ const ComprasPage = () => {
               </table>
             </div>
           )}
-        </div>
         </div>
 
         {/* Modal Registrar Compra */}

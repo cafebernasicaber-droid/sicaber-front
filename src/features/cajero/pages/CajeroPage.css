@@ -1303,15 +1303,3 @@
 [data-theme="dark"] .cj-add-panel__prod-name { color: #f0ece4 !important; }
 [data-theme="dark"] .cj-add-panel__total { color: #81C784 !important; }
 [data-theme="dark"] .cj-cart__item-adics { color: #FFD54F !important; }
-
-/* ── np-cart-body: wrapper del medio de la columna del carrito
-   (selectores + ítems + notas). En la vista del Cajero (alto completo)
-   es un simple flex pasa-todo y el scroll sigue en .cj-cart__items. En
-   el modal del Admin, PedidosPage.css le pone overflow-y:auto y ahí
-   scrollea todo el bloque, con Local/Atendido pegados arriba. ── */
-.np-cart-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.np-cart-sticky {
-  position: sticky; top: 0; z-index: 3;
-  background: var(--cj-surface);
-  padding-bottom: 6px;
-}

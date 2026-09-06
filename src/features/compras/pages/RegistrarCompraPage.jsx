@@ -211,7 +211,7 @@ function ModalTiposPresentacion({ onClose, tipos, create, update, toggleEstado }
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
         background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
-        maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', overflowX: 'hidden', boxShadow: 'var(--shadow-lg)', animation: 'popIn .22s ease',
+        maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar tipos de presentación</div>

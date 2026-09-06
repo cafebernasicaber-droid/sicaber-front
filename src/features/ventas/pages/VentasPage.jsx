@@ -121,161 +121,79 @@ function ModalRegistrarVenta({ onClose, onSave }) {
 function ModalDetalle({ venta, onClose, onNavigateDev, todasDevs = [] }) {
   const devs = todasDevs.filter(d => d.pedido_id === venta.id_pedido);
   const cfg  = ESTADO_CFG[venta.estado] || {};
-  // `productos` viene de p.items (JSONB). Se normaliza a arreglo porque una
-  // venta antigua puede traerlo nulo y el modal reventaba al mapearlo.
-  const productos = Array.isArray(venta.productos) ? venta.productos : [];
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{maxWidth:620,textAlign:'left',padding:0}} onClick={e=>e.stopPropagation()}>
-
-        {/* Cabecera estándar (misma estructura que Ficha técnica y Compras) */}
-        <div className="modal-head">
-          <div style={{display:'flex',alignItems:'center',gap:12}}>
-            <div className="modal-head__icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/></svg>
-            </div>
-            <div>
-              <div className="modal-head__title">Venta #{getVentaId(venta)}</div>
-              <div className="modal-head__sub">{venta.cliente || 'Sin cliente'} · {fmtFecha(venta.fecha)} · {fmtHora(venta.fecha)}</div>
-            </div>
+      <div className="modal-box" style={{maxWidth:560,textAlign:'left',padding:'32px 36px',maxHeight:'80vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:1,textTransform:'uppercase'}}>Venta</div>
+            <div style={{fontSize:24,fontWeight:800}}>#{getVentaId(venta)}</div>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span style={{background:cfg.bg,color:cfg.color,padding:'5px 14px',borderRadius:100,fontSize:12,fontWeight:700,whiteSpace:'nowrap'}}>{cfg.label || venta.estado}</span>
-            <button onClick={onClose} title="Cerrar" className="modal-close-btn">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
+          <span style={{background:cfg.bg,color:cfg.color,padding:'5px 14px',borderRadius:100,fontSize:12,fontWeight:700}}>{cfg.label}</span>
         </div>
-
-        <div style={{padding:'20px 24px'}}>
-          {/* Dos columnas de datos, en el mismo formato de tarjeta que usan
-              los detalles de Ficha técnica y Compras. Se añaden Local y Mesa,
-              que el backend ya devolvía (VENTA_SELECT trae p.sede y p.mesa)
-              pero este modal ignoraba. */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14}}>
-            <div className="modal-seccion" style={{marginBottom:0}}>
-              <div className="modal-seccion__titulo">Información general</div>
-              {[
-                ['Cliente', venta.cliente || '—'],
-                ['Pedido',  '#' + venta.id_pedido],
-                ['Fecha',   fmtFecha(venta.fecha)],
-                ['Hora',    fmtHora(venta.fecha)],
-              ].map(([k,v]) => (
-                <div key={k} className="modal-fila">
-                  <span className="modal-fila__k">{k}</span>
-                  <span className="modal-fila__v">{v}</span>
-                </div>
-              ))}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+          {[['Cliente',venta.cliente],['Pedido','#'+venta.id_pedido],['Fecha',fmtFecha(venta.fecha)],['Hora',fmtHora(venta.fecha)],['Método',venta.metodo_pago],['Tipo',venta.tipo_venta]].map(([k,v]) => (
+            <div key={k} style={{background:'var(--bg-surface-2)',borderRadius:8,padding:'10px 14px'}}>
+              <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:600,textTransform:'uppercase',letterSpacing:0.5}}>{k}</div>
+              <div style={{fontSize:14,fontWeight:600,marginTop:3}}>{v}</div>
             </div>
-            <div className="modal-seccion" style={{marginBottom:0}}>
-              <div className="modal-seccion__titulo">Pago y entrega</div>
-              {[
-                ['Método', venta.metodo_pago || '—'],
-                ['Tipo',   venta.tipo_venta === 'domicilio' ? 'Domicilio' : venta.tipo_venta || '—'],
-                ['Local',  venta.sede || '—'],
-                ['Mesa',   venta.mesa || '—'],
-              ].map(([k,v]) => (
-                <div key={k} className="modal-fila">
-                  <span className="modal-fila__k">{k}</span>
-                  <span className="modal-fila__v">{v}</span>
-                </div>
-              ))}
-            </div>
+          ))}
+        </div>
+        <div style={{background:'var(--bg-surface-2)',borderRadius:8,padding:'12px 16px',marginBottom:16,display:'flex',justifyContent:'space-between'}}>
+          <span style={{fontWeight:600,color:'var(--text-secondary)'}}>Total</span>
+          <span style={{fontSize:20,fontWeight:800,color:'#2E7D32'}}>{fmt(venta.total)}</span>
+        </div>
+        {Array.isArray(venta.productos) && venta.productos.length > 0 && (
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Productos</div>
+            {venta.productos.map((p,i) => (
+              <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 10px',borderRadius:6,background:i%2===0?'#F5F5F5':'transparent',fontSize:13}}>
+                <span>{p.nombre||p} {p.cantidad>1&&<span style={{background:'#2E7D32',color:'white',padding:'1px 5px',borderRadius:4,fontSize:10,marginLeft:4}}>x{p.cantidad}</span>}</span>
+                {p.precio && <span style={{fontWeight:600,color:'#2E7D32'}}>{fmt(p.precio*(p.cantidad||1))}</span>}
+              </div>
+            ))}
+            {Array.isArray(venta.toppings) && venta.toppings.length > 0 && (
+              <div style={{marginTop:8,paddingTop:8,borderTop:'1px dashed #ddd'}}>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:4}}>Toppings:</div>
+                {venta.toppings.map((t,i) => (
+                  <div key={i} style={{fontSize:12,color:'var(--text-secondary)',padding:'2px 0'}}>{t.nombre} {t.precio>0?<span style={{color:'#F57F17'}}>+{fmt(t.precio)}</span>:<span style={{color:'#2E7D32'}}>Gratis</span>}</div>
+                ))}
+              </div>
+            )}
           </div>
-
-          <div className="modal-seccion" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px'}}>
-            <span style={{fontWeight:700,color:'var(--text-secondary)',fontSize:13}}>Total de la venta</span>
-            <span style={{fontSize:22,fontWeight:800,color:'var(--color-green)'}}>{fmt(venta.total)}</span>
-          </div>
-
-          {/* Productos. Antes las filas alternas usaban un gris fijo (#F5F5F5)
-              que en modo oscuro tapaba el texto, y los toppings se leían de
-              `venta.toppings` — un campo que VENTA_SELECT nunca devuelve, así
-              que esa sección jamás se mostraba. Los toppings y adiciones
-              reales viajan DENTRO de cada producto (p.toppings / p.adiciones),
-              que es de donde se leen ahora. */}
-          <div className="modal-seccion">
-            <div className="modal-seccion__titulo">Productos ({productos.length})</div>
-            {productos.length === 0 ? (
-              <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Esta venta no tiene el detalle de productos guardado.</p>
-            ) : productos.map((p,i) => {
-              const cantidad = p.cantidad || 1;
-              const toppings  = Array.isArray(p.toppings)  ? p.toppings  : [];
-              const adiciones = Array.isArray(p.adiciones) ? p.adiciones : [];
+        )}
+        {devs.length > 0 && (
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>Devoluciones ({devs.length})</div>
+            {devs.map(d => {
+              const dCfg = {pendiente:{bg:'#FFF8E1',c:'#F57F17'},aprobada:{bg:'#E8F5E9',c:'#2E7D32'},rechazada:{bg:'#FFEBEE',c:'#C62828'}}[d.estado]||{};
               return (
-                <div key={i} style={{padding:'8px 10px',borderRadius:8,background:i%2===0?'var(--bg-hover)':'transparent',marginBottom:4}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,fontSize:13}}>
-                    <span style={{color:'var(--text-primary)',fontWeight:600}}>
-                      {p.nombre || p.name || p}
-                      {cantidad > 1 && (
-                        <span style={{background:'var(--color-green)',color:'#fff',padding:'1px 6px',borderRadius:4,fontSize:10,marginLeft:6,fontWeight:700}}>x{cantidad}</span>
-                      )}
-                    </span>
-                    {p.precio != null && (
-                      <span style={{fontWeight:700,color:'var(--color-green)',whiteSpace:'nowrap'}}>{fmt(p.precio * cantidad)}</span>
-                    )}
+                <div key={getDevId(d)} style={{background:dCfg.bg,borderRadius:8,padding:'10px 14px',marginBottom:6}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                    <span style={{fontWeight:700,fontSize:13}}>Dev. #{getDevId(d)}</span>
+                    <span style={{color:dCfg.c,fontWeight:700,fontSize:12}}>{d.estado.toUpperCase()}</span>
                   </div>
-                  {toppings.map((t,j) => (
-                    <div key={`t${j}`} style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-secondary)',paddingLeft:12,marginTop:3}}>
-                      <span>+ {t.nombre}</span>
-                      <span style={{color: t.precio > 0 ? '#F57F17' : 'var(--color-green)'}}>
-                        {t.precio > 0 ? `+${fmt(t.precio * cantidad)}` : 'Gratis'}
-                      </span>
+                  {Array.isArray(d.productos_devueltos) && d.productos_devueltos.length > 0 && (
+                    <div style={{fontSize:12,color:'var(--text-secondary)',marginBottom:3}}>
+                      Productos: {d.productos_devueltos.map(p => p.nombre||p).join(', ')}
                     </div>
-                  ))}
-                  {adiciones.map((a,j) => (
-                    <div key={`a${j}`} style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-secondary)',paddingLeft:12,marginTop:3}}>
-                      <span>+ {a.nombre}</span>
-                      <span style={{color:'#F57F17'}}>+{fmt((a.precio || 0) * cantidad)}</span>
+                  )}
+                  {d.monto_devolucion && (
+                    <div style={{fontSize:12,fontWeight:600,color:'#E65100',marginBottom:3}}>
+                      Monto: {fmt(d.monto_devolucion)}
                     </div>
-                  ))}
+                  )}
+                  <div style={{fontSize:12,color:'var(--text-secondary)'}}>{d.motivo}</div>
                 </div>
               );
             })}
           </div>
-
-          {devs.length > 0 && (
-            <div className="modal-seccion">
-              <div className="modal-seccion__titulo">Devoluciones ({devs.length})</div>
-              {devs.map(d => {
-                // Colores como fondo translúcido + variable de texto, para que
-                // se lean igual en modo claro y oscuro (antes eran pasteles
-                // fijos con texto oscuro encima).
-                const dCfg = {
-                  pendiente: { bg:'rgba(245,127,23,.12)', bd:'rgba(245,127,23,.35)', c:'#F57F17' },
-                  aprobada:  { bg:'rgba(46,125,50,.12)',  bd:'rgba(46,125,50,.35)',  c:'#2E7D32' },
-                  rechazada: { bg:'rgba(198,40,40,.12)',  bd:'rgba(198,40,40,.35)',  c:'#C62828' },
-                }[d.estado] || { bg:'var(--bg-hover)', bd:'var(--border)', c:'var(--text-secondary)' };
-                return (
-                  <div key={getDevId(d)} style={{background:dCfg.bg,border:`1px solid ${dCfg.bd}`,borderRadius:8,padding:'10px 14px',marginBottom:6}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
-                      <span style={{fontWeight:700,fontSize:13,color:'var(--text-primary)'}}>Devolución #{getDevId(d)}</span>
-                      <span style={{color:dCfg.c,fontWeight:700,fontSize:11,letterSpacing:.5}}>{String(d.estado || '').toUpperCase()}</span>
-                    </div>
-                    {Array.isArray(d.productos_devueltos) && d.productos_devueltos.length > 0 && (
-                      <div style={{fontSize:12,color:'var(--text-secondary)',marginBottom:3}}>
-                        Productos: {d.productos_devueltos.map(p => p.nombre || p).join(', ')}
-                      </div>
-                    )}
-                    {d.monto != null && (
-                      <div style={{fontSize:12,fontWeight:600,color:'#E65100',marginBottom:3}}>Monto: {fmt(d.monto)}</div>
-                    )}
-                    {d.motivo && <div style={{fontSize:12,color:'var(--text-secondary)'}}>{d.motivo}</div>}
-                    {d.estado === 'rechazada' && d.motivo_rechazo && (
-                      <div style={{fontSize:12,color:'#C62828',marginTop:3}}><strong>Motivo del rechazo:</strong> {d.motivo_rechazo}</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+        )}
+        <div className="modal-actions" style={{justifyContent:'space-between',marginTop:20}}>
+          <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+          {venta.estado === 'vendido' && (
+            <button className="btn-confirm-primary" onClick={() => { onClose(); onNavigateDev(venta); }}>↩ Registrar devolución</button>
           )}
-
-          <div className="modal-pie">
-            <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-            {venta.estado === 'vendido' && (
-              <button className="btn-confirm-primary" onClick={() => { onClose(); onNavigateDev(venta); }}>↩ Registrar devolución</button>
-            )}
-          </div>
         </div>
       </div>
     </div>
@@ -382,9 +300,7 @@ export default function VentasPage() {
         </div>
 
         <div className="insumos-card">
-          {/* borderBottom pasa de '#eee' fijo a la variable de tema: en modo
-              oscuro esa línea gris clara no se distinguía del fondo. */}
-          <div style={{display:'flex',alignItems:'center',gap:12,padding:'16px 20px',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:12,padding:'16px 20px',borderBottom:'1px solid #eee',flexWrap:'wrap'}}>
             <div className="search-group" style={{flex:1,maxWidth:400}}>
               <div className="search-wrap">
                 <span className="search-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
@@ -392,30 +308,25 @@ export default function VentasPage() {
                 {query && <button className="search-clear" onClick={() => setQuery('')}>✕</button>}
               </div>
             </div>
-            {/* Los filtros se agrupan a la derecha en vez de ir sueltos uno
-                tras otro: la búsqueda ocupa su ancho y estado/fechas/local
-                quedan juntos, así al reducir la ventana el bloque de filtros
-                baja completo en vez de partirse por la mitad. Los estilos en
-                línea repetidos de cada control pasan a `.filtro-select`
-                (definida en shared/styles/modales.css). */}
-            <div style={{display:'flex',alignItems:'center',gap:10,marginLeft:'auto',flexWrap:'wrap'}}>
-              <select className="filtro-select" value={filtroEstado} onChange={e => { setFiltro(e.target.value); setPagina(1); }}>
-                <option value="todos">Todos los estados</option>
-                <option value="vendido">Vendido</option>
-                <option value="devuelto">Devuelto</option>
-              </select>
-              <div style={{display:'flex',alignItems:'center',gap:6}} title="Filtrar ventas por rango de fechas">
-                <input className="filtro-select" type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPagina(1); }}/>
-                <span style={{fontSize:12,color:'var(--text-muted)'}}>–</span>
-                <input className="filtro-select" type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPagina(1); }}/>
-                {(fechaDesde || fechaHasta) && (
-                  <button className="search-clear" title="Limpiar filtro de fechas"
-                    onClick={() => { setFechaDesde(''); setFechaHasta(''); setPagina(1); }}>✕</button>
-                )}
-              </div>
-              <LocalFiltro value={localSel} onChange={v => { setLocalSel(v); setPagina(1); }} sedeUsuario={user?.sede}/>
-              <span style={{fontSize:13,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{filtradas.length} venta{filtradas.length!==1?'s':''}</span>
+            <select value={filtroEstado} onChange={e => { setFiltro(e.target.value); setPagina(1); }}
+              style={{padding:'10px 14px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,outline:'none',background:'var(--bg-surface)'}}>
+              <option value="todos">Todos los estados</option>
+              <option value="vendido">Vendido</option>
+              <option value="devuelto">Devuelto</option>
+            </select>
+            <div style={{display:'flex',alignItems:'center',gap:6}} title="Filtrar ventas por rango de fechas">
+              <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPagina(1); }}
+                style={{padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,outline:'none',background:'var(--bg-surface)',color:'var(--text-primary)'}}/>
+              <span style={{fontSize:12,color:'var(--text-muted)'}}>–</span>
+              <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPagina(1); }}
+                style={{padding:'10px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,outline:'none',background:'var(--bg-surface)',color:'var(--text-primary)'}}/>
+              {(fechaDesde || fechaHasta) && (
+                <button className="search-clear" title="Limpiar filtro de fechas"
+                  onClick={() => { setFechaDesde(''); setFechaHasta(''); setPagina(1); }}>✕</button>
+              )}
             </div>
+            <LocalFiltro value={localSel} onChange={v => { setLocalSel(v); setPagina(1); }} sedeUsuario={user?.sede}/>
+            <span style={{fontSize:13,color:'var(--text-muted)',marginLeft:'auto'}}>{filtradas.length} venta{filtradas.length!==1?'s':''}</span>
           </div>
 
           {paginadas.length === 0 ? (
@@ -477,7 +388,7 @@ export default function VentasPage() {
           )}
 
           {totalPags > 1 && (
-            <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:8,padding:'14px',borderTop:'1px solid var(--border)'}}>
+            <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:8,padding:'14px',borderTop:'1px solid #eee'}}>
               <button className="btn-cancel" style={{padding:'6px 14px'}} disabled={pagina===1} onClick={() => setPagina(p => p-1)}>Anterior</button>
               {Array.from({length:totalPags},(_,i)=>i+1).map(n => (
                 <button key={n} className={n===pagina?'btn-confirm-primary':'btn-cancel'} style={{padding:'6px 14px'}} onClick={() => setPagina(n)}>{n}</button>

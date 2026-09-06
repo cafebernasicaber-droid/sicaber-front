@@ -106,21 +106,11 @@
 .dash-alert--purple { background: #F3E5F5; color: #6A1B9A; border: 1px solid #CE93D8; }
 
 /* ── CHARTS ──────────────────────────────────────────────── */
-/* item 11 — 3 gráficas balanceadas: mismas columnas, misma altura, donuts
-   con tamaño legible. */
 .dash-charts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 16px;
   margin-bottom: 20px;
-  align-items: stretch;
-}
-.dash-charts > .dash-card {
-  display: flex; flex-direction: column; min-width: 0;
-}
-.dash-charts > .dash-card > .dash-card__header { margin-bottom: 14px; }
-.dash-chart-body {
-  flex: 1; display: flex; align-items: center; justify-content: center;
 }
 .dash-card__header h3 { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .dash-card__header p  { margin: 0; }
@@ -133,8 +123,8 @@
 .dash-alert--warn { background: #FFF3E0; color: #E65100; border: 1px solid #FFCC80; }
 .dash-alert--magenta { background: #FCE4EC; color: #AD1457; border: 1px solid #F48FB1; }
 
-@media (max-width: 1100px) { .dash-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 680px) { .dash-charts { grid-template-columns: 1fr; } .dash-grid { grid-template-columns: 1fr; } .dash-stats { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 1100px) { .dash-charts { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 768px) { .dash-charts { grid-template-columns: 1fr; } .dash-grid { grid-template-columns: 1fr; } .dash-stats { grid-template-columns: repeat(2, 1fr); } }
 
 /* ════════════════════════════════════════════════════════════
    THEME PATCH — DashboardPage

@@ -3,7 +3,7 @@ import { devolucionesApi } from '../../../shared/services/api';
 const devolucionesService = {
   getAll:        (sede)          => devolucionesApi.getAll(sede),
   create:        (data)          => devolucionesApi.create(data),
-  cambiarEstado: (id, estado, motivoRechazo) => devolucionesApi.cambiarEstado(id, estado, motivoRechazo),
+  cambiarEstado: (id, estado)    => devolucionesApi.cambiarEstado(id, estado),
   // No hay endpoint /devoluciones/stats en el backend, así que lo calculamos
   // aquí mismo a partir del listado completo (usado por el Dashboard).
   getStats: async (sede) => {
