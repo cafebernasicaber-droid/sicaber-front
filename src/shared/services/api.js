@@ -247,10 +247,22 @@ export const tiposPresentacionApi = {
   toggleEstado: (id)     => patch (`/tipos-presentacion/${id}/estado`),
 };
 
+// ── CIUDADES (catálogo para Proveedores) ─────────────────────────
+export const ciudadesApi = {
+  getAll:       ()       => get   ('/ciudades'),
+  create:       (data)   => post  ('/ciudades', data),
+  update:       (id, d)  => put   (`/ciudades/${id}`, d),
+  toggleEstado: (id)     => patch (`/ciudades/${id}/estado`),
+};
+
 // ── COMPRAS ──────────────────────────────────────────────────
 export const comprasApi = {
-  getActivas:  ()         => get ('/compras'),
-  getHistorial:()         => get ('/compras/historial'),
+  // localId opcional: si se pasa, el backend solo devuelve las compras de
+  // ese local — mismo patrón ya usado en pedidosApi.getAll con `sede`.
+  // ComprasPage.jsx ya esperaba esto (useCompras(localFiltro)); solo
+  // faltaba que api.js realmente lo mandara al backend.
+  getActivas:  (localId)  => get ((localId && localId !== 'todos') ? `/compras?local_id=${encodeURIComponent(localId)}` : '/compras'),
+  getHistorial:(localId)  => get ((localId && localId !== 'todos') ? `/compras/historial?local_id=${encodeURIComponent(localId)}` : '/compras/historial'),
   getById:     (id)       => get (`/compras/${id}`),
   create:      (data)     => post('/compras', data),
   anular:      (id, mot)  => patch(`/compras/${id}/anular`, { motivo: mot }),

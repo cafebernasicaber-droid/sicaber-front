@@ -1,17 +1,21 @@
 import { useState, useCallback, useEffect } from 'react';
 import comprasService from '../services/comprasService';
 
-const useCompras = () => {
+// `localId` opcional: si se pasa (y no es 'todos'), solo trae las compras de
+// ese local — el backend lo filtra vía GET /compras?local_id=. ComprasPage.jsx
+// ya llamaba a useCompras(localFiltro) esperando este comportamiento; antes
+// el parámetro se ignoraba por completo (el hook no lo aceptaba).
+const useCompras = (localId) => {
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    comprasService.getActivas()
+    comprasService.getActivas(localId)
       .then(data => setCompras(Array.isArray(data) ? data : []))
       .catch(() => setCompras([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [localId]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -30,7 +34,7 @@ const useCompras = () => {
   }, [refresh]);
   const anular = useCallback(async (id, motivo) => { const r = await comprasService.anular(id, motivo); refresh(); return r; }, [refresh]);
   const getById = useCallback((id) => comprasService.getById(id), []);
-  const getHistorial = useCallback(() => comprasService.getHistorial(), []);
+  const getHistorial = useCallback((localIdHist) => comprasService.getHistorial(localIdHist), []);
 
   return { compras, loading, refresh, create, anular, getById, getHistorial };
 };

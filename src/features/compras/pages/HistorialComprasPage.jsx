@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import comprasService from '../services/comprasService';
+import localesService from '../../../shared/services/localesService';
 import './ComprasPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
@@ -15,6 +16,8 @@ const formatDate = (iso) => {
   if (!iso) return '—';
   return new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso));
 };
+// `compras.fecha` es DATE → llega como ISO; en tabla/detalle basta el día.
+const soloFecha = (v) => (v ? String(v).slice(0, 10) : '—');
 
 // ── Modal Ver Compra ──────────────────────────────────────────────────────────
 function ModalVerCompra({ compra, onClose }) {
@@ -69,7 +72,8 @@ function ModalVerCompra({ compra, onClose }) {
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Información general</div>
               {[
                 ['Proveedor',  formatoTitulo(compra.proveedorNombre)],
-                ['Fecha',      compra.fecha],
+                ['Local',      compra.localNombre || '—'],
+                ['Fecha',      soloFecha(compra.fecha)],
                 ...(descuento > 0 && totalBruto != null ? [['Subtotal', formatCOP(totalBruto)]] : []),
                 ['Total',      <span style={{ fontWeight:800,color:'#FFCC80' }}>{formatCOP(compra.total)}</span>],
                 ['Descuento',  descuento > 0
@@ -94,7 +98,7 @@ function ModalVerCompra({ compra, onClose }) {
                 ] : []),
               ].map(([label, val]) => (
                 <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13 }}>
-                  <span style={{ color:'var(--text-secondary)',fontWeight:600 }}>{label}</span>
+                  <span style={{ color: label === 'Motivo' ? '#E53935' : 'var(--text-secondary)', fontWeight:600 }}>{label}</span>
                   <span style={{ color:'var(--text-primary)',fontWeight:500 }}>{val}</span>
                 </div>
               ))}
@@ -151,7 +155,7 @@ function ModalVerCompra({ compra, onClose }) {
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop:'2px solid var(--border)',background:'var(--bg-hover)' }}>
-                    <td colSpan="4" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
+                    <td colSpan="3" style={{ padding:'8px',fontWeight:700,color:'var(--text-secondary)',fontSize:13 }}>Total</td>
                     <td style={{ padding:'8px',fontWeight:800,color:'#FFCC80',fontSize:15 }}>{formatCOP(compra.total)}</td>
                   </tr>
                 </tfoot>
@@ -229,23 +233,40 @@ function ModalVerCompra({ compra, onClose }) {
 }
 
 // ── Página Historial ──────────────────────────────────────────────────────────
+// Reservado EXCLUSIVAMENTE para compras ANULADAS (ver GET /compras/historial
+// en el backend, que ahora filtra solo por estado='anulada' — se quitó la
+// antigua regla de "más de 30 días", que mezclaba compras activas viejas
+// con las anuladas). Toda compra activa, sin importar su antigüedad, vive
+// en la tabla principal de Compras (con su propia paginación); en cuanto
+// una compra se anula, sale de ahí y aparece aquí de inmediato.
 const HistorialComprasPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [desde, setDesde]       = useState('');
   const [hasta, setHasta]       = useState('');
   const [verCompra, setVerCompra] = useState(null);
   const [historial, setHistorial] = useState([]);
   const [loading, setLoading]     = useState(true);
+  // Filtro por local — consume GET /compras/historial?local_id=. El valor
+  // inicial puede venir de la URL (?local=ID) cuando se llega desde el
+  // listado de Compras con un local ya seleccionado.
+  const [localFiltro, setLocalFiltro] = useState(() => new URLSearchParams(location.search).get('local') || 'todos');
+  const [locales, setLocales] = useState([]);
+  useEffect(() => {
+    localesService.getActivos()
+      .then(d => setLocales(Array.isArray(d) ? d : []))
+      .catch(() => setLocales([]));
+  }, []);
 
   useEffect(() => {
     let activo = true;
     setLoading(true);
-    comprasService.getHistorial()
+    comprasService.getHistorial(localFiltro)
       .then(data => { if (activo) setHistorial(Array.isArray(data) ? data : []); })
       .catch(() => { if (activo) setHistorial([]); })
       .finally(() => { if (activo) setLoading(false); });
     return () => { activo = false; };
-  }, []);
+  }, [localFiltro]);
 
   const filtrado = useMemo(() => {
     return (Array.isArray(historial) ? historial : []).filter(c => {
@@ -256,10 +277,8 @@ const HistorialComprasPage = () => {
     });
   }, [historial, desde, hasta]);
 
-  const totalHistorial   = filtrado.length;
-  const totalAnuladas    = filtrado.filter(c => c.estado === 'anulada').length;
-  const totalCompletadas = filtrado.filter(c => c.estado !== 'anulada').length;
-  const totalMonto       = filtrado.reduce((acc, c) => acc + (Number(c.total) || 0), 0);
+  const totalAnuladas = filtrado.length;
+  const totalMonto    = filtrado.reduce((acc, c) => acc + (Number(c.total) || 0), 0);
 
   return (
     <Layout>
@@ -281,27 +300,36 @@ const HistorialComprasPage = () => {
         </div>
 
         <div className="page-header">
-          <h1 className="page-title">Historial de Compras</h1>
-          <p className="page-subtitle">Compras antiguas (&gt;30 días) y anuladas</p>
+          <h1 className="page-title">Historial de Compras Anuladas</h1>
+          <p className="page-subtitle">Registro exclusivo de compras anuladas — las compras activas viven en la tabla principal, sin importar su antigüedad</p>
         </div>
 
-        {/* Resumen */}
+        {/* Resumen — simplificado: todo lo que aparece acá es, por
+            definición, anulado (ver el filtro del backend), así que ya no
+            hace falta desglosar "completadas vs. anuladas". */}
         <div style={{ display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:24 }}>
           {[
-            { label:'Total en historial', value: totalHistorial,          color:'#1565C0', bg:'rgba(25,118,210,0.12)' },
-            { label:'Completadas',        value: totalCompletadas,        color:'#2E7D32', bg:'#E8F5E9' },
-            { label:'Anuladas',           value: totalAnuladas,           color:'#B71C1C', bg:'#FFEBEE' },
-            { label:'Monto total',        value: formatCOP(totalMonto),   color:'#4E342E', bg:'#EFEBE9', isText:true },
-          ].map(({ label, value, color, bg, isText }) => (
+            { label:'Total de anuladas', value: totalAnuladas,          color:'#B71C1C', bg:'#FFEBEE' },
+            { label:'Monto total',       value: formatCOP(totalMonto),  color:'#4E342E', bg:'#EFEBE9', isText:true },
+          ].map(({ label, value, color }) => (
             <div key={label} style={{ background:'var(--stat-card-bg)',borderRadius:12,padding:'16px 20px',border:`1px solid var(--border)`,borderTop:`3px solid ${color}`,boxShadow:'var(--stat-card-shadow)' }}>
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6 }}>{label}</div>
-              <div style={{ fontSize:isText?16:26,fontWeight:800,color }}>{value}</div>
+              <div style={{ fontSize: label === 'Monto total' ? 16 : 26, fontWeight:800, color }}>{value}</div>
             </div>
           ))}
         </div>
 
-        {/* Filtros por fecha */}
+        {/* Filtros */}
         <div style={{ display:'flex',gap:12,alignItems:'center',marginBottom:16,flexWrap:'wrap' }}>
+          <div style={{ display:'flex',alignItems:'center',gap:8 }}>
+            <label style={{ fontSize:13,fontWeight:600,color:'var(--text-secondary)' }}>Local:</label>
+            <select value={localFiltro} onChange={e => setLocalFiltro(e.target.value)}
+              title="Filtrar por local"
+              style={{ padding:'6px 10px',borderRadius:8,border:'1px solid var(--border)',fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)' }}>
+              <option value="todos">Todos los locales</option>
+              {locales.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+            </select>
+          </div>
           <div style={{ display:'flex',alignItems:'center',gap:8 }}>
             <label style={{ fontSize:13,fontWeight:600,color:'var(--text-secondary)' }}>Desde:</label>
             <input type="date" value={desde}
@@ -314,8 +342,8 @@ const HistorialComprasPage = () => {
               onChange={e => { setHasta(e.target.value); }}
               style={{ padding:'6px 10px',borderRadius:8,border:'1px solid var(--border)',fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)' }} />
           </div>
-          {(desde || hasta) && (
-            <button onClick={() => { setDesde(''); setHasta(''); }}
+          {(desde || hasta || localFiltro !== 'todos') && (
+            <button onClick={() => { setDesde(''); setHasta(''); setLocalFiltro('todos'); }}
               style={{ padding:'6px 14px',borderRadius:8,border:'1px solid var(--border)',background:'var(--bg-surface)',color:'var(--text-secondary)',fontSize:13,cursor:'pointer' }}>
               Limpiar filtros
             </button>
@@ -339,25 +367,24 @@ const HistorialComprasPage = () => {
                   <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                 </svg>
               </div>
-              <h3>No hay registros en el historial</h3>
-              <p>Las compras mayores a 30 días o anuladas aparecerán aquí</p>
+              <h3>No hay compras anuladas en el historial</h3>
+              <p>Las compras que anules aparecerán aquí de inmediato</p>
             </div>
           ) : (
             <div className="table-wrap">
               <table className="insumos-table">
                 <thead>
                   <tr>
-                    <th>Proveedor</th><th>Fecha</th>
-                    <th>Insumos</th><th>Total</th><th>Descuento</th><th>Estado</th><th>Acción</th>
+                    <th>Proveedor</th><th>Local</th><th>Fecha</th>
+                    <th>Insumos</th><th>Total</th><th>Descuento</th><th>Acción</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtrado.map(c => {
-                    const esAnulada = c.estado === 'anulada';
-                    return (
+                  {filtrado.map(c => (
                       <tr key={c.id}>
                         <td className="td-nombre">{formatoTitulo(c.proveedorNombre)}</td>
-                        <td>{c.fecha}</td>
+                        <td>{c.localNombre || '—'}</td>
+                        <td>{soloFecha(c.fecha)}</td>
                         <td>
                           <div className="items-nombres">
                             {(c.items || []).slice(0,3).map((it, i) => (
@@ -374,17 +401,6 @@ const HistorialComprasPage = () => {
                         <td className="td-total">{formatCOP(c.total)}</td>
                         <td>{Number(c.descuento) > 0 ? <span style={{ color:'#C9A227', fontWeight:700 }}>{Number(c.descuento)}%</span> : '—'}</td>
                         <td>
-                          {esAnulada ? (
-                            <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(183,28,28,.25)',color:'#EF9A9A',border:'1px solid rgba(239,83,80,.3)' }}>
-                              Anulada
-                            </span>
-                          ) : (
-                            <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(46,125,50,.2)',color:'#81C784',border:'1px solid rgba(129,199,132,.3)' }}>
-                              Registrada
-                            </span>
-                          )}
-                        </td>
-                        <td>
                           <Tooltip label="Ver detalle">
                             <button className="btn-ver" onClick={() => setVerCompra(c)}>
                               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -394,8 +410,7 @@ const HistorialComprasPage = () => {
                           </Tooltip>
                         </td>
                       </tr>
-                    );
-                  })}
+                  ))}
                 </tbody>
               </table>
 

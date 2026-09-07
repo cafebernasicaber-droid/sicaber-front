@@ -16,12 +16,6 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
   const [error, setError] = useState('');
   const set = k => e => setForm(f => ({...f, [k]: e.target.value}));
 
-  // 1 — sugerencia inicial: solo insumos marcados "es para topping" desde
-  // Insumos (esTopping). En cuanto se escribe algo en el buscador, la
-  // búsqueda deja de limitarse a esta lista y corre sobre TODOS los
-  // insumos (ver `preferidos` en InsumoSearchSelect) — por si el insumo
-  // correcto no quedó marcado como topping.
-  const insumosTopping = insumos.filter(i => i.esTopping);
   const insumoSel = insumos.find(i => String(i.id) === String(form.insumo_id));
 
   const toggleProducto = (id) => {
@@ -67,12 +61,8 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
 
           <div>
             <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Insumo asociado <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span></label>
-            <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>
-              Sugerimos primero los insumos marcados como "topping" en Insumos, pero puedes buscar entre todos si el que necesitas no quedó marcado así.
-            </p>
             <InsumoSearchSelect
               insumos={insumos}
-              preferidos={insumosTopping}
               value={form.insumo_id}
               onSelect={found => setForm(f => ({...f, insumo_id: found.id}))}
               placeholder="Buscar insumo..."

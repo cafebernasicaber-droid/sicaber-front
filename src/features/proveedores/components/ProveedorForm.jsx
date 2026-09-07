@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import proveedoresService from '../services/proveedoresService';
+import ciudadesService from '../services/ciudadesService';
+import { normalizarComparacion } from '../../../shared/utils/textFormat';
 import './ProveedorForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
 
@@ -14,13 +16,16 @@ const EMPTY_FORM = {
   telefono: '',
   correo: '',
   direccion: '',
+  // Antes fija en "Medellín" (el cliente solo manejaba proveedores de ahí
+  // en ese momento) — ahora es un catálogo dinámico (ver ciudadesService),
+  // con las 16 principales ya sembradas y la posibilidad de agregar más
+  // desde el propio formulario ("+ Añadir ciudad"). Medellín se mantiene
+  // como valor por defecto al crear (sigue siendo el caso más común), pero
+  // ya es un campo editable de verdad, no un texto fijo.
   ciudad: 'Medellín',
   observaciones: '',
   estado: 'Activo'
 };
-
-// Mismo catálogo de municipios ya usado en Clientes (ClienteRegistroModal /
-// ClienteEditarModal) para no inventar una lista nueva — Medellín primero.
 
 // Persona Natural ya no admite TI, Pasaporte ni NIT como tipo de
 // documento — solo Cédula de Ciudadanía y Cédula de Extranjería.
@@ -34,10 +39,7 @@ const TIPOS_DOCUMENTO = ['CC', 'CE'];
 // interfaz.
 const TELEFONO_LEN = 10;
 // "Nombre completo" (Persona Natural) y "Persona de contacto" (Persona
-// Jurídica) comparten las mismas reglas: ahora es un campo unificado
-// (antes Nombres + Apellidos, 60 cada uno, por separado), así que el
-// máximo sube a 100 para no quedar corto con nombres compuestos de varias
-// palabras.
+// Jurídica) comparten las mismas reglas.
 const NOMBRE_COMPLETO_MIN = 3;
 const NOMBRE_COMPLETO_MAX = 60;
 // Razón Social tiene sus propias reglas, más permisivas en símbolos pero
@@ -64,7 +66,7 @@ const colapsarEspacios = (v) => v.replace(/\s{2,}/g, ' ');
 const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
 
 // Validación de "Nombre completo" (Persona Natural) / "Persona de
-// contacto" (Persona Jurídica) — mismas reglas para ambos: 3 a 100
+// contacto" (Persona Jurídica) — mismas reglas para ambos: 3 a 60
 // caracteres, sin espacios de sobra, no puede ser solo espacios en
 // blanco. El filtro de escritura ya se encarga de bloquear números y
 // símbolos, así que acá solo queda validar longitud/contenido real.
@@ -129,6 +131,269 @@ const filtrarNumeroDocumento = (tipo, v) => {
   return v.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12); // CE
 };
 
+// Selector con buscador — mismo componente ya usado en Compras e Insumos.
+function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage }) {
+  const [open, setOpen] = useState(false);
+  const [texto, setTexto] = useState('');
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const onDocMouseDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setTexto('');
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const selected = options.find(o => String(o.value) === String(value));
+  const filtrados = texto.trim()
+    ? options.filter(o => {
+        const t = texto.trim().toLowerCase();
+        return o.label.toLowerCase().includes(t) || (o.sub && o.sub.toLowerCase().includes(t));
+      })
+    : options;
+
+  const abrir = () => {
+    if (disabled) return;
+    setOpen(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  return (
+    <div ref={wrapRef} className="buscador-select-wrap">
+      <input
+        ref={inputRef}
+        type="text"
+        className="buscador-select-input"
+        disabled={disabled}
+        value={open ? (texto || (selected ? selected.label : '')) : (selected ? selected.label : '')}
+        onFocus={abrir}
+        onClick={abrir}
+        onChange={e => { setTexto(e.target.value); if (!open) setOpen(true); }}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      {open && !disabled && (
+        <div className="buscador-dropdown">
+          {filtrados.length === 0 ? (
+            <div className="buscador-dropdown-empty">{emptyMessage || 'Sin resultados.'}</div>
+          ) : filtrados.map(o => (
+            <div
+              key={o.value}
+              className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
+              onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Modal: Añadir / gestionar ciudades ─────────────────────────────────
+// Mismo patrón exacto que "Gestionar tipos de presentación" en Compras:
+// crear, editar el nombre, activar/desactivar. Sin eliminar — ninguna
+// ciudad se puede borrar del catálogo, solo desactivar (ver ciudadesApi).
+function ModalCiudades({ onClose, onCiudadesActualizadas }) {
+  const [ciudades, setCiudades] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [nombre, setNombre] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editNombre, setEditNombre] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [toggleLoadingId, setToggleLoadingId] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
+
+  const recargar = () => {
+    ciudadesService.getAll()
+      .then(d => { setCiudades(Array.isArray(d) ? d : []); onCiudadesActualizadas?.(Array.isArray(d) ? d : []); })
+      .catch(() => setCiudades([]))
+      .finally(() => setCargando(false));
+  };
+  useEffect(() => { recargar(); }, []);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!nombre.trim()) { setError('El nombre de la ciudad es obligatorio.'); return; }
+    setLoading(true);
+    try {
+      const r = await ciudadesService.create({ nombre: nombre.trim() });
+      if (r?.error) { setError(r.error); return; }
+      setNombre('');
+      recargar();
+    } catch (err) {
+      setError(err.message || 'No se pudo crear la ciudad.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEdit = (c) => { setError(''); setEditId(c.id); setEditNombre(c.nombre); };
+  const cancelEdit = () => { setEditId(null); setEditNombre(''); };
+
+  const saveEdit = async (c) => {
+    setError('');
+    if (!editNombre.trim()) { setError('El nombre de la ciudad es obligatorio.'); return; }
+    if (editNombre.trim() === c.nombre) { cancelEdit(); return; }
+    setEditLoading(true);
+    try {
+      const r = await ciudadesService.update(c.id, { nombre: editNombre.trim() });
+      if (r?.error) { setError(r.error); return; }
+      cancelEdit();
+      recargar();
+    } catch (err) {
+      setError(err.message || 'No se pudo guardar el cambio.');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleToggleEstado = async (c) => {
+    setError('');
+    setToggleLoadingId(c.id);
+    try {
+      const r = await ciudadesService.toggleEstado(c.id);
+      if (r?.error) setError(r.error);
+      else recargar();
+    } catch (err) {
+      setError(err.message || 'No se pudo cambiar el estado de la ciudad.');
+    } finally {
+      setToggleLoadingId(null);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
+        background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
+        maxHeight: '85vh', overflowY: 'auto', overflowX: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.5)', animation: 'popIn .22s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar ciudades</div>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+        <div style={{ padding: '20px 24px' }}>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+            Una ciudad no se puede eliminar del catálogo — solo desactivarse, para que deje de aparecer como opción en proveedores nuevos.
+          </p>
+          {error && (
+            <div style={{ background: 'rgba(229,57,53,0.12)', color: '#EF5350', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
+              ⚠ {error}
+            </div>
+          )}
+          <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+            <input
+              type="text" value={nombre} onChange={e => setNombre(e.target.value)}
+              placeholder="Nueva ciudad (ej: Montería)"
+              style={{ flex: 1, padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+            />
+            <button type="submit" disabled={loading} className="btn-add" style={{ padding: '0 16px' }}>
+              {loading ? 'Creando...' : '+ Crear'}
+            </button>
+          </form>
+          {!cargando && ciudades.length > 0 && (
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input
+                type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre..."
+                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 36px 9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              />
+              <svg style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+          )}
+          {cargando ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>Cargando...</div>
+          ) : ciudades.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+              Aún no hay ciudades registradas.
+            </div>
+          ) : (() => {
+            const ciudadesFiltradas = busqueda.trim()
+              ? ciudades.filter(c => normalizarComparacion(c.nombre).includes(normalizarComparacion(busqueda)))
+              : ciudades;
+            if (ciudadesFiltradas.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Ninguna ciudad coincide con "{busqueda}".
+                </div>
+              );
+            }
+            return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {ciudadesFiltradas.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
+                  {editId === c.id ? (
+                    <>
+                      <input
+                        type="text" autoFocus value={editNombre} onChange={e => setEditNombre(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(c); if (e.key === 'Escape') cancelEdit(); }}
+                        style={{ flex: 1, marginRight: 10, padding: '6px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button onClick={() => saveEdit(c)} disabled={editLoading} title="Guardar"
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(76,175,80,0.15)', color: '#4CAF50', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                        </button>
+                        <button onClick={cancelEdit} title="Cancelar"
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: c.estado === 'Activo' ? 'var(--text-primary)' : 'var(--text-muted)' }}>{c.nombre}</span>
+                        <span style={{ padding:'2px 8px',borderRadius:20,fontSize:10.5,fontWeight:700,background:c.estado==='Activo'?'rgba(76,175,80,.15)':'rgba(158,158,158,.18)',color:c.estado==='Activo'?'#4CAF50':'#9E9E9E' }}>
+                          {c.estado === 'Activo' ? 'Activa' : 'Inactiva'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button
+                          onClick={() => handleToggleEstado(c)}
+                          disabled={toggleLoadingId === c.id}
+                          title={c.estado === 'Activo' ? 'Desactivar ciudad' : 'Activar ciudad'}
+                          className={`toggle-btn ${c.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
+                          style={{ opacity: toggleLoadingId === c.id ? 0.5 : 1 }}>
+                          <span className="toggle-thumb"/>
+                        </button>
+                        <button onClick={() => startEdit(c)} title="Editar nombre"
+                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+            );
+          })()}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFields = [] }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
@@ -136,6 +401,26 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
   // solo esos muestran el check de válido; el error, en cambio, se muestra
   // apenas exista (incluido al enviar, para campos nunca tocados).
   const [touched, setTouched] = useState({});
+
+  // Catálogo dinámico de ciudades (ver ciudadesService) — reemplaza el
+  // texto fijo "Medellín" que tenía este campo antes.
+  const [ciudades, setCiudades] = useState([]);
+  useEffect(() => {
+    ciudadesService.getAll()
+      .then(d => setCiudades(Array.isArray(d) ? d : []))
+      .catch(() => setCiudades([]));
+  }, []);
+  const [showModalCiudades, setShowModalCiudades] = useState(false);
+  // Refs para el autoscroll/foco al primer campo con error al enviar —
+  // en el mismo orden visual en que aparecen en el formulario.
+  const nombreCompletoRef = useRef();
+  const numeroDocumentoRef = useRef();
+  const nitRef = useRef();
+  const nombreRef = useRef();
+  const personaContactoRef = useRef();
+  const telefonoRef = useRef();
+  const correoRef = useRef();
+  const ciudadRef = useRef();
 
   useEffect(() => {
     if (initialData) {
@@ -154,7 +439,11 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         telefono:        initialData.telefono        || '',
         correo:          initialData.correo          || '',
         direccion:       initialData.direccion       || '',
-        ciudad:          'Medellín',
+        // Antes esto se forzaba siempre a 'Medellín' (el campo era fijo).
+        // Ahora, al editar un proveedor ya existente, se respeta la ciudad
+        // real que tiene guardada — solo un proveedor NUEVO arranca en
+        // 'Medellín' como valor por defecto (ver EMPTY_FORM).
+        ciudad:          initialData.ciudad || 'Medellín',
         observaciones:   initialData.observaciones   || '',
         estado:          initialData.estado !== undefined ? initialData.estado : 'Activo'
       });
@@ -212,6 +501,9 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
     else if (f.telefono.length !== TELEFONO_LEN) errs.telefono = `El teléfono debe tener exactamente ${TELEFONO_LEN} dígitos`;
     if (!f.correo.trim())   errs.correo   = 'El correo es obligatorio';
     else if (!/\S+@\S+\.\S+/.test(f.correo)) errs.correo = 'Ingresa un correo válido';
+    // Ciudad vuelve a ser un campo real (ya no fijo) — obligatorio, igual
+    // que como funcionaba antes de dejarlo en "Medellín" a secas.
+    if (!f.ciudad) errs.ciudad = 'Selecciona una ciudad';
     return errs;
   };
 
@@ -255,16 +547,12 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
 
     const newForm = { ...form, [name]: v };
     setForm(newForm);
-    // "ciudad" es un select — una elección completa apenas cambia, se
-    // valida de inmediato. Los campos de texto solo limpian su error
-    // mientras se escribe; se validan al perder el foco (ver handleBlur),
-    // para no marcar error a mitad de tecleo.
-    // Validación en tiempo real para TODOS los campos: antes solo
-    // "ciudad" (un select) se validaba de inmediato; los campos de texto
-    // (Nombre completo, Persona de contacto, Razón Social, Documento,
-    // NIT, Teléfono, Correo) esperaban a que el usuario saliera del
-    // campo (onBlur) para mostrar o quitar el error.
-    touchAndValidate(name, newForm);
+    // Validación no agresiva: la primera vez que se interactúa con un
+    // campo (onChange) NUNCA introduce una alerta nueva — solo revalida
+    // en vivo si el campo YA tiene un error visible (para poder LIMPIARLO
+    // tan pronto el valor quede correcto). La alerta nueva solo aparece
+    // al salir del campo (onBlur, ver abajo) o al enviar el formulario.
+    if (errors[name]) touchAndValidate(name, newForm);
   };
 
   // onBlur genérico para los campos de texto validados.
@@ -273,6 +561,14 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
   // Al cambiar el tipo de documento, lo que ya estaba escrito en "Número
   // de documento" se vuelve a filtrar con la regla del nuevo tipo (ej: si
   // tenía letras y pasa de CE a CC, se limpian).
+  // Ciudad ahora pasa por BuscadorSelect (recibe el valor directo, no un
+  // evento) en vez del onChange genérico usado por los demás campos.
+  const handleCiudadChange = (value) => {
+    const newForm = { ...form, ciudad: value };
+    setForm(newForm);
+    touchAndValidate('ciudad', newForm);
+  };
+
   const handleTipoDocumentoChange = (e) => {
     const nuevoTipo = e.target.value;
     const newForm = { ...form, tipoDocumento: nuevoTipo, numeroDocumento: filtrarNumeroDocumento(nuevoTipo, form.numeroDocumento) };
@@ -286,7 +582,23 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
   const handleSubmit = (e) => {
     e.preventDefault();
     const errs = validate();
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      // Marca TODOS los campos con error como tocados al enviar, para que
+      // se disparen las alertas de los que el usuario nunca llegó a tocar.
+      setTouched(prev => ({ ...prev, ...Object.fromEntries(Object.keys(errs).map(k => [k, true])) }));
+      setTimeout(() => {
+        if (errs.nombreCompleto) nombreCompletoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.numeroDocumento) numeroDocumentoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.nit) nitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.nombre) nombreRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.personaContacto) personaContactoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.telefono) telefonoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.correo) correoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else if (errs.ciudad) ciudadRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      return;
+    }
 
     // "nombre" siempre queda con un valor de despliegue coherente, para
     // que el listado, la búsqueda y el detalle de Proveedores (que leen
@@ -303,7 +615,18 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
     });
   };
 
+  // Al editar, si la ciudad ya guardada quedó inactiva mientras tanto, se
+  // sigue mostrando en la lista (con "(Inactiva)") para no perder la
+  // selección actual — mismo criterio ya usado para el proveedor
+  // inactivo en InsumoForm.jsx.
+  const ciudadesActivas = ciudades.filter(c => c.estado === 'Activo');
+  const ciudadActualInactiva = form.ciudad && !ciudadesActivas.some(c => c.nombre === form.ciudad)
+    ? ciudades.find(c => c.nombre === form.ciudad)
+    : null;
+  const opcionesCiudad = ciudadActualInactiva ? [...ciudadesActivas, ciudadActualInactiva] : ciudadesActivas;
+
   return (
+    <>
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
       {/* Toggle Persona Natural / Persona Jurídica — reemplaza cualquier
           campo seleccionable de "tipo de persona": es la propia elección
@@ -330,7 +653,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
 
         {esNatural ? (
           <>
-            <div className={`fg ${errors.nombreCompleto ? 'fg-error' : ''}`}>
+            <div ref={nombreCompletoRef} className={`fg ${errors.nombreCompleto ? 'fg-error' : ''}`}>
               <label>Nombre completo <span className="req">*</span></label>
               <input type="text" name="nombreCompleto" value={form.nombreCompleto}
                 onChange={handleChange} onBlur={handleBlur} placeholder="Ej: María José Pérez Gómez" maxLength={NOMBRE_COMPLETO_MAX} />
@@ -348,7 +671,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
               </select>
             </div>
 
-            <div className={`fg ${errors.numeroDocumento ? 'fg-error' : ''}`}>
+            <div ref={numeroDocumentoRef} className={`fg ${errors.numeroDocumento ? 'fg-error' : ''}`}>
               <label>Número de documento <span className="req">*</span></label>
               <input type="text" name="numeroDocumento" value={form.numeroDocumento}
                 onChange={handleChange} onBlur={handleBlur}
@@ -361,7 +684,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
           </>
         ) : (
           <>
-            <div className={`fg ${errors.nit ? 'fg-error' : ''}`}>
+            <div ref={nitRef} className={`fg ${errors.nit ? 'fg-error' : ''}`}>
               <label>NIT <span className="req">*</span></label>
               <input type="text" name="nit" value={form.nit}
                 onChange={handleChange} onBlur={handleBlur} placeholder="Ej: 900123456-1" maxLength={11} />
@@ -371,7 +694,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
                 : touched.nit && form.nit.trim() && <span className="ok-msg">✓ Válido</span>}
             </div>
 
-            <div className={`fg ${errors.nombre ? 'fg-error' : ''}`}>
+            <div ref={nombreRef} className={`fg ${errors.nombre ? 'fg-error' : ''}`}>
               <label>Razón social <span className="req">*</span></label>
               <input type="text" name="nombre" value={form.nombre}
                 onChange={handleChange} onBlur={handleBlur} placeholder="Ej: Distribuidora Central S.A.S" maxLength={RAZON_SOCIAL_MAX} />
@@ -382,7 +705,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
                 : touched.nombre && form.nombre.trim() && <span className="ok-msg">✓ Válido</span>}
             </div>
 
-            <div className={`fg ${errors.personaContacto ? 'fg-error' : ''}`}>
+            <div ref={personaContactoRef} className={`fg ${errors.personaContacto ? 'fg-error' : ''}`}>
               <label>Persona de contacto <span className="req">*</span></label>
               <input type="text" name="personaContacto" value={form.personaContacto}
                 onChange={handleChange} onBlur={handleBlur} placeholder="Ej: Laura Ramírez" maxLength={NOMBRE_COMPLETO_MAX} />
@@ -395,7 +718,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
           </>
         )}
 
-        <div className={`fg ${errors.telefono ? 'fg-error' : ''}`}>
+        <div ref={telefonoRef} className={`fg ${errors.telefono ? 'fg-error' : ''}`}>
           <label>Teléfono <span className="req">*</span></label>
           <input type="text" inputMode="numeric" name="telefono" value={form.telefono}
             onChange={handleChange} onBlur={handleBlur} placeholder="Ej: 3001234567" maxLength={TELEFONO_LEN} />
@@ -405,7 +728,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
             : touched.telefono && form.telefono.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
-        <div className={`fg ${errors.correo ? 'fg-error' : ''}`}>
+        <div ref={correoRef} className={`fg ${errors.correo ? 'fg-error' : ''}`}>
           <label>Correo electrónico <span className="req">*</span></label>
           <input type="text" name="correo" value={form.correo}
             onChange={handleChange} onBlur={handleBlur} placeholder="proveedor@correo.com" maxLength={CORREO_MAX} />
@@ -415,17 +738,30 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
             : touched.correo && form.correo.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
-        <div className="fg">
-          <label>Ciudad</label>
-          <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-            </svg>
-            Medellín
-          </div>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-            El sistema solo maneja proveedores de Medellín.
-          </span>
+        <div ref={ciudadRef} className={`fg ${errors.ciudad ? 'fg-error' : ''}`}>
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span>Ciudad <span className="req">*</span></span>
+            <button type="button" onClick={() => setShowModalCiudades(true)}
+              style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+              + Añadir ciudad
+            </button>
+          </label>
+          {opcionesCiudad.length > 0 ? (
+            <BuscadorSelect
+              value={form.ciudad}
+              options={opcionesCiudad.map(c => ({ value: c.nombre, label: c.nombre + (c.estado !== 'Activo' ? ' (Inactiva)' : '') }))}
+              onChange={handleCiudadChange}
+              placeholder="Buscar ciudad..."
+              emptyMessage="Ninguna ciudad coincide con esa búsqueda."
+            />
+          ) : (
+            <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
+              ⚠ No hay ciudades activas registradas. Usa "+ Añadir ciudad" para crear la primera.
+            </div>
+          )}
+          {errors.ciudad
+            ? <span className="err-msg">{errors.ciudad}</span>
+            : touched.ciudad && form.ciudad && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div className="fg">
@@ -434,7 +770,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
             onChange={handleChange} placeholder="Ej: Cra 50 #30-20" maxLength={DIRECCION_MAX} />
           <span style={{ fontSize:12,color:'var(--text-muted)',display:'block' }}>Máximo {DIRECCION_MAX} caracteres.</span>
         </div>
-<div className="fg fg-estado">
+        <div className="fg fg-estado">
           <label>Estado</label>
           <div className="estado-toggle-wrap">
             <label className="switch">
@@ -476,6 +812,14 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         </button>
       </div>
     </form>
+
+    {showModalCiudades && (
+      <ModalCiudades
+        onClose={() => setShowModalCiudades(false)}
+        onCiudadesActualizadas={setCiudades}
+      />
+    )}
+    </>
   );
 };
 

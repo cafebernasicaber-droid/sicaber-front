@@ -116,7 +116,7 @@ function ModalVerProveedor({ proveedor, onClose, onEditar, onEliminar, onToggle,
           <div style={{ background:'var(--bg-surface-3)',borderRadius:12,padding:'14px 18px',border:'1px solid var(--border)',marginBottom:14 }}>
             <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:6 }}>Observaciones</div>
             <p style={{ fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,margin:0,wordBreak:'break-word',overflowWrap:'anywhere' }}>{proveedor.observaciones || 'Sin observaciones registradas.'}</p>
-            <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(proveedor.fechaCreacion)}</div>
+            <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(proveedor.created_at)}</div>
           </div>
 
           {/* Acciones */}

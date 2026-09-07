@@ -38,6 +38,7 @@ import ToppingsPage from './features/toppings/pages/ToppingsPage';
 import VentasPage from './features/ventas/pages/VentasPage';
 import DevolucionesPage from './features/devoluciones/pages/DevolucionesPage';
 import FichasTecnicasPage from './features/fichasTecnicas/pages/FichasTecnicasPage';
+import FichaTecnicaFormPage from './features/fichasTecnicas/pages/FichaTecnicaFormPage';
 
 import CajeroPage    from './features/cajero/pages/CajeroPage';
 import VerificarCuentaPage   from './features/auth/pages/VerificarCuentaPage';
@@ -78,6 +79,8 @@ const AppRoutes = () => (
     <Route path="/ventas"          element={<PR modulo="ventas"><VentasPage /></PR>} />
     <Route path="/devoluciones"    element={<PR modulo="devoluciones"><DevolucionesPage /></PR>} />
     <Route path="/fichas-tecnicas" element={<PR modulo="fichas"><FichasTecnicasPage /></PR>} />
+    <Route path="/fichas-tecnicas/nueva" element={<PR modulo="fichas" accion="crear"><FichaTecnicaFormPage /></PR>} />
+    <Route path="/fichas-tecnicas/editar/:id" element={<PR modulo="fichas" accion="editar"><FichaTecnicaFormPage /></PR>} />
 
     <Route path="/productos"            element={<PR modulo="productos"><ProductosPage /></PR>} />
     <Route path="/productos/nuevo"      element={<PR modulo="productos" accion="crear"><ProductoFormPage /></PR>} />
@@ -108,4 +111,4 @@ const AppRoutes = () => (
   </Routes>
 );
 
-export default AppRoutes; 
+export default AppRoutes;
