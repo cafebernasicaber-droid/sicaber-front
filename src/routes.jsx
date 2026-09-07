@@ -23,6 +23,7 @@ import InsumosPage from './features/insumos/pages/InsumosPage';
 import ProveedoresPage from './features/proveedores/pages/ProveedoresPage';
 
 import ComprasPage from './features/compras/pages/ComprasPage';
+import RegistrarCompraPage from './features/compras/pages/RegistrarCompraPage';
 import HistorialComprasPage from './features/compras/pages/HistorialComprasPage';
 
 import PedidosPage from './features/pedidos/pages/PedidosPage';
@@ -95,6 +96,7 @@ const AppRoutes = () => (
     <Route path="/proveedores"            element={<PR modulo="proveedores"><ProveedoresPage /></PR>} />
 
     <Route path="/compras"             element={<PR modulo="compras"><ComprasPage /></PR>} />
+    <Route path="/compras/registrar"   element={<PR modulo="compras" accion="crear"><RegistrarCompraPage /></PR>} />
     <Route path="/compras/historial"   element={<PR modulo="compras"><HistorialComprasPage /></PR>} />
 
     {/* ── Cajero ── */}
