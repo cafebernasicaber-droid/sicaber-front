@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import insumosService from '../services/insumosService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
 import SearchSelect from '../../../shared/components/SearchSelect';
+import { useAuth } from '../../../shared/contexts/AuthContext';
 import './InsumoForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
 import { permiteDecimales, errorCantidad, localesStockPayload, desglosePorLocal } from '../../../shared/constants/insumoTipos';
@@ -42,6 +43,11 @@ const filtrarNombreInsumo = (v) => v.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñ�
 const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
 
 const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias, locales = [], localActivoId }) => {
+  const { user } = useAuth();
+  // Usuario sin local fijo (Superadministrador / Administrador): la sede es
+  // 'Ambos' o viene vacía. Debe indicar a mano en qué local(es) existe el
+  // insumo — antes esto se avisaba solo con un error rojo del backend.
+  const sinLocalFijo = !user?.sede || user.sede === 'Ambos';
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   // batch 3 item 3 — stock por local
@@ -111,14 +117,32 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     }));
   }, [locales, initialData, isEditing]);
 
-  // Al crear: si el usuario ya eligió un local en las pestañas de la vista
-  // (localActivoId distinto de 'todos'), lo proponemos como destino de la
-  // cantidad inicial.
+  // batch 9.6 item 1 — locales candidatos para la CANTIDAD INICIAL: son
+  // exactamente los marcados en "¿En qué locales existe este insumo?"
+  // (o todos los activos si se eligió "Todos los locales"). Nunca se
+  // ofrece un local donde el insumo no va a existir.
+  const localesInicialElegibles = (todosLocales
+    ? locales
+    : locales.filter(l => localesActivos.includes(String(l.id))));
+
+  // El selector de local del stock inicial hereda lo ya elegido arriba:
+  //  · exactamente 1 candidato  → se preselecciona ese (y se muestra fijo)
+  //  · el local ya elegido dejó de ser candidato → se reinicia el campo
+  //  · varios candidatos y aún sin elegir → se propone el local activo de
+  //    la vista si está entre los candidatos
   useEffect(() => {
-    if (!isEditing && localActivoId && localActivoId !== 'todos') {
-      setStockInicial(s => (s.localId ? s : { ...s, localId: String(localActivoId) }));
-    }
-  }, [isEditing, localActivoId]);
+    if (isEditing) return;
+    const ids = localesInicialElegibles.map(l => String(l.id));
+    setStockInicial(s => {
+      if (ids.length === 1) return s.localId === ids[0] ? s : { ...s, localId: ids[0] };
+      if (s.localId && !ids.includes(s.localId)) return { ...s, localId: '' };
+      if (!s.localId && localActivoId && localActivoId !== 'todos' && ids.includes(String(localActivoId))) {
+        return { ...s, localId: String(localActivoId) };
+      }
+      return s;
+    });
+    // eslint-disable-next-line
+  }, [isEditing, todosLocales, localesActivos, locales, localActivoId]);
 
   // batch 4 item 7 — locales donde el insumo está activo (edición).
   useEffect(() => {
@@ -178,7 +202,9 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       if (eMin) errs.stockMinimo = eMin === 'Requerido' ? 'El stock mínimo es obligatorio' : eMin.replace('Debe ser 1 o mayor', 'El stock mínimo debe ser 1 o mayor');
       if (stockInicialAbierto) {
         const eC = errorCantidad(stockInicial.cantidad, f.unidadMedida, { min: 0 });
+        const hayCandidatos = (todosLocales ? locales : locales.filter(l => localesActivos.includes(String(l.id)))).length > 0;
         if (eC) errs.stockInicial = eC === 'Requerido' ? 'Escribe la cantidad existente' : eC;
+        else if (!hayCandidatos) errs.stockInicial = 'Marca primero en qué locales existe el insumo';
         else if (!stockInicial.localId) errs.stockInicial = 'Elige a qué local corresponde esa cantidad';
       }
     } else {
@@ -299,15 +325,45 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     onSubmit(payload);
   };
 
+  // batch 9.6 item 2 — el backend a veces responde con INSTRUCCIONES (no
+  // fallos) redactadas en voseo y con nombres técnicos de campo. Se
+  // normalizan a la misma persona verbal del resto del sistema, se les
+  // quita la jerga ("campo local_id"), y si son una instrucción se
+  // muestran con tono informativo (azul), no como error (rojo).
+  const humanizarMensaje = (msg = '') => msg
+    .replace(/\s*\(\s*campo\s+[a-z_]+\s*\)/gi, '')
+    .replace(/\bcampo\s+local_id\b/gi, 'local')
+    .replace(/\blocal_id\b/gi, 'local')
+    .replace(/\bno ten[eé]s\b/gi, 'no tienes')
+    .replace(/\bten[eé]s\b/gi, 'tienes')
+    .replace(/\bemp[ie]zá\b/gi, 'empieza')
+    .replace(/\belegí\b/gi, 'elige')
+    .replace(/\bseleccioná\b/gi, 'selecciona')
+    .replace(/\bindicá\b/gi, 'indica')
+    .replace(/\basigná\b/gi, 'asigna')
+    .replace(/\bdeb[eé]s\b/gi, 'debes')
+    .trim();
+  const serverErrorEsInstruccion = /superadministrador|no tienes un local|local fijo|elige a qu[eé] local|no ten[eé]s un local/i.test(serverError || '');
+  const serverErrorMsg = humanizarMensaje(serverError);
+
   return (
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
       {serverError && (
-        <div className="form-server-error">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          {serverError}
-        </div>
+        serverErrorEsInstruccion ? (
+          <div className="form-server-note">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            {serverErrorMsg}
+          </div>
+        ) : (
+          <div className="form-server-error">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            {serverErrorMsg}
+          </div>
+        )
       )}
 
       <div className="form-grid">
@@ -438,6 +494,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         {locales.length > 0 && (
           <div className={`fg fg-full ${errors.localesActivos ? 'fg-error' : ''}`}>
             <label>{isEditing ? 'Locales donde está activo el insumo' : '¿En qué locales existe este insumo?'} <span className="req">*</span></label>
+            {!isEditing && sinLocalFijo && (
+              <div className="form-server-note" style={{ marginBottom: 10 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                Tu usuario no está asignado a un local fijo. Indica aquí en qué local o locales existe este insumo.
+              </div>
+            )}
             {!isEditing && (
               <div style={{ display:'flex', gap:8, marginTop:4, marginBottom:8, flexWrap:'wrap' }}>
                 <button type="button" onClick={() => { setTodosLocales(true); setLocalesActivos(locales.map(l => String(l.id))); setErrors(e => ({ ...e, localesActivos:'' })); }}
@@ -473,65 +537,92 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </div>
         )}
 
-        {/* batch 3 item 3 — Stock actual + Stock mínimo. Por local. */}
+        {/* batch 3 item 3 / batch 9.6 item 3 — bloque de Stock: el MÍNIMO es
+            único para el insumo; el stock ACTUAL entra a un solo local. Los
+            dos conceptos van en columnas separadas por un divisor para que
+            no se lean como si hablaran de lo mismo. */}
         {!isEditing ? (
-          <>
-            <div className={`fg ${errors.stockMinimo ? 'fg-error' : ''}`}>
-              <label>Stock mínimo <span className="req">*</span></label>
-              <input
-                type="number" name="stockMinimo" value={form.stockMinimo}
-                step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
-                onChange={e => { const nf = { ...form, stockMinimo: e.target.value }; setForm(nf); touchAndValidate('stockMinimo', nf); }}
-                onBlur={handleBlur}
-                placeholder={permiteDecimales(form.unidadMedida) ? 'Ej: 2.5' : '1'}
-              />
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Se aplica a todos los locales al crear; luego se ajusta por local al editar.
-                {form.unidadMedida && !permiteDecimales(form.unidadMedida) && ' La unidad "unidad" solo admite enteros.'}
-              </span>
-              {errors.stockMinimo
-                ? <span className="err-msg">{errors.stockMinimo}</span>
-                : touched.stockMinimo && form.stockMinimo !== '' && <span className="ok-msg">✓ Válido</span>}
+          <div className="stock-block">
+            <div className="form-section-title" style={{ marginBottom: 0 }}>Stock</div>
+            <div className="stock-block__intro">
+              <span>· El <strong>stock mínimo</strong> es un único valor para el insumo — el nivel que dispara la alerta de "stock bajo".</span>
+              <span>· El <strong>stock actual</strong> es <strong>por local</strong>: la cantidad inicial entra solo al local que elijas y los demás quedan en 0.</span>
             </div>
 
-            <div className={`fg ${errors.stockInicial ? 'fg-error' : ''}`}>
-              <label>Stock actual</label>
-              {!stockInicialAbierto ? (
-                <>
-                  <button type="button" onClick={abrirStockInicial}
-                    style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px dashed var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--color-green,#4CAF50)', fontWeight:700, cursor: 'pointer' }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    ¿Hay cantidad existente?
-                  </button>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                    Si no, el insumo se crea con 0 en todos los locales.
-                  </span>
-                </>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input
-                    type="number" step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
-                    placeholder={`Cantidad existente (${form.unidadMedida || 'unidad'})`}
-                    value={stockInicial.cantidad}
-                    onChange={e => { setStockInicial(s => ({ ...s, cantidad: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}
-                  />
-                  <select value={stockInicial.localId}
-                    onChange={e => { setStockInicial(s => ({ ...s, localId: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}>
-                    <option value="">— ¿A qué local corresponde? —</option>
-                    {locales.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                  </select>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    Solo este local recibe la cantidad inicial; el resto de locales queda en 0.
-                  </span>
-                  <button type="button" onClick={cerrarStockInicial}
-                    style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, color: 'var(--text-muted)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
-                    Cancelar — dejar todo en 0
-                  </button>
-                </div>
-              )}
-              {errors.stockInicial && <span className="err-msg">{errors.stockInicial}</span>}
+            <div className="stock-cols">
+              <div className={`stock-col ${errors.stockMinimo ? 'fg fg-error' : 'fg'}`}>
+                <label>Stock mínimo <span className="req">*</span></label>
+                <input
+                  type="number" name="stockMinimo" value={form.stockMinimo}
+                  step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
+                  onChange={e => { const nf = { ...form, stockMinimo: e.target.value }; setForm(nf); touchAndValidate('stockMinimo', nf); }}
+                  onBlur={handleBlur}
+                  placeholder={permiteDecimales(form.unidadMedida) ? 'Ej: 2.5' : '1'}
+                />
+                <span className="stock-help">
+                  Igual para todos los locales. Podrás ajustarlo por local cuando edites el insumo.
+                  {form.unidadMedida && !permiteDecimales(form.unidadMedida) && ' La unidad "unidad" solo admite enteros.'}
+                </span>
+                {errors.stockMinimo
+                  ? <span className="err-msg">{errors.stockMinimo}</span>
+                  : touched.stockMinimo && form.stockMinimo !== '' && <span className="ok-msg">✓ Válido</span>}
+              </div>
+
+              <div className={`stock-col stock-col--actual ${errors.stockInicial ? 'fg fg-error' : 'fg'}`}>
+                <label>Stock actual <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>(opcional)</span></label>
+                {!stockInicialAbierto ? (
+                  <>
+                    <button type="button" onClick={abrirStockInicial}
+                      style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px dashed var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--color-green,#4CAF50)', fontWeight:700, cursor: 'pointer' }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      ¿Hay cantidad existente?
+                    </button>
+                    <span className="stock-help">
+                      Si no, el insumo se crea con 0 en todos los locales.
+                    </span>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <input
+                      type="number" step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
+                      placeholder={`Cantidad existente (${form.unidadMedida || 'unidad'})`}
+                      value={stockInicial.cantidad}
+                      onChange={e => { setStockInicial(s => ({ ...s, cantidad: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}
+                    />
+                    {/* batch 9.6 item 1 — el local del stock inicial hereda lo
+                        ya elegido en "¿En qué locales existe este insumo?":
+                         · 1 local marcado  → texto fijo (no hay alternativa)
+                         · varios marcados  → desplegable SOLO con esos
+                         · "Todos"          → todos los locales activos */}
+                    {localesInicialElegibles.length === 0 ? (
+                      <div className="stock-inicial-fijo stock-inicial-fijo--muted">
+                        Marca primero, arriba, en qué locales existe el insumo.
+                      </div>
+                    ) : localesInicialElegibles.length === 1 ? (
+                      <div className="stock-inicial-fijo">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        <span>Entra a <strong>{localesInicialElegibles[0].nombre}</strong> — es el único local marcado.</span>
+                      </div>
+                    ) : (
+                      <select value={stockInicial.localId}
+                        onChange={e => { setStockInicial(s => ({ ...s, localId: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}>
+                        <option value="">— ¿A qué local corresponde? —</option>
+                        {localesInicialElegibles.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                      </select>
+                    )}
+                    <span className="stock-help">
+                      Solo ese local recibe la cantidad inicial; el resto queda en 0.
+                    </span>
+                    <button type="button" onClick={cerrarStockInicial}
+                      style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, color: 'var(--text-muted)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
+                      Cancelar — dejar todo en 0
+                    </button>
+                  </div>
+                )}
+                {errors.stockInicial && <span className="err-msg">{errors.stockInicial}</span>}
+              </div>
             </div>
-          </>
+          </div>
         ) : (
           <div className={`fg fg-full ${errors.localesStock ? 'fg-error' : ''}`}>
             <label>Stock por local</label>

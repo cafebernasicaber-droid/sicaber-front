@@ -176,6 +176,41 @@
   margin-bottom: 20px;
 }
 
+/* batch 9.6 item 2 — variante INFORMATIVA (instrucción, no fallo): azul,
+   no rojo. Para mensajes del backend que son una indicación de cómo
+   llenar el formulario, y para el aviso de "usuario sin local fijo". */
+.form-server-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: rgba(21,101,192,.12); color: var(--text-secondary);
+  border: 1px solid rgba(21,101,192,.32); border-radius: 8px;
+  padding: 12px 16px; font-size: 13px; font-weight: 500; line-height: 1.5;
+  margin-bottom: 20px;
+}
+.form-server-note svg { flex-shrink: 0; margin-top: 1px; color: #2196F3; }
+
+/* batch 9.6 item 3 — bloque de Stock: mínimo (único) vs actual (por local)
+   claramente separados por un divisor. */
+.stock-block { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px; }
+.stock-block__intro { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.stock-block__intro strong { color: var(--text-secondary); font-weight: 700; }
+.stock-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.stock-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.stock-col--actual { padding-left: 20px; border-left: 1px solid var(--border); }
+.stock-help { font-size: 12px; color: var(--text-muted); margin-top: 4px; display: block; }
+.stock-inicial-fijo {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border: 1px solid var(--border-input); border-radius: 8px;
+  background: var(--bg-hover, rgba(128,128,128,.08));
+  font-size: 13px; color: var(--text-secondary);
+}
+.stock-inicial-fijo--muted { color: var(--text-muted); font-style: italic; }
+.stock-inicial-fijo strong { color: var(--text-primary); font-weight: 700; }
+
+@media (max-width: 600px) {
+  .stock-cols { grid-template-columns: 1fr; }
+  .stock-col--actual { padding-left: 0; border-left: none; padding-top: 16px; border-top: 1px solid var(--border); }
+}
+
 .form-section-title {
   font-size: 12px; font-weight: 700; color: var(--text-secondary); letter-spacing: 0.8px;
   margin-bottom: 14px; padding-bottom: 6px;
