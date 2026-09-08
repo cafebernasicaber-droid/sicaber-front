@@ -4,7 +4,8 @@ import categoriasInsumosService from '../services/categoriasInsumosService';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import './InsumoForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
-import { permiteDecimales, errorCantidad, localesStockPayload, desglosePorLocal } from '../../../shared/constants/insumoTipos';
+import { permiteDecimales, errorCantidad, desglosePorLocal } from '../../../shared/constants/insumoTipos';
+import { construirPayloadInsumo } from './construirPayloadInsumo';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -63,7 +64,10 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     setLocalesActivos(prev => {
       const s = String(id);
       const next = prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s];
-      setErrors(e => ({ ...e, localesActivos: '' }));
+      // Al cambiar los locales marcados también se recalcula el local del
+      // stock inicial (es derivado): limpia su error para que no quede uno
+      // viejo diciendo "elige local" cuando ya quedó resuelto.
+      setErrors(e => ({ ...e, localesActivos: '', stockInicial: '' }));
       return next;
     });
   };
@@ -133,25 +137,25 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
   const localesInicialElegibles = (todosLocales
     ? locales
     : locales.filter(l => localesActivos.includes(String(l.id))));
+  const idsInicialElegibles = localesInicialElegibles.map(l => String(l.id));
 
-  // El selector de local del stock inicial hereda lo ya elegido arriba:
-  //  · exactamente 1 candidato  → se preselecciona ese (y se muestra fijo)
-  //  · el local ya elegido dejó de ser candidato → se reinicia el campo
-  //  · varios candidatos y aún sin elegir → se propone el local activo de
-  //    la vista si está entre los candidatos
-  useEffect(() => {
-    if (isEditing) return;
-    const ids = localesInicialElegibles.map(l => String(l.id));
-    setStockInicial(s => {
-      if (ids.length === 1) return s.localId === ids[0] ? s : { ...s, localId: ids[0] };
-      if (s.localId && !ids.includes(s.localId)) return { ...s, localId: '' };
-      if (!s.localId && localActivoId && localActivoId !== 'todos' && ids.includes(String(localActivoId))) {
-        return { ...s, localId: String(localActivoId) };
-      }
-      return s;
-    });
-    // eslint-disable-next-line
-  }, [isEditing, todosLocales, localesActivos, locales, localActivoId]);
+  // batch 9.9 — el local del stock inicial es un VALOR DERIVADO, no un
+  // efecto que escribe en el estado con un render de retraso (esa carrera
+  // era la causa del 400: la UI mostraba "Entra a X" pero el payload
+  // viajaba sin local):
+  //  · 1 candidato  → ES ese local, sin alternativa posible.
+  //  · varios       → el que el usuario eligió en el <select>, si sigue
+  //                   siendo candidato; si no, ninguno.
+  //  · 0 candidatos → ninguno.
+  // `stockInicial.localId` solo guarda la elección MANUAL del usuario
+  // cuando hay varios candidatos. Todo lo demás (texto, validación,
+  // payload) usa SIEMPRE `localInicialEfectivo`.
+  const localInicialEfectivo =
+    idsInicialElegibles.length === 1
+      ? idsInicialElegibles[0]
+      : (idsInicialElegibles.includes(String(stockInicial.localId))
+          ? String(stockInicial.localId)
+          : (idsInicialElegibles.includes(String(localActivoId)) ? String(localActivoId) : ''));
 
   // batch 4 item 7 — locales donde el insumo está activo (edición).
   useEffect(() => {
@@ -209,12 +213,18 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     if (!isEditing) {
       const eMin = errorCantidad(f.stockMinimo, f.unidadMedida, { min: 1 });
       if (eMin) errs.stockMinimo = eMin === 'Requerido' ? 'El stock mínimo es obligatorio' : eMin.replace('Debe ser 1 o mayor', 'El stock mínimo debe ser 1 o mayor');
-      if (stockInicialAbierto) {
-        const eC = errorCantidad(stockInicial.cantidad, f.unidadMedida, { min: 0 });
-        const hayCandidatos = (todosLocales ? locales : locales.filter(l => localesActivos.includes(String(l.id)))).length > 0;
-        if (eC) errs.stockInicial = eC === 'Requerido' ? 'Escribe la cantidad existente' : eC;
-        else if (!hayCandidatos) errs.stockInicial = 'Marca primero en qué locales existe el insumo';
-        else if (!stockInicial.localId) errs.stockInicial = 'Elige a qué local corresponde esa cantidad';
+      // Solo se valida el stock inicial si el panel está abierto Y hay una
+      // cantidad escrita. Panel abierto sin cantidad = "no hay stock
+      // inicial": no se pide local ni se manda nada (item 2).
+      const cantEscrita = stockInicialAbierto && String(stockInicial.cantidad).trim() !== '';
+      if (cantEscrita) {
+        const eC = errorCantidad(stockInicial.cantidad, f.unidadMedida, { min: 0, obligatorio: false });
+        if (eC) {
+          errs.stockInicial = eC;
+        } else if (Number(stockInicial.cantidad) > 0) {
+          if (idsInicialElegibles.length === 0) errs.stockInicial = 'Marca primero en qué locales existe el insumo';
+          else if (!localInicialEfectivo) errs.stockInicial = 'Elige a qué local corresponde esa cantidad';
+        }
       }
     } else {
       const filaMala = localesStock.some(r =>
@@ -306,69 +316,18 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       });
       return;
     }
-    const dec = permiteDecimales(form.unidadMedida);
-    const num = (v) => (dec ? Number(v) : Math.round(Number(v))) || 0;
+    // El payload se arma en una función PURA (construirPayloadInsumo):
+    // así el body no depende de ninguna carrera de useEffect. El local
+    // del stock inicial va SIEMPRE con el valor derivado ya resuelto.
+    const payload = construirPayloadInsumo({
+      form, isEditing, locales, todosLocales, localesActivos,
+      stockInicialAbierto, stockInicial, localInicialEfectivo, localesStock,
+    });
 
-    // ── Payload EXPLÍCITO (antes se hacía `...form` a ciegas, lo que
-    //    arrastraba `stockActual: ''` — string vacío que el backend
-    //    rechaza — y cualquier campo residual). El insumo se guarda SIN
-    //    proveedor (batch 7) y SIN flags de topping/adición (batch 8):
-    //    esos campos NO se incluyen a propósito. ──
-    const payload = {
-      nombre: form.nombre.trim(),
-      categoria: form.categoria,
-      categoriaId: form.categoriaId,
-      categoria_id: isNaN(Number(form.categoriaId)) ? form.categoriaId : Number(form.categoriaId),
-      unidadMedida: form.unidadMedida,
-      estado: form.estado,
-      descripcion: (form.descripcion || '').trim().slice(0, DESCRIPCION_INSUMO_MAX),
-      tamanoOz: form.unidadMedida === 'oz' && form.tamanoOz !== '' ? Number(form.tamanoOz) : null,
-      proveedor: null, proveedorId: null,
-    };
-
-    // batch 4 item 7 — locales donde EXISTE el insumo
-    const localesIds = (todosLocales ? (locales || []).map(l => String(l.id)) : localesActivos)
-      .map(id => (isNaN(Number(id)) ? id : Number(id)));
-    if (localesIds.length) {
-      payload.locales_ids = localesIds;
-      payload.localesIds = localesIds;
-      payload.todos_locales = todosLocales;
-    }
-
-    if (!isEditing) {
-      const min = dec ? Math.max(1, Number(form.stockMinimo) || 1) : Math.max(1, Math.round(Number(form.stockMinimo) || 1));
-      payload.stockMinimo = min;
-      payload.stock_minimo = min;
-      // El stock arranca en 0 en todos los locales; la cantidad existente
-      // (si la hay) va aparte en stock_inicial + local_inicial_id. Se manda
-      // como número, nunca como '' (era lo que rompía el POST).
-      payload.stockActual = 0;
-      payload.stock_actual = 0;
-
-      // Stock inicial: SOLO si el panel está abierto, hay una cantidad real
-      // (> 0) y el local elegido está entre los locales marcados. Si no, se
-      // manda 0 y NINGÚN local — nunca un local "suelto" sin cantidad
-      // (que era una de las causas del 400).
-      const idsElegibles = localesInicialElegibles.map(l => String(l.id));
-      const cantNum = Number(stockInicial.cantidad);
-      const hayCantidad = stockInicialAbierto && stockInicial.cantidad !== '' && !isNaN(cantNum) && cantNum > 0;
-      const localValido = !!stockInicial.localId && idsElegibles.includes(String(stockInicial.localId));
-      if (hayCantidad && localValido) {
-        const q = num(stockInicial.cantidad);
-        payload.stockInicial = q;
-        payload.stock_inicial = q;
-        payload.localInicialId = stockInicial.localId;
-        payload.local_inicial_id = stockInicial.localId;
-      } else {
-        payload.stockInicial = 0;
-        payload.stock_inicial = 0;
-      }
-    } else {
-      const filas = localesStock.map(r => ({ localId: r.localId, stockActual: num(r.stockActual), stockMinimo: num(r.stockMinimo) }));
-      Object.assign(payload, localesStockPayload(filas));
-      // valor representativo para cualquier lector antiguo del campo plano
-      payload.stockMinimo = filas.length ? filas[0].stockMinimo : Number(form.stockMinimo) || 0;
-    }
+    // Deja el payload EXACTO en consola para poder compararlo con lo que
+    // espera la API (DevTools > Console). No expone datos sensibles.
+    // eslint-disable-next-line no-console
+    console.debug('[InsumoForm] POST /insumos payload →', JSON.parse(JSON.stringify(payload)));
 
     submittingRef.current = true;
     setSubmitting(true);
@@ -549,11 +508,11 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             <label>{isEditing ? 'Locales donde está activo el insumo' : '¿En qué locales existe este insumo?'} <span className="req">*</span></label>
             {!isEditing && (
               <div style={{ display:'flex', gap:8, marginTop:4, marginBottom:8, flexWrap:'wrap' }}>
-                <button type="button" onClick={() => { setTodosLocales(true); setLocalesActivos(locales.map(l => String(l.id))); setErrors(e => ({ ...e, localesActivos:'' })); }}
+                <button type="button" onClick={() => { setTodosLocales(true); setLocalesActivos(locales.map(l => String(l.id))); setErrors(e => ({ ...e, localesActivos:'', stockInicial:'' })); }}
                   style={{ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${todosLocales ? '#4CAF50' : 'var(--border-input)'}`, background: todosLocales ? 'rgba(76,175,80,0.12)' : 'transparent', color: todosLocales ? '#2E7D32' : 'var(--text-secondary)', fontWeight:700, fontSize:12.5, cursor:'pointer' }}>
                   Todos los locales
                 </button>
-                <button type="button" onClick={() => setTodosLocales(false)}
+                <button type="button" onClick={() => { setTodosLocales(false); setErrors(e => ({ ...e, stockInicial:'' })); }}
                   style={{ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${!todosLocales ? '#4CAF50' : 'var(--border-input)'}`, background: !todosLocales ? 'rgba(76,175,80,0.12)' : 'transparent', color: !todosLocales ? '#2E7D32' : 'var(--text-secondary)', fontWeight:700, fontSize:12.5, cursor:'pointer' }}>
                   Locales específicos
                 </button>
@@ -646,15 +605,18 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                         Marca primero, arriba, en qué locales existe el insumo.
                       </div>
                     ) : localesInicialElegibles.length === 1 ? (
+                      // 1 candidato → ES ese local (localInicialEfectivo ya lo
+                      // refleja); el texto es el reflejo del valor, no un
+                      // sustituto del campo.
                       <div className="stock-inicial-fijo">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                         <span>Entra a <strong>{localesInicialElegibles[0].nombre}</strong> — es el único local marcado.</span>
                       </div>
                     ) : (
-                      <select value={stockInicial.localId}
+                      <select value={localInicialEfectivo}
                         onChange={e => { setStockInicial(s => ({ ...s, localId: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}>
                         <option value="">— ¿A qué local corresponde? —</option>
-                        {localesInicialElegibles.map(l => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                        {localesInicialElegibles.map(l => <option key={l.id} value={String(l.id)}>{l.nombre}</option>)}
                       </select>
                     )}
                     <span className="stock-help">
