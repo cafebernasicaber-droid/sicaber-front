@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import insumosService from '../services/insumosService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
 import SearchSelect from '../../../shared/components/SearchSelect';
-import { useAuth } from '../../../shared/contexts/AuthContext';
 import './InsumoForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
 import { permiteDecimales, errorCantidad, localesStockPayload, desglosePorLocal } from '../../../shared/constants/insumoTipos';
@@ -43,11 +42,6 @@ const filtrarNombreInsumo = (v) => v.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñ�
 const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
 
 const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias, locales = [], localActivoId }) => {
-  const { user } = useAuth();
-  // Usuario sin local fijo (Superadministrador / Administrador): la sede es
-  // 'Ambos' o viene vacía. Debe indicar a mano en qué local(es) existe el
-  // insumo — antes esto se avisaba solo con un error rojo del backend.
-  const sinLocalFijo = !user?.sede || user.sede === 'Ambos';
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   // batch 3 item 3 — stock por local
@@ -325,45 +319,50 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     onSubmit(payload);
   };
 
-  // batch 9.6 item 2 — el backend a veces responde con INSTRUCCIONES (no
-  // fallos) redactadas en voseo y con nombres técnicos de campo. Se
-  // normalizan a la misma persona verbal del resto del sistema, se les
-  // quita la jerga ("campo local_id"), y si son una instrucción se
-  // muestran con tono informativo (azul), no como error (rojo).
-  const humanizarMensaje = (msg = '') => msg
-    .replace(/\s*\(\s*campo\s+[a-z_]+\s*\)/gi, '')
-    .replace(/\bcampo\s+local_id\b/gi, 'local')
-    .replace(/\blocal_id\b/gi, 'local')
-    .replace(/\bno ten[eé]s\b/gi, 'no tienes')
-    .replace(/\bten[eé]s\b/gi, 'tienes')
-    .replace(/\bemp[ie]zá\b/gi, 'empieza')
-    .replace(/\belegí\b/gi, 'elige')
-    .replace(/\bseleccioná\b/gi, 'selecciona')
-    .replace(/\bindicá\b/gi, 'indica')
-    .replace(/\basigná\b/gi, 'asigna')
-    .replace(/\bdeb[eé]s\b/gi, 'debes')
-    .trim();
-  const serverErrorEsInstruccion = /superadministrador|no tienes un local|local fijo|elige a qu[eé] local|no ten[eé]s un local/i.test(serverError || '');
+  // batch 9.6 / 9.7 item 1 — el backend a veces responde con INSTRUCCIONES
+  // (no fallos) redactadas en voseo, con jerga ("campo local_id") y
+  // planteando el rol como una carencia ("como Superadmin no tenés local
+  // fijo"). Se normalizan a la misma persona verbal del resto del sistema,
+  // se quita la jerga y el preámbulo, y si es una instrucción se muestra
+  // como ayuda discreta junto al campo de locales — no en un recuadro.
+  const humanizarMensaje = (msg = '') => {
+    let m = (msg || '')
+      .replace(/\s*\(\s*campo\s+[a-z_]+\s*\)/gi, '')
+      .replace(/\bcampo\s+local_id\b/gi, 'local')
+      .replace(/\blocal_id\b/gi, 'local')
+      .replace(/\bno ten[eé]s\b/gi, 'no tienes')
+      .replace(/\bten[eé]s\b/gi, 'tienes')
+      .replace(/\bemp[ie]zá\b/gi, 'empieza')
+      .replace(/\belegí\b/gi, 'elige')
+      .replace(/\bseleccioná\b/gi, 'selecciona')
+      .replace(/\bindicá\b/gi, 'indica')
+      .replace(/\basigná\b/gi, 'asigna')
+      .replace(/\bdeb[eé]s\b/gi, 'debes')
+      // El rol poder operar sobre cualquier local es una CAPACIDAD, no una
+      // carencia: se quita el preámbulo "como Superadmin no tienes local fijo:".
+      .replace(/^\s*como\s+(super)?administrador[^:.]*?(no tienes un local fijo|sin local fijo)[^:.]*[:.]\s*/i, '')
+      .replace(/^\s*(no tienes un local fijo|tu usuario no está asignado a un local fijo)[^:.]*[:.]\s*/i, '')
+      .trim();
+    if (m) m = m.charAt(0).toUpperCase() + m.slice(1);
+    if (m && !/[.!?]$/.test(m)) m += '.';
+    return m;
+  };
+  const serverErrorEsInstruccion = /superadministrador|no tienes un local|local fijo|elige a qu[eé] local|en qu[eé] local|no ten[eé]s un local/i.test(serverError || '');
   const serverErrorMsg = humanizarMensaje(serverError);
 
   return (
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
-      {serverError && (
-        serverErrorEsInstruccion ? (
-          <div className="form-server-note">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-            </svg>
-            {serverErrorMsg}
-          </div>
-        ) : (
-          <div className="form-server-error">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            {serverErrorMsg}
-          </div>
-        )
+      {/* Solo los errores REALES (que bloquean el guardado) van en el
+          recuadro rojo destacado. Las instrucciones sobre a qué local
+          pertenece el insumo se muestran discretas, junto al campo de
+          locales (ver más abajo). */}
+      {serverError && !serverErrorEsInstruccion && (
+        <div className="form-server-error">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          {serverErrorMsg}
+        </div>
       )}
 
       <div className="form-grid">
@@ -494,14 +493,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         {locales.length > 0 && (
           <div className={`fg fg-full ${errors.localesActivos ? 'fg-error' : ''}`}>
             <label>{isEditing ? 'Locales donde está activo el insumo' : '¿En qué locales existe este insumo?'} <span className="req">*</span></label>
-            {!isEditing && sinLocalFijo && (
-              <div className="form-server-note" style={{ marginBottom: 10 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-                </svg>
-                Tu usuario no está asignado a un local fijo. Indica aquí en qué local o locales existe este insumo.
-              </div>
-            )}
             {!isEditing && (
               <div style={{ display:'flex', gap:8, marginTop:4, marginBottom:8, flexWrap:'wrap' }}>
                 <button type="button" onClick={() => { setTodosLocales(true); setLocalesActivos(locales.map(l => String(l.id))); setErrors(e => ({ ...e, localesActivos:'' })); }}
@@ -531,9 +522,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               </div>
             )}
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
-              Este selector solo define en qué locales <strong>existe</strong> el insumo. El stock real se suma después desde <strong>Registrar Compra</strong>, según el local que se elija allí.
+              {isEditing
+                ? <>Marca en qué locales sigue disponible el insumo. El stock real se ajusta desde <strong>Registrar Compra</strong>.</>
+                : <>Elige en qué locales existe este insumo. El stock real entra después desde <strong>Registrar Compra</strong>, según el local que elijas allí.</>}
             </span>
             {errors.localesActivos && <span className="err-msg">{errors.localesActivos}</span>}
+            {!errors.localesActivos && serverError && serverErrorEsInstruccion && (
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>{serverErrorMsg}</span>
+            )}
           </div>
         )}
 

@@ -9,6 +9,7 @@ import { validarArchivoComprobante, procesarComprobante, normalizarFechaComproba
 import ImageLightbox from '../../../shared/components/ImageLightbox';
 import '../../../shared/components/ImageLightbox.css';
 import SearchSelect from '../../../shared/components/SearchSelect';
+import { useAuth } from '../../../shared/contexts/AuthContext';
 import './CompraForm.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
@@ -96,6 +97,11 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
 };
 
 const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones }) => {
+  const { user } = useAuth();
+  // Rol con local fijo (cajero / bartender): su `sede` es el nombre de un
+  // local real. Superadministrador y Administrador tienen sede 'Ambos' (o
+  // vacía) y pueden comprar para cualquier local.
+  const sedeUsuario = user?.sede && user.sede !== 'Ambos' ? user.sede : null;
   const [form, setForm] = useState(EMPTY_FORM);
   const itemsWrapRef = useRef();
   const proveedorRef = useRef();
@@ -137,6 +143,23 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       .then(d => setLocales(Array.isArray(d) ? d : []))
       .catch(() => setLocales([]));
   }, []);
+  // Local del rol operativo, resuelto contra el catálogo real (por nombre o id).
+  const localFijoObj = sedeUsuario
+    ? locales.find(l => l.nombre === sedeUsuario || String(l.id) === String(sedeUsuario)) || null
+    : null;
+  // Cajero / bartender: la compra entra SIEMPRE a su propio local — se
+  // prefija y el campo se muestra como texto fijo, no como desplegable.
+  useEffect(() => {
+    if (!sedeUsuario) return;
+    setForm(prev => {
+      const id = localFijoObj ? String(localFijoObj.id) : sedeUsuario;
+      const nombre = localFijoObj ? localFijoObj.nombre : sedeUsuario;
+      return (String(prev.localId) === String(id) && prev.localNombre === nombre)
+        ? prev : { ...prev, localId: id, localNombre: nombre };
+    });
+    setErrors(prev => (prev.localId ? { ...prev, localId: '' } : prev));
+    // eslint-disable-next-line
+  }, [sedeUsuario, localFijoObj?.id]);
   const seleccionarLocal = (value) => {
     const loc = locales.find(l => String(l.id) === String(value));
     setForm(prev => ({ ...prev, localId: value, localNombre: loc ? loc.nombre : '' }));
@@ -586,10 +609,20 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
         </div>
 
         {/* batch 5 item 2 — Local (obligatorio), mismo buscador con lupa
-            que Proveedor. El stock comprado entra solo a este local. */}
+            que Proveedor. El stock comprado entra solo a este local.
+            batch 9.7 item 2 — según el rol:
+             · Superadmin / Admin (sede 'Ambos') → desplegable con TODOS
+               los locales activos, sin avisos de configuración.
+             · Cajero / bartender → su propio local, prefijado y como
+               texto fijo (no un desplegable de una sola opción). */}
         <div ref={localRef} className={`fg ${errors.localId ? 'fg-error' : ''}`}>
           <label>Local <span className="req">*</span></label>
-          {locales.length > 0 ? (
+          {sedeUsuario ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', border: '1.5px solid var(--border-input)', borderRadius: 8, background: 'var(--bg-hover, rgba(128,128,128,.08))', fontSize: 14, color: 'var(--text-secondary)' }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4"/></svg>
+              <strong style={{ color: 'var(--text-primary)' }}>{form.localNombre || sedeUsuario}</strong>
+            </div>
+          ) : locales.length > 0 ? (
             <SearchSelect
               value={form.localId}
               options={locales.map(l => ({
@@ -609,11 +642,13 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
             </div>
           )}
           <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-            El stock de esta compra entra únicamente al local seleccionado.
+            {sedeUsuario
+              ? 'La compra entra al stock de tu local.'
+              : 'El stock de esta compra entra únicamente al local seleccionado.'}
           </span>
           {errors.localId
             ? <span className="err-msg">{errors.localId}</span>
-            : touched.localId && form.localId && <span className="ok-msg">✓ Válido</span>}
+            : touched.localId && form.localId && !sedeUsuario && <span className="ok-msg">✓ Válido</span>}
         </div>
 
         <div ref={fechaRef} className={`fg ${errors.fecha ? 'fg-error' : ''}`}>
