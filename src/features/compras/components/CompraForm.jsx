@@ -524,7 +524,10 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     setSubiendoComprobante(true);
     try {
       const comprobanteUrl = comprobanteFile ? await uploadToCloudinary(comprobanteFile) : null;
-      onSubmit({
+      // await: mantiene el botón deshabilitado (disabled incluye
+      // `subiendoComprobante`) hasta que el POST termina, para que un
+      // segundo clic no registre la compra dos veces.
+      await onSubmit({
         ...form,
         local_id: form.localId,
         localId: form.localId,

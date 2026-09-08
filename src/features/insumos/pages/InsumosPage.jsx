@@ -207,8 +207,10 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
   const [serverError, setServerError] = useState('');
 
   const handleSubmit = async data => {
+    setServerError(''); // limpia el error anterior antes de reintentar
     const r = isEdit ? await onUpdate(insumo.id, data) : await onCreate(data);
-    if (r?.error) { setServerError(r.error); return; }
+    if (r?.error) { setServerError(r.error); return r; }
+    return r;
   };
 
   return (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import insumosService from '../services/insumosService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
 import SearchSelect from '../../../shared/components/SearchSelect';
@@ -73,6 +73,21 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
   // el usuario nunca llegó a tocar).
   const [touched, setTouched] = useState({});
   const [tamanoOzEsOtro, setTamanoOzEsOtro] = useState(false);
+  // Guarda contra envíos repetidos mientras la petición está en curso
+  // (en la consola se veían 8 POST seguidos con 400 por clics repetidos).
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  // Para llevar el aviso de error del servidor a la vista: aparece arriba
+  // del formulario y el botón de guardar está abajo, así que sin esto el
+  // usuario no lo veía y volvía a hacer clic.
+  const serverErrorRef = useRef(null);
+  useEffect(() => {
+    if (serverError && serverErrorRef.current) {
+      serverErrorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [serverError]);
 
   useEffect(() => {
     if (initialData) {
@@ -277,19 +292,41 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       : prev);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submittingRef.current) return; // envío en curso — ignora clics extra
     const errs = validate();
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      // Lleva a la vista el primer campo con error (el botón de guardar
+      // está al fondo del modal).
+      requestAnimationFrame(() => {
+        const first = document.querySelector('.insumo-form .fg-error, .insumo-form .err-msg');
+        first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      return;
+    }
     const dec = permiteDecimales(form.unidadMedida);
     const num = (v) => (dec ? Number(v) : Math.round(Number(v))) || 0;
+
+    // ── Payload EXPLÍCITO (antes se hacía `...form` a ciegas, lo que
+    //    arrastraba `stockActual: ''` — string vacío que el backend
+    //    rechaza — y cualquier campo residual). El insumo se guarda SIN
+    //    proveedor (batch 7) y SIN flags de topping/adición (batch 8):
+    //    esos campos NO se incluyen a propósito. ──
     const payload = {
-      ...form,
-      // batch 7 item 2 — el insumo se guarda SIN proveedor.
-      proveedor: null, proveedorId: null,
+      nombre: form.nombre.trim(),
+      categoria: form.categoria,
+      categoriaId: form.categoriaId,
+      categoria_id: isNaN(Number(form.categoriaId)) ? form.categoriaId : Number(form.categoriaId),
+      unidadMedida: form.unidadMedida,
+      estado: form.estado,
+      descripcion: (form.descripcion || '').trim().slice(0, DESCRIPCION_INSUMO_MAX),
       tamanoOz: form.unidadMedida === 'oz' && form.tamanoOz !== '' ? Number(form.tamanoOz) : null,
+      proveedor: null, proveedorId: null,
     };
-    // batch 4 item 7 — locales donde existe el insumo
+
+    // batch 4 item 7 — locales donde EXISTE el insumo
     const localesIds = (todosLocales ? (locales || []).map(l => String(l.id)) : localesActivos)
       .map(id => (isNaN(Number(id)) ? id : Number(id)));
     if (localesIds.length) {
@@ -297,13 +334,29 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       payload.localesIds = localesIds;
       payload.todos_locales = todosLocales;
     }
+
     if (!isEditing) {
       const min = dec ? Math.max(1, Number(form.stockMinimo) || 1) : Math.max(1, Math.round(Number(form.stockMinimo) || 1));
       payload.stockMinimo = min;
       payload.stock_minimo = min;
-      if (stockInicialAbierto && stockInicial.localId) {
-        payload.stockInicial = num(stockInicial.cantidad);
-        payload.stock_inicial = payload.stockInicial;
+      // El stock arranca en 0 en todos los locales; la cantidad existente
+      // (si la hay) va aparte en stock_inicial + local_inicial_id. Se manda
+      // como número, nunca como '' (era lo que rompía el POST).
+      payload.stockActual = 0;
+      payload.stock_actual = 0;
+
+      // Stock inicial: SOLO si el panel está abierto, hay una cantidad real
+      // (> 0) y el local elegido está entre los locales marcados. Si no, se
+      // manda 0 y NINGÚN local — nunca un local "suelto" sin cantidad
+      // (que era una de las causas del 400).
+      const idsElegibles = localesInicialElegibles.map(l => String(l.id));
+      const cantNum = Number(stockInicial.cantidad);
+      const hayCantidad = stockInicialAbierto && stockInicial.cantidad !== '' && !isNaN(cantNum) && cantNum > 0;
+      const localValido = !!stockInicial.localId && idsElegibles.includes(String(stockInicial.localId));
+      if (hayCantidad && localValido) {
+        const q = num(stockInicial.cantidad);
+        payload.stockInicial = q;
+        payload.stock_inicial = q;
         payload.localInicialId = stockInicial.localId;
         payload.local_inicial_id = stockInicial.localId;
       } else {
@@ -316,15 +369,23 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       // valor representativo para cualquier lector antiguo del campo plano
       payload.stockMinimo = filas.length ? filas[0].stockMinimo : Number(form.stockMinimo) || 0;
     }
-    onSubmit(payload);
+
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onSubmit(payload);
+    } finally {
+      submittingRef.current = false;
+      if (mountedRef.current) setSubmitting(false);
+    }
   };
 
-  // batch 9.6 / 9.7 item 1 — el backend a veces responde con INSTRUCCIONES
-  // (no fallos) redactadas en voseo, con jerga ("campo local_id") y
-  // planteando el rol como una carencia ("como Superadmin no tenés local
-  // fijo"). Se normalizan a la misma persona verbal del resto del sistema,
-  // se quita la jerga y el preámbulo, y si es una instrucción se muestra
-  // como ayuda discreta junto al campo de locales — no en un recuadro.
+  // El backend a veces responde con mensajes en voseo, con jerga
+  // ("campo local_id") o planteando el rol como una carencia ("como
+  // Superadmin no tenés local fijo"). Se normalizan a la misma persona
+  // verbal del resto del sistema y se les quita esa jerga/preámbulo —
+  // pero el mensaje SIEMPRE se muestra: si el guardado falló, el usuario
+  // tiene que enterarse.
   const humanizarMensaje = (msg = '') => {
     let m = (msg || '')
       .replace(/\s*\(\s*campo\s+[a-z_]+\s*\)/gi, '')
@@ -338,8 +399,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       .replace(/\bindicá\b/gi, 'indica')
       .replace(/\basigná\b/gi, 'asigna')
       .replace(/\bdeb[eé]s\b/gi, 'debes')
-      // El rol poder operar sobre cualquier local es una CAPACIDAD, no una
-      // carencia: se quita el preámbulo "como Superadmin no tienes local fijo:".
       .replace(/^\s*como\s+(super)?administrador[^:.]*?(no tienes un local fijo|sin local fijo)[^:.]*[:.]\s*/i, '')
       .replace(/^\s*(no tienes un local fijo|tu usuario no está asignado a un local fijo)[^:.]*[:.]\s*/i, '')
       .trim();
@@ -347,17 +406,12 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     if (m && !/[.!?]$/.test(m)) m += '.';
     return m;
   };
-  const serverErrorEsInstruccion = /superadministrador|no tienes un local|local fijo|elige a qu[eé] local|en qu[eé] local|no ten[eé]s un local/i.test(serverError || '');
   const serverErrorMsg = humanizarMensaje(serverError);
 
   return (
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
-      {/* Solo los errores REALES (que bloquean el guardado) van en el
-          recuadro rojo destacado. Las instrucciones sobre a qué local
-          pertenece el insumo se muestran discretas, junto al campo de
-          locales (ver más abajo). */}
-      {serverError && !serverErrorEsInstruccion && (
-        <div className="form-server-error">
+      {serverError && (
+        <div className="form-server-error" ref={serverErrorRef} role="alert">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
@@ -527,9 +581,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                 : <>Elige en qué locales existe este insumo. El stock real entra después desde <strong>Registrar Compra</strong>, según el local que elijas allí.</>}
             </span>
             {errors.localesActivos && <span className="err-msg">{errors.localesActivos}</span>}
-            {!errors.localesActivos && serverError && serverErrorEsInstruccion && (
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>{serverErrorMsg}</span>
-            )}
           </div>
         )}
 
@@ -695,14 +746,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </svg>
           Cancelar
         </button>
-        <button type="submit" className="btn-form-submit" disabled={categoriasDisponibles.length === 0 || Object.values(errors).some(Boolean)}>
+        <button type="submit" className="btn-form-submit" disabled={submitting || categoriasDisponibles.length === 0 || Object.values(errors).some(Boolean)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             {isEditing
               ? <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>
               : <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>
             }
           </svg>
-          {isEditing ? 'Guardar cambios' : 'Registrar insumo'}
+          {submitting ? (isEditing ? 'Guardando…' : 'Registrando…') : (isEditing ? 'Guardar cambios' : 'Registrar insumo')}
         </button>
       </div>
     </form>

@@ -38,6 +38,49 @@ const handleUnauthorized = () => {
   window.dispatchEvent(new Event('sicaber:unauthorized'));
 };
 
+// ── Mensaje de error legible desde la respuesta del backend ──────────
+// Antes solo se miraba `data.error`: si el backend respondía con otra
+// forma (`message`, `errors: [...]`, `errors: {campo: msg}`, un 400 de
+// express-validator, o directamente sin cuerpo JSON) el frontend se
+// quedaba con "Error en la solicitud" genérico — o, peor, con undefined —
+// y el formulario parecía no hacer nada. Acá se cubren las formas
+// habituales y, si el error viene atado a un campo, se antepone su nombre.
+const mensajeDeError = (data, status) => {
+  if (typeof data === 'string' && data.trim()) return data.trim();
+  if (data && typeof data === 'object') {
+    // Formas planas más comunes.
+    const plano = data.error || data.message || data.msg || data.detail || data.mensaje;
+    if (typeof plano === 'string' && plano.trim()) return plano.trim();
+
+    // Colección de errores por campo: array [{ field/param/path, msg/message }]
+    // o objeto { campo: "mensaje" }.
+    const col = data.errors || data.errores || data.validationErrors || data.fields;
+    if (Array.isArray(col) && col.length) {
+      return col
+        .map(e => {
+          const campo = e.field || e.param || e.path || e.campo || e.name;
+          const msg = e.msg || e.message || e.error || (typeof e === 'string' ? e : '');
+          return campo && msg ? `${campo}: ${msg}` : (msg || campo);
+        })
+        .filter(Boolean)
+        .join(' · ');
+    }
+    if (col && typeof col === 'object') {
+      const partes = Object.entries(col)
+        .map(([campo, msg]) => {
+          const t = Array.isArray(msg) ? msg.join(', ') : (typeof msg === 'object' ? (msg.msg || msg.message) : msg);
+          return t ? `${campo}: ${t}` : '';
+        })
+        .filter(Boolean);
+      if (partes.length) return partes.join(' · ');
+    }
+  }
+  // Sin cuerpo aprovechable: al menos deja claro que el servidor rechazó.
+  return status
+    ? `El servidor rechazó la solicitud (error ${status}). Revisa los datos e inténtalo de nuevo.`
+    : 'No se pudo completar la solicitud. Revisa tu conexión e inténtalo de nuevo.';
+};
+
 // ── Fetch base ───────────────────────────────────────────────
 const request = async (method, path, body = null, publicRoute = false) => {
   const headers = { 'Content-Type': 'application/json' };
@@ -59,12 +102,13 @@ const request = async (method, path, body = null, publicRoute = false) => {
     if (res.status === 401 && !publicRoute) {
       handleUnauthorized();
     }
-    // Propaga el mensaje de error del servidor, y cualquier dato extra que
-    // haya mandado (ej. insumosAsociados en la eliminación inteligente de
+    // Propaga el mensaje de error del servidor (en todas sus formas
+    // habituales, ver mensajeDeError), y cualquier dato extra que haya
+    // mandado (ej. insumosAsociados en la eliminación inteligente de
     // categorías), no solo duplicateFields como antes.
-    throw Object.assign(new Error(data.error || 'Error en la solicitud'), {
+    throw Object.assign(new Error(mensajeDeError(data, res.status)), {
       status: res.status,
-      ...data,
+      ...(data && typeof data === 'object' ? data : {}),
     });
   }
   return data;
