@@ -401,6 +401,14 @@ function LocalesTab({ showOk }) {
   const [modal, setModal]     = useState(null); // null | 'new' | local
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError]   = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(''); // el nombre tecleado
+  const [deleteBusy, setDeleteBusy]     = useState(false);
+  const [deleteBloqueado, setDeleteBloqueado] = useState(false); // respuesta 409
+
+  const cerrarDelete = () => {
+    setDeleteTarget(null); setDeleteError(''); setDeleteConfirm('');
+    setDeleteBloqueado(false); setDeleteBusy(false);
+  };
 
   const refresh = () => {
     // GET /locales/todos — a diferencia del selector del checkout (que
@@ -426,18 +434,47 @@ function LocalesTab({ showOk }) {
     }
   };
 
+  // batch 9 item 2 — el nombre tecleado debe coincidir EXACTO (sin
+  // distinguir mayúsculas/espacios sobrantes) para habilitar el borrado.
+  const nombreConfirmado = deleteTarget &&
+    deleteConfirm.trim().toLowerCase() === String(deleteTarget.nombre || '').trim().toLowerCase();
+
   const handleDelete = async () => {
+    if (!nombreConfirmado || deleteBusy) return;
+    setDeleteBusy(true); setDeleteError(''); setDeleteBloqueado(false);
     try {
       const r = await localesService.remove(deleteTarget.id);
-      if (r?.error) { setDeleteError(r.error); return; }
+      if (r?.error) { setDeleteError(r.error); setDeleteBusy(false); return; }
       refresh();
       showOk(`Local "${deleteTarget.nombre}" eliminado`);
-      setDeleteTarget(null); setDeleteError('');
+      cerrarDelete();
     } catch (err) {
-      // El backend responde 409 con un mensaje claro si el local todavía
-      // tiene pedidos/empleados/usuarios asociados (ver DELETE /locales/:id)
-      // — se muestra tal cual, no se bloquea desde el frontend a ciegas.
-      setDeleteError(err.message || 'No se pudo eliminar el local.');
+      // El backend responde 409 con validación de dependencias: un mensaje
+      // que explica qué lo impide y cuántos registros hay asociados
+      // (pedidos / empleados / usuarios / insumos). Se muestra TAL CUAL y
+      // se ofrece "Desactivar" como alternativa, en vez de un error genérico.
+      if (err.status === 409) {
+        setDeleteBloqueado(true);
+        setDeleteError(err.error || err.message || 'El local tiene registros asociados y no se puede eliminar.');
+      } else {
+        setDeleteError(err.message || 'No se pudo eliminar el local.');
+      }
+      setDeleteBusy(false);
+    }
+  };
+
+  // Alternativa cuando el borrado está bloqueado por dependencias.
+  const handleDesactivarEnLugar = async () => {
+    if (deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await localesService.toggleEstado(deleteTarget.id);
+      refresh();
+      showOk(`Local "${deleteTarget.nombre}" desactivado`);
+      cerrarDelete();
+    } catch (err) {
+      setDeleteError(err.message || 'No se pudo desactivar el local.');
+      setDeleteBusy(false);
     }
   };
 
@@ -451,7 +488,7 @@ function LocalesTab({ showOk }) {
         />
       )}
       {deleteTarget && (
-        <div className="modal-overlay" onClick={() => { setDeleteTarget(null); setDeleteError(''); }}>
+        <div className="modal-overlay" onClick={cerrarDelete}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
             <div className="modal-icon modal-icon-danger">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
@@ -459,10 +496,55 @@ function LocalesTab({ showOk }) {
             <h3>¿Eliminar este local?</h3>
             <p>Esta acción es <strong>permanente</strong> y no se puede deshacer.</p>
             <div className="modal-detail">"{deleteTarget.nombre}"</div>
-            {deleteError && <div style={{ background:'rgba(229,57,53,0.12)',color:'var(--color-red)',padding:'10px 14px',borderRadius:8,margin:'10px 0 0',fontSize:13 }}>⚠ {deleteError}</div>}
+
+            {/* batch 9 item 2 — confirmación explícita: hay que escribir el
+                nombre del local para habilitar el botón. */}
+            {!deleteBloqueado && (
+              <div style={{ margin:'14px 0 0', textAlign:'left' }}>
+                <label style={{ fontSize:13, color:'var(--text-muted)', display:'block', marginBottom:6 }}>
+                  Escribe <strong>{deleteTarget.nombre}</strong> para confirmar
+                </label>
+                <input
+                  type="text" autoFocus value={deleteConfirm}
+                  onChange={e => setDeleteConfirm(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleDelete(); }}
+                  placeholder={deleteTarget.nombre}
+                  style={{
+                    width:'100%', padding:'9px 12px', borderRadius:8,
+                    border:'1px solid var(--border-color, #ccc)', fontSize:14,
+                    background:'var(--input-bg, #fff)', color:'inherit', boxSizing:'border-box',
+                  }}
+                />
+              </div>
+            )}
+
+            {deleteError && (
+              <div style={{ background:'rgba(229,57,53,0.12)',color:'var(--color-red)',padding:'10px 14px',borderRadius:8,margin:'12px 0 0',fontSize:13,textAlign:'left',lineHeight:1.5 }}>
+                ⚠ {deleteError}
+                {deleteBloqueado && (
+                  <div style={{ marginTop:6, color:'var(--text-muted)' }}>
+                    Puedes <strong>desactivar</strong> el local: dejará de aparecer en el checkout
+                    pero se conserva su historial.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="modal-actions">
-              <button className="btn-cancel" onClick={() => { setDeleteTarget(null); setDeleteError(''); }}>Cancelar</button>
-              <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
+              <button className="btn-cancel" onClick={cerrarDelete}>Cancelar</button>
+              {deleteBloqueado ? (
+                <button className="btn-confirm-danger" disabled={deleteBusy} onClick={handleDesactivarEnLugar}>
+                  {deleteBusy ? 'Desactivando…' : 'Desactivar en su lugar'}
+                </button>
+              ) : (
+                <button
+                  className="btn-confirm-danger"
+                  disabled={!nombreConfirmado || deleteBusy}
+                  onClick={handleDelete}
+                >
+                  {deleteBusy ? 'Eliminando…' : 'Sí, eliminar'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -553,7 +635,7 @@ function LocalesTab({ showOk }) {
                       </Tooltip>
                     )}
                     {hasPermiso('locales', 'eliminar') && (
-                      <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Eliminar" onClick={() => { setDeleteError(''); setDeleteTarget(l); }}/>
+                      <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Eliminar" onClick={() => { cerrarDelete(); setDeleteTarget(l); }}/>
                     )}
                   </div>
                 </div>

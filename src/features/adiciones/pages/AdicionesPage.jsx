@@ -12,6 +12,7 @@ import AnularButton from '../../../shared/components/AnularButton';
 import adicionesService from '../services/adicionesService';
 import insumosService from '../../insumos/services/insumosService';
 import InsumoSearchSelect from '../../../shared/components/InsumoSearchSelect';
+import { permiteDecimales, errorCantidad, insumoUsoLabel } from '../../../shared/constants/insumoTipos';
 import '../../insumos/pages/InsumosPage.css';
 import '../../productos/pages/Modulos.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
@@ -67,25 +68,19 @@ function AdicionModal({ inicial, insumos, onClose, onSave }) {
   );
   const [error, setError] = useState('');
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  // 1 — igual que en Toppings: selector de insumo opcional (buscador con
-  // lupa compartido) + cantidad que consume esta adición. No cambia el
-  // precio ni el comportamiento de venta — es solo para poder descontar
-  // stock/costo real cuando la adición sí consume un insumo (ej. "Leche de
-  // coco" sí gasta insumo; "Vaso personalizado" quizás no).
+  // Selector de insumo OPCIONAL + cantidad por uso. Déjalo vacío si la
+  // adición es solo un extra de precio sin consumo real de insumos.
   const insumoSel = insumos.find(i => String(i.id) === String(form.insumo_id));
 
-  // Solo se ofrecen los insumos marcados como "es para topping" desde el
-  // módulo de Insumos (columna es_topping). Antes el buscador listaba TODO
-  // el catálogo, así que al crear una adición aparecían insumos que no
-  // tienen ningún sentido como adición (vasos, empaques, materia prima
-  // a granel).
-  //
-  // El insumo ya guardado en esta adición se mantiene siempre en la lista
-  // aunque no esté marcado como topping: si no, editar una adición vieja
-  // haría desaparecer el nombre de su insumo asociado.
+  // batch 8 item 5 — el buscador lista TODOS los insumos activos, sin
+  // filtrar por ningún flag (el insumo ya no lleva flags de topping/adición).
   const insumosParaAdicion = insumos.filter(
-    i => i.esTopping || String(i.id) === String(form.insumo_id)
+    i => (i.estado !== 'Inactivo' && i.estado !== false) || String(i.id) === String(form.insumo_id)
   );
+  const unidadUso = insumoSel?.unidadMedida || 'unidad';
+  const errCantidadUso = form.insumo_id
+    ? errorCantidad(form.cantidad, unidadUso, { min: 0, obligatorio: false })
+    : '';
 
   // Contador de palabras de la descripción, visible mientras se escribe.
   const palabrasDescripcion = (form.descripcion || '').trim() ? (form.descripcion || '').trim().split(/\s+/) : [];
@@ -96,10 +91,7 @@ function AdicionModal({ inicial, insumos, onClose, onSave }) {
     if (!form.nombre.trim()) { setError('El nombre de la adición es obligatorio.'); return; }
     const precioNum = Number(form.precio);
     if (form.precio === '' || isNaN(precioNum) || precioNum < 0) { setError('Ingresa un precio válido (mayor o igual a 0).'); return; }
-    if (form.insumo_id && form.cantidad !== '' && (isNaN(form.cantidad) || Number(form.cantidad) < 0)) {
-      setError('La cantidad consumida debe ser un número válido (mayor o igual a 0).');
-      return;
-    }
+    if (form.insumo_id && errCantidadUso) { setError(errCantidadUso); return; }
     if (form.descripcion && form.descripcion !== form.descripcion.trimStart()) {
       setError('La descripción no puede empezar con un espacio en blanco.');
       return;
@@ -146,7 +138,7 @@ function AdicionModal({ inicial, insumos, onClose, onSave }) {
           <div className="mod-form-group">
             <label>Insumo asociado <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span></label>
             <p style={{fontSize:12,color:'var(--text-muted)',marginTop:0,marginBottom:8}}>
-              Solo se listan los insumos habilitados como topping o adición. Déjalo vacío si esta adición es solo un extra de precio sin consumo real de insumos.
+              Déjalo vacío si esta adición es solo un extra de precio sin consumo real de insumos.
             </p>
             <InsumoSearchSelect
               insumos={insumosParaAdicion}
@@ -154,20 +146,21 @@ function AdicionModal({ inicial, insumos, onClose, onSave }) {
               onSelect={found => setForm(f => ({...f, insumo_id: found.id}))}
               placeholder="Buscar insumo para la adición..."
             />
-            {insumosParaAdicion.length === 0 && (
-              <p style={{fontSize:12,color:'#F57F17',marginTop:6,marginBottom:0}}>
-                No hay insumos habilitados como topping. Márcalos con la casilla “es para topping” en el módulo de Insumos.
-              </p>
-            )}
             {insumoSel && (
               <>
                 <div style={{marginTop:10}}>
                   <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>
-                    Cantidad de {insumoSel.unidadMedida || 'unidad'} que consume <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span>
+                    Cantidad por uso
                   </label>
-                  <input type="number" step="0.1" value={form.cantidad} onChange={set('cantidad')}
-                    placeholder={`Ej: 1 ${insumoSel.unidadMedida || ''}`}
-                    style={{width:'100%',padding:'9px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13,outline:'none'}}/>
+                  <div style={{position:'relative'}}>
+                    <input type="number" step={permiteDecimales(unidadUso) ? 'any' : '1'} value={form.cantidad} onChange={set('cantidad')}
+                      placeholder={permiteDecimales(unidadUso) ? 'Ej: 1.5' : 'Ej: 1'}
+                      style={{width:'100%',padding:`9px ${unidadUso ? 46 : 12}px 9px 12px`,border:`1.5px solid ${errCantidadUso ? '#EF5350' : 'var(--border)'}`,borderRadius:8,fontSize:13,outline:'none'}}/>
+                    <span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',fontSize:12,fontWeight:600,color:'var(--text-muted)',pointerEvents:'none'}}>{unidadUso}</span>
+                  </div>
+                  {errCantidadUso
+                    ? <p style={{fontSize:11.5,color:'#EF5350',margin:'4px 0 0'}}>{errCantidadUso}</p>
+                    : <p style={{fontSize:11.5,color:'var(--text-muted)',margin:'4px 0 0'}}>Esta cantidad se descuenta del stock cada vez que un cliente pide esta adición.</p>}
                 </div>
                 <button type="button" onClick={() => setForm(f => ({...f, insumo_id: null, cantidad: ''}))}
                   style={{marginTop:6,background:'none',border:'none',padding:0,color:'var(--text-muted)',fontSize:12,textDecoration:'underline',cursor:'pointer'}}>
@@ -419,13 +412,17 @@ export default function AdicionesPage() {
               <div className="table-wrap">
                 <table className="insumos-table">
                   <thead>
-                    <tr><th>Nombre</th><th>Precio</th><th>Descripción</th><th>Estado</th><th>Acciones</th></tr>
+                    <tr><th>Nombre</th><th>Precio</th><th>Insumo</th><th>Descripción</th><th>Estado</th><th>Acciones</th></tr>
                   </thead>
                   <tbody>
                     {paginated.map(a => (
                       <tr key={a.id}>
                         <td className="td-nombre">{a.nombre}</td>
                         <td style={{ fontWeight: 700, color: '#4CAF50' }}>{fmt(a.precio)}</td>
+                        <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                          {/* batch 9 item 4 — insumo asociado + cantidad por uso */}
+                          {insumoUsoLabel(a, insumos) || <span style={{ opacity: 0.5 }}>—</span>}
+                        </td>
                         <td style={{ fontSize: 13, color: 'var(--text-primary)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {a.descripcion || '—'}
                         </td>

@@ -90,6 +90,25 @@ export function insumoEnLocal(insumo, localId) {
   };
 }
 
+// ── Pertenencia de un insumo a un local (batch 9 item 1) ──────────────
+// El backend ahora devuelve los contadores por local. Un insumo
+// "pertenece" a un local si tiene fila insumo_local ahí (aparece en su
+// desglose) o si el backend manda la lista de ids de locales del insumo.
+// Si no hay NINGÚN dato por local (deploy sin desglose) no se puede
+// excluir: se asume que pertenece a todos para no vaciar la tabla.
+export function perteneceALocal(insumo, localId) {
+  if (!localId || localId === 'todos') return true;
+  const ids =
+    insumo?.localesIds || insumo?.locales_ids ||
+    insumo?.localIds  || insumo?.local_ids || null;
+  if (Array.isArray(ids) && ids.length) {
+    return ids.some(x => String(x) === String(localId));
+  }
+  const desg = desglosePorLocal(insumo);
+  if (!desg.length) return true;
+  return desg.some(f => String(f.localId) === String(localId));
+}
+
 // Stock/mínimo "efectivos" del insumo para el local activo (cambio 2).
 // Se asume que, al pedir GET /insumos?local=<id>, la API ya devuelve
 // stockActual/stockMinimo/estadoStock referidos a ese local. Cuando
@@ -219,6 +238,27 @@ export function tiposUsoPayload({ es_insumo, es_adicion_sin_costo, es_topping })
     esAdicionSinCosto: !!es_adicion_sin_costo,
     esTopping: !!es_topping,
   };
+}
+
+// ── Insumo + cantidad por uso, para los listados de Toppings/Adiciones ──
+// (batch 9 items 3 y 4). Devuelve p. ej. "Crema batida — 15 g", o solo el
+// nombre si no hay cantidad, o null si el topping/adición no tiene insumo.
+// `entidad` es el topping o la adición; `insumos` el catálogo completo.
+export function insumoUsoLabel(entidad, insumos) {
+  if (!entidad) return null;
+  const insumoId = entidad.insumo_id ?? entidad.insumoId ?? entidad.insumo?.id;
+  if (insumoId == null || insumoId === '') return null;
+  const ins = (insumos || []).find(i => String(i.id) === String(insumoId));
+  const nombre = ins?.nombre || entidad.insumo?.nombre || entidad.insumo_nombre;
+  if (!nombre) return null;
+  const cant =
+    entidad.cantidad ?? entidad.cantidad_uso ?? entidad.cantidadUso ??
+    entidad.cantidad_por_uso ?? entidad.cantidadPorUso ?? null;
+  const unidad =
+    ins?.unidadMedida || ins?.unidad_medida ||
+    entidad.insumo?.unidadMedida || entidad.unidad_medida || '';
+  if (cant == null || cant === '' || Number(cant) === 0) return nombre;
+  return `${nombre} — ${cant} ${unidad}`.trim();
 }
 
 // Valor de `?tipo=` para los selectores filtrados de Ficha Técnica /

@@ -4,7 +4,6 @@ import PrivateRoute from './shared/components/PrivateRoute';
 import AccesoNoAutorizado from './shared/components/AccesoNoAutorizado';
 
 import Landing from './landing/Landing';
-import MisPedidosPage from './landing/MisPedidosPage';
 import DashboardPage from './features/dashboard/pages/DashboardPage';
 
 import RolesPage from './features/roles/pages/RolesPage';
@@ -56,7 +55,9 @@ const PR = ({ children, modulo, accion }) => <PrivateRoute modulo={modulo} accio
 const AppRoutes = () => (
   <Routes>
     <Route path="/" element={<Landing />} />
-    <Route path="/mis-pedidos" element={<MisPedidosPage />} />
+    {/* batch 8 item 2 — /mis-pedidos eliminada: el historial vive en el
+        modal de perfil del cliente. */}
+    <Route path="/mis-pedidos" element={<Navigate to="/" replace />} />
     <Route path="/login" element={<Navigate to="/" replace />} />
     <Route path="/acceso-no-autorizado" element={<AccesoNoAutorizado />} />
 

@@ -970,6 +970,8 @@ export default function Landing() {
   // batch 5 item 4 — perfilTab persiste mientras el modal siga abierto
   // (info | historial | editar). El dropdown se eliminó por completo.
   const [perfilTab, setPerfilTab] = useState("info");
+  // batch 8 item 2 — pedido expandido dentro de la pestaña Historial del modal
+  const [histExpandido, setHistExpandido] = useState(null);
   const [editData, setEditData] = useState({});
   const [editDataOrig, setEditDataOrig] = useState({});
   const [editError, setEditError] = useState("");
@@ -1448,7 +1450,8 @@ export default function Landing() {
       const c = await clientesService.getById(clienteSession.id);
       if (c) {
         setClienteData(c);
-        const ed = { nombre: c.nombre, telefono: c.telefono||"", direccion: c.direccion||"", comuna: c.comuna||"", departamento: "Antioquia", municipio: "Medellín" };
+        // batch 8 item 1 — el cliente ya no tiene dirección/comuna/ubicación.
+        const ed = { nombre: c.nombre, telefono: c.telefono || "" };
         setEditData(ed);
         setEditDataOrig(ed);
       }
@@ -1992,7 +1995,15 @@ const handleLogin = async e => {
                   );
                   return (
                     <button key={cat.id} className={`lx-catcard ${activeCat === cat.nombre ? 'lx-catcard--on' : ''}`} onClick={() => setActiveCat(cat.nombre)}>
-                      <div className="lx-catcard__circle">{icono}</div>
+                      {/* batch 9 item 6 — imagen de la categoría junto al
+                          nombre; si no hay, se conserva el ícono por defecto. */}
+                      <div className="lx-catcard__circle">
+                        {cat.imagen
+                          ? <img src={cat.imagen} alt={cat.nombre}
+                              style={{ width:'100%', height:'100%', objectFit:'cover', borderRadius:'50%' }}
+                              onError={e => { e.target.style.display = 'none'; }}/>
+                          : icono}
+                      </div>
                       <div className="lx-catcard__label">
                         <span className="lx-catcard__name">{cat.nombre}</span>
                         <span className="lx-catcard__count">{count} producto{count!==1?'s':''}</span>
@@ -2003,7 +2014,17 @@ const handleLogin = async e => {
               </div>
             </div>
           ) : (
-            <div className="lx-cats">{cats.map(c => <button key={c} className={`lx-cat ${activeCat===c?"lx-cat--on":""}`} onClick={() => setActiveCat(c)}>{c}</button>)}</div>
+            <div className="lx-cats">{cats.map(c => {
+              // batch 9 item 6 — miniatura de la categoría antes del texto.
+              const cImg = c !== 'Todos' && (CATEGORIAS_DATA.find(k => k.nombre === c)?.imagen);
+              return (
+                <button key={c} className={`lx-cat ${activeCat===c?"lx-cat--on":""}`} onClick={() => setActiveCat(c)}>
+                  {cImg && <img src={cImg} alt="" onError={e => { e.target.style.display = 'none'; }}
+                    style={{ width:18, height:18, borderRadius:'50%', objectFit:'cover', marginRight:6, verticalAlign:'-4px' }}/>}
+                  {c}
+                </button>
+              );
+            })}</div>
           )}
           <div className="lx-grid">
             {shown.map(p => {
@@ -2019,10 +2040,13 @@ const handleLogin = async e => {
               return (
               <div className="lx-card" key={p.id} style={hayStock ? {} : {opacity:0.75}}>
                 <div className="lx-card__img-wrap">
-                  {(p.imagen||p.img)
-                    ? <img src={p.imagen||p.img} alt={p.nombre} className="lx-card__img" onError={e=>{e.target.style.display='none'}}/>
-                    : <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:36}}>☕</div>
-                  }
+                  {/* Placeholder de taza SIEMPRE detrás: si el producto no
+                      tiene imagen, o la URL falla al cargar (onError oculta
+                      el <img>), queda este fondo parejo en vez de un hueco. */}
+                  <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:36,color:'var(--lx-muted,#9aa0a6)'}}>☕</div>
+                  {(p.imagen||p.img) && (
+                    <img src={p.imagen||p.img} alt={p.nombre} className="lx-card__img" style={{position:'relative',zIndex:1}} onError={e=>{e.target.style.display='none'}}/>
+                  )}
                   {descVigente && (
                     <span style={{position:'absolute',top:10,left:10,background:'#E53935',color:'white',fontSize:11,fontWeight:800,padding:'3px 9px',borderRadius:20,zIndex:2}}>
                       -{descVigente}%
@@ -2296,26 +2320,81 @@ const handleLogin = async e => {
                 ))}
               </div>
               {perfilTab === "historial" && (
-                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                <div style={{display:'flex',flexDirection:'column',gap:10,maxHeight:'52vh',overflowY:'auto',paddingRight:2}}>
                   {(pedidosCliente || []).length === 0 ? (
                     <div style={{textAlign:'center',padding:'24px 0',color:'var(--lx-muted)',fontSize:13}}>Todavía no tienes pedidos.</div>
                   ) : (
                     <>
-                      {pedidosCliente.slice(0,8).map(p => (
-                        <div key={p.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'12px 14px',background:'rgba(128,128,128,.06)',borderRadius:10,border:'1px solid var(--lx-border)'}}>
-                          <div style={{minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>Pedido #{p.id}</div>
-                            <div style={{fontSize:11.5,color:'var(--lx-muted)'}}>{p.created_at ? new Date(p.created_at).toLocaleDateString('es-CO',{day:'numeric',month:'short',year:'numeric'}) : '—'}</div>
+                      <div style={{fontSize:12,color:'var(--lx-muted)'}}>{pedidosCliente.length} pedido{pedidosCliente.length!==1?'s':''} en total</div>
+                      {pedidosCliente.map(p => {
+                        const abierto = histExpandido === p.id;
+                        const prods = Array.isArray(p.productos) ? p.productos : [];
+                        const fechaTxt = (p.fechaCreacion || p.created_at)
+                          ? new Date(p.fechaCreacion || p.created_at).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'})
+                          : '';
+                        return (
+                          <div key={p.id} style={{background:'rgba(128,128,128,.06)',borderRadius:10,border:`1px solid ${abierto ? 'var(--lx-green)' : 'var(--lx-border)'}`,overflow:'hidden'}}>
+                            <button type="button" onClick={() => setHistExpandido(abierto ? null : p.id)}
+                              style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'12px 14px',background:'none',border:'none',cursor:'pointer',textAlign:'left'}}>
+                              <div style={{minWidth:0}}>
+                                <div style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>Pedido #{p.id}</div>
+                                <div style={{fontSize:11.5,color:'var(--lx-muted)'}}>{fechaTxt}{p.hora ? ` · ${p.hora}` : ''}</div>
+                              </div>
+                              <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+                                <span style={{fontSize:11,fontWeight:700,color: estadoColor[p.estado] || '#6b7280'}}>{estadoLabel[p.estado] || p.estado}</span>
+                                <span style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>{fmt2(p.total)}</span>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{transform:abierto?'rotate(180deg)':'none',transition:'transform .18s',color:'var(--lx-muted)'}}><polyline points="6 9 12 15 18 9"/></svg>
+                              </div>
+                            </button>
+                            {abierto && (
+                              <div style={{padding:'0 14px 14px',borderTop:'1px solid var(--lx-border)'}}>
+                                <div style={{fontSize:11,fontWeight:700,color:'var(--lx-muted)',textTransform:'uppercase',letterSpacing:.4,margin:'12px 0 6px'}}>Productos</div>
+                                <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                                  {prods.length === 0
+                                    ? <span style={{fontSize:12,color:'var(--lx-muted)'}}>Sin productos registrados.</span>
+                                    : prods.map((x,i) => (
+                                      <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:12.5,color:'var(--lx-text)'}}>
+                                        <span>{x.nombre || x} <span style={{color:'var(--lx-muted)'}}>x{x.cantidad || 1}</span>
+                                          {Array.isArray(x.toppings) && x.toppings.length > 0 && <span style={{fontSize:11,color:'var(--lx-muted)'}}> · {x.toppings.map(t=>t.nombre||t).join(', ')}</span>}
+                                          {Array.isArray(x.adiciones) && x.adiciones.length > 0 && <span style={{fontSize:11,color:'var(--lx-muted)'}}> · {x.adiciones.map(a=>a.nombre||a).join(', ')}</span>}
+                                        </span>
+                                        {(x.precioTotal || x.precio) && <span style={{color:'var(--lx-muted)'}}>{fmt2((x.precioTotal||x.precio)*(x.cantidad||1))}</span>}
+                                      </div>
+                                    ))}
+                                </div>
+                                {p.tipo === 'local' && p.localNombre && (
+                                  <div style={{fontSize:12,color:'var(--lx-muted)',marginTop:8}}>🏠 Recoger en: <strong style={{color:'var(--lx-text)'}}>{p.localNombre}</strong></div>
+                                )}
+                                {p.estado !== 'entregado' && p.estado !== 'cancelado' && p.estado !== 'anulado' && (
+                                  <div style={{margin:'10px 0',padding:'10px 12px',borderRadius:10,background:'rgba(128,128,128,.06)'}}>
+                                    <PedidoProgreso estado={p.estado} pago={p.pago} tipo={p.tipo} orientacion="horizontal" />
+                                  </div>
+                                )}
+                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:13,fontWeight:700,color:'var(--lx-text)',marginTop:10,paddingTop:8,borderTop:'1px dashed var(--lx-border)'}}>
+                                  <span>Total</span><span style={{color:'#4CAF50'}}>{fmt2(p.total)}</span>
+                                </div>
+                                <button onClick={() => verFacturaPedido(p)}
+                                  style={{marginTop:10,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid var(--lx-border)',background:'transparent',color:'var(--lx-text)',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                  Ver factura
+                                </button>
+                                <button onClick={() => { setModal(null); volverAComprar(p); }}
+                                  style={{marginTop:8,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid var(--lx-green)',background:'transparent',color:'var(--lx-green)',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                                  Volver a comprar
+                                </button>
+                                {(p.estado === 'entregado' || p.estado === 'listo') && (
+                                  <button onClick={() => { setModal(null); setDevPedido(p); }}
+                                    style={{marginTop:8,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid #EF5350',background:'transparent',color:'#EF5350',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                                    Solicitar devolución
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
-                            <span style={{fontSize:11,fontWeight:700,color: estadoColor[p.estado] || '#6b7280'}}>{estadoLabel[p.estado] || p.estado}</span>
-                            <span style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>{fmt2(p.total)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      <button className="lx-btn lx-btn--sm" style={{justifyContent:'center',marginTop:4}} onClick={() => { setModal(null); navigate('/mis-pedidos'); }}>
-                        Ver historial completo →
-                      </button>
+                        );
+                      })}
                     </>
                   )}
                 </div>
@@ -2325,9 +2404,6 @@ const handleLogin = async e => {
                   {[
                     {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>,label:'Correo',val:cliente?.correo},
                     {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5 19.79 19.79 0 0 1 1.6 4.87 2 2 0 0 1 3.56 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10.4a16 16 0 0 0 6 6l.9-.9a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.46 18z"/></svg>,label:'Teléfono',val:cliente?.telefono||'—'},
-                    {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>,label:'Dirección',val:cliente?.direccion||'—'},
-                    {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>,label:'Comuna',val:cliente?.comuna||'—'},
-                    {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>,label:'Ubicación',val:cliente?.municipio&&cliente?.departamento?`${cliente.municipio}, ${cliente.departamento}`:'—'},
                     {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>,label:'Documento',val:cliente?.tipoDoc&&cliente?.numeroDoc?`${cliente.tipoDoc}: ${cliente.numeroDoc}`:'—'},
                     {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,label:'Miembro desde',val:cliente?.fechaRegistro?new Date(cliente.fechaRegistro).toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'}):'—'},
                   ].map(({icon,label,val}) => (
@@ -2347,23 +2423,6 @@ const handleLogin = async e => {
                   {editSuccess && <div className="lx-modal__ok">{editSuccess}</div>}
                   <div className="lx-field"><label>Nombre completo *</label><input type="text" value={editData.nombre||""} onChange={e=>setEditData({...editData,nombre:e.target.value})}/></div>
                   <div className="lx-field"><label>Teléfono</label><input type="tel" value={editData.telefono||""} onChange={e=>setEditData({...editData,telefono:e.target.value})}/></div>
-                  <div className="lx-field">
-                    <label>Comuna <span style={{fontSize:11,color:'var(--lx-muted)',fontWeight:400}}>(servicio disponible solo en comunas 8 y 9)</span></label>
-                    <select value={editData.comuna||""} onChange={e=>setEditData({...editData,comuna:e.target.value})}>
-                      <option value="">Seleccionar comuna...</option>
-                      <option value="Comuna 8 - Villa Hermosa">Comuna 8 - Villa Hermosa</option>
-                      <option value="Comuna 9 - Buenos Aires">Comuna 9 - Buenos Aires</option>
-                    </select>
-                  </div>
-                  <div className="lx-field"><label>Dirección</label><input type="text" value={editData.direccion||""} placeholder="Ej: Calle 10 # 43-20" onChange={e=>setEditData({...editData,direccion:e.target.value})}/></div>
-               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-  <div className="lx-field"><label>Departamento</label>
-    <select value="Antioquia" disabled><option>Antioquia</option></select>
-  </div>
-  <div className="lx-field"><label>Municipio</label>
-    <select value="Medellín" disabled><option>Medellín</option></select>
-  </div>
-</div>
                   <button type="submit" className="lx-btn lx-btn--full" disabled={editLoading} style={{marginTop:4}}>{editLoading?"Guardando...":"Guardar cambios"}</button>
                 </form>
               )}

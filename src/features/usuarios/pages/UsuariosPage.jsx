@@ -3,6 +3,7 @@ import { useAuth } from '../../../shared/contexts/AuthContext';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
+import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import useUsuarios from '../hooks/useUsuarios';
 import rolesService from '../../roles/services/rolesService';
 import useClientes from '../../clientes/hooks/useClientes';
@@ -983,17 +984,10 @@ const UsuariosPage = () => {
               {query && <button className="search-clear" onClick={() => { setQuery(''); setPage(1); }}>✕</button>}
             </div>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:6}}>
-            <label style={{fontSize:12,color:'var(--text-muted)'}}>Registrado entre</label>
-            <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPage(1); }}
-              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
-            <span style={{color:'var(--text-muted)',fontSize:13}}>–</span>
-            <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPage(1); }}
-              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
-            {(fechaDesde || fechaHasta) && (
-              <button className="search-clear" onClick={() => { setFechaDesde(''); setFechaHasta(''); setPage(1); }}>✕</button>
-            )}
-          </div>
+          <DateRangeFilter
+            label="Registrado entre" desde={fechaDesde} hasta={fechaHasta} maxToday
+            onChange={({ desde, hasta }) => { setFechaDesde(desde); setFechaHasta(hasta); setPage(1); }}
+          />
           {(query || rolFiltro !== 'Todos' || fechaDesde || fechaHasta) && (
             <button className="btn-limpiar-filtros" title="Limpiar filtros"
               onClick={() => { setQuery(''); setRolFiltro('Todos'); setFechaDesde(''); setFechaHasta(''); setPage(1); }}>

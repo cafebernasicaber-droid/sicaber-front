@@ -6,6 +6,7 @@ import './ComprasPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import ImageLightbox from '../../../shared/components/ImageLightbox';
+import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import '../../../shared/components/ImageLightbox.css';
 import { formatoTitulo } from '../../../shared/utils/textFormat';
 
@@ -315,18 +316,11 @@ const HistorialComprasPage = () => {
 
         {/* Filtros por fecha */}
         <div style={{ display:'flex',gap:12,alignItems:'center',marginBottom:16,flexWrap:'wrap' }}>
-          <div style={{ display:'flex',alignItems:'center',gap:8 }}>
-            <label style={{ fontSize:13,fontWeight:600,color:'var(--text-secondary)' }}>Desde:</label>
-            <input type="date" value={desde}
-              onChange={e => { setDesde(e.target.value); }}
-              style={{ padding:'6px 10px',borderRadius:8,border:'1px solid var(--border)',fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)' }} />
-          </div>
-          <div style={{ display:'flex',alignItems:'center',gap:8 }}>
-            <label style={{ fontSize:13,fontWeight:600,color:'var(--text-secondary)' }}>Hasta:</label>
-            <input type="date" value={hasta}
-              onChange={e => { setHasta(e.target.value); }}
-              style={{ padding:'6px 10px',borderRadius:8,border:'1px solid var(--border)',fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)' }} />
-          </div>
+          <DateRangeFilter
+            label="Compras entre" desde={desde} hasta={hasta} maxToday showClear={false}
+            title="Filtrar historial por rango de fechas"
+            onChange={({ desde: d, hasta: h }) => { setDesde(d); setHasta(h); }}
+          />
           {locales.length > 0 && (
             <div style={{ display:'flex',alignItems:'center',gap:8 }}>
               <label style={{ fontSize:13,fontWeight:600,color:'var(--text-secondary)' }}>Local:</label>

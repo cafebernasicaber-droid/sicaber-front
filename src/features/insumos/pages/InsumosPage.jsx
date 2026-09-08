@@ -11,7 +11,7 @@ import './InsumosPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
-import { estadoStockDe, tiposUsoDe, TIPO_USO_LABELS, STOCK_BAJO, STOCK_SIN, STOCK_OK, insumoEnLocal } from '../../../shared/constants/insumoTipos';
+import { estadoStockDe, STOCK_BAJO, STOCK_SIN, STOCK_OK, insumoEnLocal, perteneceALocal } from '../../../shared/constants/insumoTipos';
 
 const fmtNum = n => {
   const v = Number(n) || 0;
@@ -48,34 +48,8 @@ function EstadoStockBadge({ estado }) {
   );
 }
 
-// Cambio 4 — badges de tipo de uso (Insumo normal / Adición sin costo / Topping)
-// para el listado. Colores propios, legibles en claro y oscuro.
-// Nota: la etiqueta que ve el usuario está en TIPO_USO_LABELS (es_adicion_sin_costo
-// → "Topping" gratis; es_topping → "Adición" con costo). Los colores siguen a la
-// etiqueta: morado = Topping, azul = Adición.
-const TIPO_BADGE_STYLE = {
-  es_insumo:            { bg:'rgba(76,175,80,0.14)',  fg:'#2E7D32', bd:'rgba(76,175,80,0.45)' },
-  es_adicion_sin_costo: { bg:'rgba(142,36,170,0.14)', fg:'#8E24AA', bd:'rgba(142,36,170,0.45)' },
-  es_topping:           { bg:'rgba(3,155,229,0.14)',  fg:'#0277BD', bd:'rgba(3,155,229,0.45)' },
-};
-function TiposUsoBadges({ insumo }) {
-  const t = tiposUsoDe(insumo);
-  const activos = Object.keys(TIPO_USO_LABELS).filter(k => t[k]);
-  if (activos.length === 0) return null;
-  return (
-    <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginTop:4 }}>
-      {activos.map(k => {
-        const s = TIPO_BADGE_STYLE[k];
-        return (
-          <span key={k} style={{
-            padding:'1px 7px', borderRadius:20, fontSize:10.5, fontWeight:700,
-            background:s.bg, color:s.fg, border:`1px solid ${s.bd}`,
-          }}>{TIPO_USO_LABELS[k]}</span>
-        );
-      })}
-    </div>
-  );
-}
+// batch 8 item 3 — los badges de tipo de uso (topping / adición) se
+// quitaron del listado: el insumo ya no lleva esos flags.
 
 // Emoji ⚠️ antes del nombre cuando el estado de stock que devuelve la API es
 // "bajo". El tooltip nativo (title) se ve bien en claro y oscuro sin CSS extra.
@@ -128,7 +102,6 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
                 {esSin && <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>Sin stock</span>}
                 {esBajo && <span title={`Quedan ${Math.max(0, Number(insumo.stockActual)||0)} ${insumo.unidadMedida||''} (mínimo: ${insumo.stockMinimo})`} style={{ cursor:'help',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(230,115,0,0.15)',color:'#E65100',border:'1px solid #FFCC80' }}>⚠️ Stock bajo</span>}
               </div>
-              <TiposUsoBadges insumo={insumo} />
             </div>
           </div>
           <button onClick={onClose} style={{ width:34,height:34,borderRadius:'50%',border:'none',background:'var(--bg-hover)',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0 }}>
@@ -143,7 +116,6 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
                 ['ID', <span style={{ fontFamily:'monospace',fontSize:12,color:'#81C784',background:'rgba(76,175,80,.12)',padding:'2px 8px',borderRadius:6 }}>{insumo.id}</span>],
                 ['Categoría', <span className="badge-cat">{insumo.categoria}</span>],
                 ['Unidad medida', insumo.unidadMedida],
-                ['Proveedor', insumo.proveedor || '—'],
                 ['Estado',
                   <div style={{ display:'flex',alignItems:'center',gap:8 }}>
                     <button className={`toggle-btn ${insumo.estado==='Activo'?'toggle-on':'toggle-off'}`} onClick={onToggle} style={{ cursor:'pointer' }}><span className="toggle-thumb"/></button>
@@ -652,7 +624,7 @@ const InsumosPage = () => {
   const localActivoNombre = locales.find(l => String(l.id) === String(localSel))?.nombre || 'Local';
 
   const [query, setQuery]           = useState('');
-  const [tabFiltro, setTabFiltro]   = useState('todos');
+  const [tabFiltro, setTabFiltro]   = useState('activos');
   const [soloStockBajo, setSoloStockBajo] = useState(false);
   const [page, setPage]             = useState(1);
   const PER_PAGE = 7;
@@ -674,13 +646,22 @@ const InsumosPage = () => {
     [insumos, localSel]
   );
 
+  // batch 9 item 1 — TODO el pipeline (tabla, búsqueda, paginación,
+  // contadores) opera sólo sobre los insumos que pertenecen al local
+  // activo. Así "Mostrando X de N", los chips Todos/Activos/Inactivos y
+  // "Ver solo stock bajo" quedan siempre referidos al mismo local.
+  const insumosLocal = useMemo(
+    () => insumosVista.filter(i => perteneceALocal(i, localSel)),
+    [insumosVista, localSel]
+  );
+
   const searched = query.trim() !== '';
   const q = query.trim().toLowerCase();
   const base = q
-    ? insumosVista.filter(i =>
+    ? insumosLocal.filter(i =>
         (i.nombre || '').toLowerCase().includes(q) ||
         (i.categoria || '').toLowerCase().includes(q))
-    : insumosVista;
+    : insumosLocal;
 
   // Cambio 1 / batch 3 item 5 — el estado de stock lo calcula la API POR
   // LOCAL (estadoStockDe lee ese campo, con fallback a stockActual/
@@ -688,23 +669,30 @@ const InsumosPage = () => {
   // segundo aparece en alerta. "bajo" → emoji ⚠️; "sin_stock" → etiqueta roja.
   const esStockBajo = i => i.estado === 'Activo' && estadoStockDe(i) === STOCK_BAJO;
   const esSinStock  = i => estadoStockDe(i) === STOCK_SIN;
+  // "Ver solo stock bajo" incluye también los "Sin stock" (agotados):
+  // ambos son insumos que necesitan reposición en el local activo.
+  const necesitaReposicion = i =>
+    i.estado === 'Activo' &&
+    (estadoStockDe(i) === STOCK_BAJO || estadoStockDe(i) === STOCK_SIN);
 
   const displayedBase = (tabFiltro === 'activos'
     ? base.filter(i => i.estado === 'Activo')
     : tabFiltro === 'inactivos'
       ? base.filter(i => i.estado !== 'Activo')
       : base
-  ).filter(i => !soloStockBajo || esStockBajo(i));
+  ).filter(i => !soloStockBajo || necesitaReposicion(i));
   const displayed = [...displayedBase].sort((a, b) => Number(b.id) - Number(a.id));
 
   const totalPages = Math.ceil(displayed.length / PER_PAGE);
   const paginated  = displayed.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   useEffect(() => { if (page > 1 && page > totalPages) setPage(Math.max(1, totalPages)); }, [totalPages, page]);
 
-  // Contadores: reflejan el local activo (mismo largo, pero "stock bajo" sí varía).
-  const totalActivos   = insumosVista.filter(i => i.estado === 'Activo').length;
-  const totalInactivos = insumosVista.filter(i => i.estado !== 'Activo').length;
-  const stockBajoList  = insumosVista.filter(esStockBajo);
+  // batch 9 item 1 — contadores SIEMPRE referidos al local activo:
+  // sólo cuentan insumos que pertenecen a ese local (misma base que la
+  // tabla). "Ver solo stock bajo" cuenta bajo + sin stock.
+  const totalActivos   = insumosLocal.filter(i => i.estado === 'Activo').length;
+  const totalInactivos = insumosLocal.filter(i => i.estado !== 'Activo').length;
+  const stockBajoList  = insumosLocal.filter(necesitaReposicion);
 
   const showOk  = msg => { setSuccessMsg(msg); setErrorMsg('');  setTimeout(() => setSuccessMsg(''), 3500); };
   const showErr = msg => { setErrorMsg(msg);  setSuccessMsg(''); setTimeout(() => setErrorMsg(''), 4500); };
@@ -903,9 +891,9 @@ const InsumosPage = () => {
 
           <div className="sic-filterbar__row sic-filterbar__row--sep">
             <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-              <button style={tabStyle('todos')} onClick={() => { setTabFiltro('todos'); setPage(1); }}>
-                Todos ({insumosVista.length})
-              </button>
+              {/* batch 9.5 item 1 — chip "Todos" eliminado: solo Activos /
+                  Inactivos (+ "Ver solo stock bajo"). Por defecto se entra
+                  en "Activos". */}
               <button style={tabStyle('activos')} onClick={() => { setTabFiltro('activos'); setPage(1); }}>
                 Activos ({totalActivos})
               </button>
@@ -914,7 +902,7 @@ const InsumosPage = () => {
               </button>
               <button
                 onClick={() => { setSoloStockBajo(v => !v); setPage(1); }}
-                title={soloStockBajo ? 'Quitar filtro de stock bajo' : 'Mostrar solo insumos con stock bajo'}
+                title={soloStockBajo ? 'Quitar filtro de stock bajo' : 'Mostrar solo insumos con stock bajo o agotados en este local'}
                 style={{
                   padding:'7px 18px', borderRadius:20, border:'none', cursor:'pointer', fontWeight:600, fontSize:13,
                   display:'flex', alignItems:'center', gap:6, transition:'all .2s',
@@ -983,7 +971,7 @@ const InsumosPage = () => {
                       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
                     </svg>
                   </div>
-                  <h3>Ningún insumo{tabFiltro !== 'todos' ? ` ${tabFiltro}` : ''} está en stock bajo</h3>
+                  <h3>Ningún insumo {tabFiltro} está en stock bajo</h3>
                   <p>Todo el stock está por encima de su mínimo.</p>
                   <button className="btn-outline-green" onClick={() => setSoloStockBajo(false)}>Ver todos los insumos</button>
                 </>
@@ -994,20 +982,14 @@ const InsumosPage = () => {
                       <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
                     </svg>
                   </div>
-                  <h3>No hay insumos{tabFiltro !== 'todos' ? ` ${tabFiltro}` : ''} registrados</h3>
-                  <p>
-                    {tabFiltro !== 'todos'
-                      ? `Cambia el filtro para ver otros insumos`
-                      : 'Comienza agregando el primer insumo al sistema'}
-                  </p>
-                  {tabFiltro === 'todos' && (
-                    <button className="btn-add-first" onClick={() => { setTarget(null); setModal('nuevo'); }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                      </svg>
-                      Agregar primer insumo
-                    </button>
-                  )}
+                  <h3>No hay insumos {tabFiltro} en este local</h3>
+                  <p>Cambia el filtro o de local, o agrega un insumo nuevo.</p>
+                  <button className="btn-add-first" onClick={() => { setTarget(null); setModal('nuevo'); }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    Agregar insumo
+                  </button>
                 </>
               )}
             </div>
@@ -1051,7 +1033,6 @@ const InsumosPage = () => {
                             {stockBajo && <AvisoStockBajo insumo={ins} />}
                             <span className="td-trunc">{ins.nombre}</span>
                           </span>
-                          <TiposUsoBadges insumo={ins} />
                           {/* en móvil, la categoría/unidad ocultas se muestran aquí */}
                           <span className="td-nombre__meta">{ins.categoria} · {ins.unidadMedida}</span>
                         </td>

@@ -7,6 +7,7 @@ import insumosService from '../../insumos/services/insumosService';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
 import InsumoSearchSelect from '../../../shared/components/InsumoSearchSelect';
+import { permiteDecimales, errorCantidad, insumoUsoLabel } from '../../../shared/constants/insumoTipos';
 import '../../insumos/pages/InsumosPage.css';
 
 function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
@@ -16,13 +17,14 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
   const [error, setError] = useState('');
   const set = k => e => setForm(f => ({...f, [k]: e.target.value}));
 
-  // 1 — sugerencia inicial: solo insumos marcados "es para topping" desde
-  // Insumos (esTopping). En cuanto se escribe algo en el buscador, la
-  // búsqueda deja de limitarse a esta lista y corre sobre TODOS los
-  // insumos (ver `preferidos` en InsumoSearchSelect) — por si el insumo
-  // correcto no quedó marcado como topping.
-  const insumosTopping = insumos.filter(i => i.esTopping);
+  // batch 8 item 4 — el buscador lista TODOS los insumos activos, sin
+  // filtrar por ningún flag (el insumo ya no lleva flags de topping).
+  const insumosActivos = insumos.filter(i => i.estado !== 'Inactivo' && i.estado !== false);
   const insumoSel = insumos.find(i => String(i.id) === String(form.insumo_id));
+  const unidadUso = insumoSel?.unidadMedida || 'unidad';
+  const errCantidadUso = form.insumo_id
+    ? errorCantidad(form.cantidad, unidadUso, { min: 0, obligatorio: false })
+    : '';
 
   const toggleProducto = (id) => {
     setForm(f => {
@@ -36,10 +38,7 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
   const handleSubmit = async e => {
     e.preventDefault(); setError('');
     if (!form.nombre.trim()) { setError('El nombre del topping es obligatorio.'); return; }
-    if (form.insumo_id && form.cantidad !== '' && (isNaN(form.cantidad) || Number(form.cantidad) < 0)) {
-      setError('La cantidad consumida debe ser un número válido (mayor o igual a 0).');
-      return;
-    }
+    if (form.insumo_id && errCantidadUso) { setError(errCantidadUso); return; }
     // Sin insumo asociado no tiene sentido guardar una cantidad suelta.
     const payload = { ...form, cantidad: form.insumo_id && form.cantidad !== '' ? Number(form.cantidad) : null };
     try {
@@ -67,12 +66,8 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
 
           <div>
             <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>Insumo asociado <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span></label>
-            <p style={{fontSize:12,color:'var(--text-muted)',marginBottom:8}}>
-              Sugerimos primero los insumos marcados como "topping" en Insumos, pero puedes buscar entre todos si el que necesitas no quedó marcado así.
-            </p>
             <InsumoSearchSelect
-              insumos={insumos}
-              preferidos={insumosTopping}
+              insumos={insumosActivos}
               value={form.insumo_id}
               onSelect={found => setForm(f => ({...f, insumo_id: found.id}))}
               placeholder="Buscar insumo..."
@@ -81,11 +76,17 @@ function ToppingModal({ inicial, productos, insumos, onClose, onSave }) {
               <>
                 <div style={{marginTop:10}}>
                   <label style={{fontSize:12,fontWeight:700,color:'var(--text-secondary)',display:'block',marginBottom:5}}>
-                    Cantidad de {insumoSel.unidadMedida || 'unidad'} que consume <span style={{fontWeight:400,color:'var(--text-muted)'}}>(opcional)</span>
+                    Cantidad por uso
                   </label>
-                  <input type="number" step="0.1" value={form.cantidad} onChange={set('cantidad')}
-                    placeholder={`Ej: 1 ${insumoSel.unidadMedida || ''}`}
-                    style={{width:'100%',padding:'9px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13,outline:'none'}}/>
+                  <div style={{position:'relative'}}>
+                    <input type="number" step={permiteDecimales(unidadUso) ? 'any' : '1'} value={form.cantidad} onChange={set('cantidad')}
+                      placeholder={permiteDecimales(unidadUso) ? 'Ej: 1.5' : 'Ej: 1'}
+                      style={{width:'100%',padding:`9px ${unidadUso ? 46 : 12}px 9px 12px`,border:`1.5px solid ${errCantidadUso ? '#EF5350' : 'var(--border)'}`,borderRadius:8,fontSize:13,outline:'none'}}/>
+                    <span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',fontSize:12,fontWeight:600,color:'var(--text-muted)',pointerEvents:'none'}}>{unidadUso}</span>
+                  </div>
+                  {errCantidadUso
+                    ? <p style={{fontSize:11.5,color:'#EF5350',margin:'4px 0 0'}}>{errCantidadUso}</p>
+                    : <p style={{fontSize:11.5,color:'var(--text-muted)',margin:'4px 0 0'}}>Esta cantidad se descuenta del stock cada vez que un cliente pide este topping.</p>}
                 </div>
                 <button type="button" onClick={() => setForm(f => ({...f, insumo_id: null, cantidad: ''}))}
                   style={{marginTop:6,background:'none',border:'none',padding:0,color:'var(--text-muted)',fontSize:12,textDecoration:'underline',cursor:'pointer'}}>
@@ -160,6 +161,8 @@ export default function ToppingsPage() {
   const [modal, setModal] = useState(null); // null | 'new' | topping
   const [deleteTarget, setDel] = useState(null);
   const [success, setSuccess] = useState('');
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 8; // batch 8 item 4 — paginación de 8 por página
   const searchRef = useRef();
 
   const refresh = () => {
@@ -172,6 +175,10 @@ export default function ToppingsPage() {
   const displayed = query.trim()
     ? toppings.filter(t => t.nombre.toLowerCase().includes(query.toLowerCase()))
     : toppings;
+  const totalPages = Math.max(1, Math.ceil(displayed.length / PER_PAGE));
+  const paginados = displayed.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
+  useEffect(() => { setPage(1); }, [query]);
 
   // 1 — el selector del modal solo debe ofrecer productos activos (no
   // tiene sentido ligar un topping nuevo a un producto ya descontinuado).
@@ -234,15 +241,20 @@ export default function ToppingsPage() {
           ) : (
             <div className="table-wrap">
               <table className="insumos-table">
-                <thead><tr><th>ID</th><th>Nombre</th><th>Aplica a</th><th>Estado</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>ID</th><th>Nombre</th><th>Insumo</th><th>Aplica a</th><th>Estado</th><th>Acciones</th></tr></thead>
                 <tbody>
-                  {displayed.map(t => {
+                  {paginados.map(t => {
                     const ids = Array.isArray(t.productos_ids) ? t.productos_ids : [];
                     const aplicaATodos = ids.length === 0;
+                    const usoInsumo = insumoUsoLabel(t, insumos);
                     return (
                       <tr key={t.id}>
                         <td className="td-id">{t.id}</td>
                         <td className="td-nombre">{t.nombre}</td>
+                        <td style={{fontSize:13,color:'var(--text-muted)'}}>
+                          {/* batch 9 item 3 — insumo asociado + cantidad por uso */}
+                          {usoInsumo || <span style={{opacity:0.5}}>—</span>}
+                        </td>
                         <td style={{fontSize:13,color:'var(--text-muted)'}}>
                           {/* 4 — resumen corto en vez de la lista completa de
                               nombres (que se corta en tablas con varios
@@ -283,6 +295,20 @@ export default function ToppingsPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+          {totalPages > 1 && (
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,padding:'14px 18px',borderTop:'1px solid var(--border)'}}>
+              <span style={{fontSize:13,color:'var(--text-muted)'}}>
+                Mostrando {(page-1)*PER_PAGE+1}–{Math.min(page*PER_PAGE, displayed.length)} de {displayed.length}
+              </span>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                <button className="btn-cancel" disabled={page===1} style={{padding:'6px 12px'}} onClick={() => setPage(p => Math.max(1, p-1))}>← Ant.</button>
+                {Array.from({length:totalPages},(_,i)=>i+1).map(n => (
+                  <button key={n} className={n===page ? 'btn-confirm-primary' : 'btn-cancel'} style={{padding:'6px 11px'}} onClick={() => setPage(n)}>{n}</button>
+                ))}
+                <button className="btn-cancel" disabled={page===totalPages} style={{padding:'6px 12px'}} onClick={() => setPage(p => Math.min(totalPages, p+1))}>Sig. →</button>
+              </div>
             </div>
           )}
         </div>

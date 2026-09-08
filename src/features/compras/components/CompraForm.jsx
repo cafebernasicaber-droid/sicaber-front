@@ -8,6 +8,7 @@ import { uploadToCloudinary } from '../../../shared/services/cloudinaryService';
 import { validarArchivoComprobante, procesarComprobante, normalizarFechaComprobante } from '../../../shared/services/ocrService';
 import ImageLightbox from '../../../shared/components/ImageLightbox';
 import '../../../shared/components/ImageLightbox.css';
+import SearchSelect from '../../../shared/components/SearchSelect';
 import './CompraForm.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
 
@@ -50,7 +51,9 @@ const EMPTY_FORM = {
   localNombre: '',
   fecha: getTodayStr(),
   observaciones: '',
-  items: [{ ...EMPTY_ITEM }]
+  // batch 7 item 5 — arranca vacío: los insumos se agregan uno a uno
+  // desde el panel izquierdo a la lista del panel derecho.
+  items: []
 };
 
 const formatCOP = (val) =>
@@ -92,92 +95,9 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
   return `¿${cuantosCuantas(null, unidad)} ${cantidadLabel} trae cada ${tipoLabel}?`;
 };
 
-// Selector con buscador — mismo campo de siempre (mismo lugar, misma
-// apariencia general), pero con un input de texto que filtra las
-// opciones en tiempo real en vez de tener que desplazarse por una lista
-// larga. `options` es [{ value, label, sub? }] — `sub` es texto adicional
-// donde también se busca (ej. NIT) sin mostrarse en la opción.
-function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage, onBlur }) {
-  const [open, setOpen] = useState(false);
-  const [texto, setTexto] = useState('');
-  const wrapRef = useRef(null);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    const onDocMouseDown = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        if (open) onBlur?.();
-        setOpen(false);
-        setTexto('');
-      }
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [open, onBlur]);
-
-  const selected = options.find(o => String(o.value) === String(value));
-  const filtrados = texto.trim()
-    ? options.filter(o => {
-        const t = texto.trim().toLowerCase();
-        return o.label.toLowerCase().includes(t) || (o.sub && o.sub.toLowerCase().includes(t));
-      })
-    : options;
-
-  // Al abrir, el campo NO se borra — sigue mostrando lo ya elegido, con
-  // todo el texto seleccionado (igual que cualquier campo de búsqueda con
-  // un valor precargado), listo para que escribir lo reemplace de
-  // inmediato. Así se ve exactamente como un select normal hasta que el
-  // usuario decide escribir para filtrar.
-  const abrir = () => {
-    if (disabled) return;
-    setOpen(true);
-    setTimeout(() => inputRef.current?.select(), 0);
-  };
-
-  return (
-    <div ref={wrapRef} className="buscador-select-wrap">
-      <input
-        ref={inputRef}
-        type="text"
-        className="buscador-select-input"
-        disabled={disabled}
-        value={open ? (texto || (selected ? selected.label : '')) : (selected ? selected.label : '')}
-        onFocus={abrir}
-        onClick={abrir}
-        onChange={e => { setTexto(e.target.value); if (!open) setOpen(true); }}
-        placeholder={placeholder}
-        autoComplete="off"
-      />
-      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
-      {open && !disabled && (
-        <div className="buscador-dropdown">
-          {filtrados.length === 0 ? (
-            <div className="buscador-dropdown-empty">{emptyMessage || 'Sin resultados.'}</div>
-          ) : filtrados.map(o => (
-            <div
-              key={o.value}
-              className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
-              onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
-            >
-              <div>{o.label}</div>
-              {o.sub
-                ? <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>{o.sub}</div>
-                : o.subPlaceholder
-                  ? <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 1 }}>{o.subPlaceholder}</div>
-                  : null}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones }) => {
   const [form, setForm] = useState(EMPTY_FORM);
-  const itemRefs = useRef([]);
+  const itemsWrapRef = useRef();
   const proveedorRef = useRef();
   const localRef = useRef();
   const fechaRef = useRef();
@@ -237,12 +157,10 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       .catch(() => setTodosInsumos([]));
   }, []);
 
-  const insumosFiltrados = form.proveedorId
-    ? todosInsumos.filter(i =>
-        String(i.proveedorId) === String(form.proveedorId) ||
-        i.proveedor === form.proveedorNombre
-      )
-    : [];
+  // batch 7 item 4 — proveedor e insumo son independientes: el selector de
+  // insumo lista TODOS los insumos activos, sin filtrar por el proveedor
+  // elegido (el insumo ya no tiene relación con proveedor).
+  const insumosFiltrados = todosInsumos;
 
   // El comprobante es obligatorio salvo que todos los ítems sean de tipo
   // "Unitario" (comportamiento heredado del extinto modo "Directo") — si
@@ -278,21 +196,17 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   };
 
   const validateItems = (items) => {
+    if (!items || items.length === 0) return 'Agrega al menos un insumo a la compra.';
     const itemInvalido = items.some(it => !esItemValido(it));
     return itemInvalido ? 'Revisa los insumos: cada uno necesita tipo, contenido y precio válidos (mínimo $1.000).' : '';
   };
-
-  // Índice del primer ítem con error (en el orden en que aparecen en
-  // pantalla) — usado para llevar el scroll exactamente ahí, no solo
-  // avisar que "algo" está mal.
-  const primerIndiceItemInvalido = (items) => items.findIndex(it => !esItemValido(it));
 
   const validate = () => {
     const errs = {};
     if (!form.proveedorNombre.trim()) errs.proveedorNombre = 'Selecciona un proveedor';
     if (!form.localId) errs.localId = 'Selecciona el local';
     if (!form.fecha) errs.fecha = 'La fecha es obligatoria';
-    else if (form.fecha !== getTodayStr()) errs.fecha = 'Solo puedes registrar la compra con la fecha de hoy.';
+    else if (form.fecha > getTodayStr()) errs.fecha = 'No puedes registrar una compra con fecha futura.';
     const itemsErr = validateItems(form.items);
     if (itemsErr) errs.items = itemsErr;
     if (descuento !== '' && (isNaN(descuento) || Number(descuento) < 0 || Number(descuento) > 100)) {
@@ -311,14 +225,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
 
   const seleccionarProveedor = (value) => {
     const prov = proveedores.find(p => String(p.id) === String(value));
-    setForm(prev => ({
-      ...prev,
-      proveedorId:     value,
-      proveedorNombre: prov ? prov.nombre : '',
-      items:           [{ ...EMPTY_ITEM }]
-    }));
+    // batch 7 item 4 — al elegir proveedor ya NO se limpian los insumos:
+    // proveedor e insumo son independientes.
+    setForm(prev => ({ ...prev, proveedorId: value, proveedorNombre: prov ? prov.nombre : '' }));
     setTouched(prev => ({ ...prev, proveedorNombre: true }));
-    setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor', items: '' }));
+    setErrors(prev => ({ ...prev, proveedorNombre: prov ? '' : 'Selecciona un proveedor' }));
   };
 
   const handleChange = (e) => {
@@ -327,7 +238,8 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       seleccionarProveedor(value);
       return;
     } else if (name === 'fecha') {
-      setForm(prev => ({ ...prev, fecha: value === getTodayStr() ? value : getTodayStr() }));
+      // hoy o pasado; una fecha futura se acota a hoy
+      setForm(prev => ({ ...prev, fecha: value && value <= getTodayStr() ? value : getTodayStr() }));
     } else {
       setForm(prev => ({ ...prev, [name]: value }));
     }
@@ -352,115 +264,80 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     return v;
   };
 
-  const handleInsumoSelect = (idx, nombreInsumo) => {
+  // ── batch 7 item 5 — panel IZQUIERDO: se configura UN insumo (itemDraft)
+  //    y con "Agregar" se pasa a la lista del panel derecho (form.items). ──
+  const [itemDraft, setItemDraft] = useState({ ...EMPTY_ITEM });
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [draftError, setDraftError] = useState('');
+
+  const handleDraftInsumo = (nombreInsumo) => {
     const insumo = todosInsumos.find(i => i.nombre === nombreInsumo);
+    setItemDraft({
+      ...EMPTY_ITEM,
+      insumo: nombreInsumo,
+      insumoId: insumo ? insumo.id : '',
+      unidad: insumo ? (insumo.unidadMedida || '') : '',
+    });
+    setDraftError('');
+  };
 
-    const items = [...form.items];
-    items[idx] = {
-      ...items[idx],
-      insumo:         nombreInsumo,
-      insumoId:       insumo ? insumo.id : '',
-      unidad:         insumo ? (insumo.unidadMedida || '') : items[idx].unidad,
-      presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '',
-      presentacionMultiNivel: false, presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '',
-    };
-    setForm(prev => ({ ...prev, items }));
+  const handleDraftPresentacion = (field, value) => {
+    setDraftError('');
+    setItemDraft(prev => {
+      const it = { ...prev };
+      if (field === 'presentacionTipo') {
+        const eraUnitario = it.presentacionTipo === 'Unitario';
+        const esUnitario = value === 'Unitario';
+        return {
+          ...it,
+          presentacionTipo: value,
+          presentacionCantidad: esUnitario ? '1' : (eraUnitario ? '' : it.presentacionCantidad),
+          presentacionMultiNivel: esUnitario ? false : it.presentacionMultiNivel,
+          presentacionUnidadesInternas: esUnitario ? '' : it.presentacionUnidadesInternas,
+          presentacionContenidoUnidadInterna: esUnitario ? '' : it.presentacionContenidoUnidadInterna,
+        };
+      }
+      const esEntero = it.unidad === 'unidad';
+      let v = value;
+      if (field === 'presentacionCantidad') { v = filtrarNumero(value, 0, 999999); if (v === '0') v = ''; }
+      else if (field === 'presentacionContenido') { v = filtrarNumero(value, esEntero ? 0 : 2, 999999.99); if (esEntero && v === '0') v = ''; }
+      else if (field === 'presentacionPrecio') { v = filtrarNumero(value, 0, 999999999); if (v === '0') v = ''; }
+      else if (field === 'presentacionUnidadesInternas') { v = filtrarNumero(value, 0, 999999); if (v === '0') v = ''; }
+      else if (field === 'presentacionContenidoUnidadInterna') { v = filtrarNumero(value, esEntero ? 0 : 2, 999999.99); if (esEntero && v === '0') v = ''; }
+      return { ...it, [field]: v };
+    });
+  };
+
+  const handleDraftToggleMulti = () => setItemDraft(prev => prev.presentacionMultiNivel
+    ? { ...prev, presentacionMultiNivel: false, presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '' }
+    : { ...prev, presentacionMultiNivel: true, presentacionContenido: '' });
+
+  const limpiarDraftCero = (field) =>
+    setItemDraft(prev => Number(prev[field]) === 0 ? { ...prev, [field]: '' } : prev);
+
+  const limpiarDraft = () => { setItemDraft({ ...EMPTY_ITEM }); setEditingIdx(null); setDraftError(''); };
+
+  const agregarItemDraft = () => {
+    if (!itemDraft.insumo) { setDraftError('Elige el insumo.'); return; }
+    if (!esItemValido(itemDraft)) { setDraftError('Completa tipo, contenido y precio válidos (mínimo $1.000).'); return; }
+    const dup = form.items.some((it, i) => i !== editingIdx && it.insumoId && String(it.insumoId) === String(itemDraft.insumoId));
+    if (dup) { setDraftError('Ese insumo ya está en la lista.'); return; }
+    setForm(prev => {
+      const items = [...prev.items];
+      if (editingIdx != null) items[editingIdx] = { ...itemDraft };
+      else items.push({ ...itemDraft });
+      return { ...prev, items };
+    });
     setTouched(prev => ({ ...prev, items: true }));
-    setErrors(prev => ({ ...prev, items: validateItems(items) }));
+    setErrors(prev => ({ ...prev, items: '' }));
+    limpiarDraft();
   };
 
-  const handlePresentacionChange = (idx, field, value) => {
-    const items = [...form.items];
-    let v = value;
-    if (field === 'presentacionTipo') {
-      const eraUnitario = items[idx].presentacionTipo === 'Unitario';
-      const esUnitario = value === 'Unitario';
-      items[idx] = {
-        ...items[idx],
-        presentacionTipo: value,
-        // "Unitario" fija la cantidad en 1 (oculta) y no admite el
-        // checkbox de nivel 3; al salir de "Unitario" hacia otro tipo, se
-        // limpia para que el usuario la vuelva a llenar — nunca se
-        // auto-convierte un valor entre tipos.
-        presentacionCantidad: esUnitario ? '1' : (eraUnitario ? '' : items[idx].presentacionCantidad),
-        presentacionMultiNivel: esUnitario ? false : items[idx].presentacionMultiNivel,
-        presentacionUnidadesInternas: esUnitario ? '' : items[idx].presentacionUnidadesInternas,
-        presentacionContenidoUnidadInterna: esUnitario ? '' : items[idx].presentacionContenidoUnidadInterna,
-      };
-      setForm(prev => ({ ...prev, items }));
-      setTouched(prev => ({ ...prev, items: true }));
-      setErrors(prev => ({ ...prev, items: validateItems(items) }));
-      return;
-    }
-    if (field === 'presentacionCantidad') {
-      v = filtrarNumero(value, 0, 999999);
-      if (v === '0') v = ''; // entero puro — nunca puede quedar en 0
-    } else if (field === 'presentacionContenido') {
-      const esEntero = items[idx].unidad === 'unidad';
-      v = filtrarNumero(value, esEntero ? 0 : 2, 999999.99);
-      if (esEntero && v === '0') v = ''; // entero puro (piezas) — nunca 0
-      // Si admite decimales, "0" se deja transitar (para poder escribir
-      // "0.5"); se limpia si queda así al salir del campo (ver onBlur).
-    } else if (field === 'presentacionPrecio') {
-      v = filtrarNumero(value, 0, 999999999);
-      if (v === '0') v = ''; // entero puro — nunca puede quedar en 0
-    } else if (field === 'presentacionUnidadesInternas') {
-      // Unidades internas por presentación (ej. bolsas dentro de la caja): entero.
-      v = filtrarNumero(value, 0, 999999);
-      if (v === '0') v = ''; // entero puro — nunca puede quedar en 0
-    } else if (field === 'presentacionContenidoUnidadInterna') {
-      // Contenido por unidad interna (ej. kg por bolsa): decimal según unidad.
-      const esEntero = items[idx].unidad === 'unidad';
-      v = filtrarNumero(value, esEntero ? 0 : 2, 999999.99);
-      if (esEntero && v === '0') v = ''; // entero puro — nunca 0
-    }
-    items[idx] = { ...items[idx], [field]: v };
-    setForm(prev => ({ ...prev, items }));
-    setTouched(prev => ({ ...prev, items: true }));
-    setErrors(prev => ({ ...prev, items: validateItems(items) }));
-  };
-
-  // Activa/desactiva el modo de mini-presentación para un ítem. Al
-  // activar, limpia "Contenido por presentación" (deja de estar en uso).
-  // Al desactivar, limpia los 2 campos nuevos y deja el campo simple
-  // vacío otra vez — nunca se intenta auto-convertir un valor entre modos.
-  const handleTogglePresentacionMulti = (idx) => {
-    const items = [...form.items];
-    const activar = !items[idx].presentacionMultiNivel;
-    items[idx] = activar
-      ? { ...items[idx], presentacionMultiNivel: true, presentacionContenido: '' }
-      : { ...items[idx], presentacionMultiNivel: false, presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '' };
-    setForm(prev => ({ ...prev, items }));
-    setTouched(prev => ({ ...prev, items: true }));
-    setErrors(prev => ({ ...prev, items: validateItems(items) }));
-  };
-
-  // Los campos de contenido decimal (Contenido por presentación, Contenido
-  // por unidad interna) dejan pasar "0" mientras se escribe, para no
-  // bloquear "0.5" a mitad de tecleo. Al salir del campo, si quedó
-  // exactamente en 0, se limpia — nunca puede quedar guardado en 0.
-  const limpiarSiCeroAlSalir = (idx, field) => {
-    const items = [...form.items];
-    if (Number(items[idx][field]) === 0) {
-      items[idx] = { ...items[idx], [field]: '' };
-      setForm(prev => ({ ...prev, items }));
-      setErrors(prev => ({ ...prev, items: validateItems(items) }));
-    }
-  };
-
-  const addItem = () => {
-    setForm(prev => ({ ...prev, items: [...prev.items, { ...EMPTY_ITEM }] }));
-    setTimeout(() => {
-      const nuevoIdx = itemRefs.current.length - 1;
-      itemRefs.current[nuevoIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 80);
-  };
-
-  const removeItem = (idx) => {
-    if (form.items.length === 1) return;
-    const items = form.items.filter((_, i) => i !== idx);
-    setForm(prev => ({ ...prev, items }));
-    if (touched.items) setErrors(prev => ({ ...prev, items: validateItems(items) }));
+  const editarItem = (idx) => { setItemDraft({ ...form.items[idx] }); setEditingIdx(idx); setDraftError(''); };
+  const quitarItem = (idx) => {
+    setForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
+    if (editingIdx === idx) limpiarDraft();
+    else if (editingIdx != null && idx < editingIdx) setEditingIdx(editingIdx - 1);
   };
 
   const totalBruto = (form.items || []).reduce((sum, it) => sum + subtotalItem(it), 0);
@@ -666,9 +543,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
         } else if (errs.fecha) {
           fechaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else if (errs.items) {
-          const idx = primerIndiceItemInvalido(form.items);
-          const el = idx !== -1 ? itemRefs.current[idx] : null;
-          (el || itemRefs.current[0])?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          itemsWrapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else if (errs.descuento) {
           descuentoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else if (errs.comprobante) {
@@ -692,12 +567,13 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
         <div ref={proveedorRef} className={`fg ${errors.proveedorNombre ? 'fg-error' : ''}`}>
           <label>Proveedor <span className="req">*</span></label>
           {proveedores.length > 0 ? (
-            <BuscadorSelect
+            <SearchSelect
               value={form.proveedorId}
               options={proveedores.map(p => ({ value: p.id, label: p.nombre, sub: [p.nit, p.numeroDocumento].filter(Boolean).join(' ') }))}
               onChange={seleccionarProveedor}
               placeholder="Buscar proveedor por nombre, NIT o documento..."
-              emptyMessage="Ningún proveedor activo coincide con esa búsqueda."
+              emptyMessage="No hay proveedores activos."
+              hasError={!!errors.proveedorNombre}
             />
           ) : (
             <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
@@ -714,23 +590,18 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
         <div ref={localRef} className={`fg ${errors.localId ? 'fg-error' : ''}`}>
           <label>Local <span className="req">*</span></label>
           {locales.length > 0 ? (
-            <BuscadorSelect
+            <SearchSelect
               value={form.localId}
               options={locales.map(l => ({
                 value: l.id,
                 label: l.nombre,
-                // Solo se usa como dirección real para búsqueda/subtítulo si
-                // NO viene vacía ni con un texto marcador ("PEGAR", "—", …).
                 sub: (l.direccion && !/^(pegar|—|-|n\/a|sin)/i.test(l.direccion.trim())) ? l.direccion.trim() : '',
                 subPlaceholder: 'Sin dirección registrada',
               }))}
               onChange={seleccionarLocal}
-              onBlur={() => {
-                setTouched(prev => ({ ...prev, localId: true }));
-                setErrors(prev => ({ ...prev, localId: form.localId ? '' : 'Selecciona el local' }));
-              }}
               placeholder="Buscar local por nombre o dirección..."
-              emptyMessage="Ningún local activo coincide con esa búsqueda."
+              emptyMessage="No hay locales activos."
+              hasError={!!errors.localId}
             />
           ) : (
             <div style={{ padding: '10px 14px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227' }}>
@@ -747,13 +618,16 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
 
         <div ref={fechaRef} className={`fg ${errors.fecha ? 'fg-error' : ''}`}>
           <label>Fecha de compra <span className="req">*</span></label>
+          {/* batch 7 item 7 — hoy y cualquier fecha pasada; las futuras
+              quedan deshabilitadas en el calendario (max), no solo
+              rechazadas al guardar. */}
           <input
             type="date" name="fecha" value={form.fecha}
-            min={getTodayStr()} max={getTodayStr()}
+            max={getTodayStr()}
             onChange={handleChange}
           />
           <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-            Solo puedes registrar la compra con la fecha de hoy.
+            Puedes registrar la compra con la fecha de hoy o una fecha pasada. No se permiten fechas futuras.
           </span>
           {errors.fecha && <span className="err-msg">{errors.fecha}</span>}
         </div>
@@ -769,240 +643,201 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
         </div>
       </div>
 
-      <div className="compra-items-wrap">
+      {/* batch 7 item 5 — dos paneles: IZQ configura un insumo, DER lista
+          los añadidos (scroll propio, numeración sin huecos, contador). */}
+      <div className="compra-items-wrap" ref={itemsWrapRef}>
         <div className="compra-items-header">
           <span className="compra-items-label">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
             </svg>
             Insumos de la compra
-            {form.items.filter(it => it.insumo).length > 0 && (
-              <span style={{ background:'#4CAF50', color:'white', borderRadius:20, padding:'2px 10px', fontSize:11.5, fontWeight:700, marginLeft:8 }}>
-                {form.items.filter(it => it.insumo).length}
-              </span>
-            )}
           </span>
-          <button type="button" className="btn-add-item" onClick={addItem} disabled={!form.proveedorId}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            Agregar insumo
-          </button>
         </div>
 
-        {form.proveedorId && insumosFiltrados.length === 0 && (
-          <div style={{ padding: '12px 16px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 13, color: '#C9A227', marginBottom: 10 }}>
-            ⚠ El proveedor seleccionado no tiene insumos asociados. Registra insumos para este proveedor en Gestión de Insumos.
-          </div>
-        )}
+        {errors.items && <div className="items-error-msg">{errors.items}</div>}
 
-        {errors.items
-          ? <div className="items-error-msg">{errors.items}</div>
-          : touched.items && <div className="ok-msg" style={{ padding: '4px 18px 0' }}>✓ Insumos válidos</div>}
-
-        {form.items.map((item, idx) => {
-          const contenidoEsEntero = item.unidad === 'unidad';
-          return (
-          <div key={idx} ref={el => itemRefs.current[idx] = el} className={`item-block ${touched.items && !esItemValido(item) ? 'item-block--error' : ''}`}>
-            <div className="item-block-header">
-              <div className="item-block-title">
-                <span className="item-block-index">Insumo {idx + 1}</span>
-                <span className="item-block-name">{item.insumo || 'Sin seleccionar'}</span>
-              </div>
-              <span className="item-block-modo-badge item-block-modo-badge--presentacion">
-                {item.presentacionTipo || 'Por presentación'}
-              </span>
+        <div className="compra-items-2col">
+          {/* ── Panel IZQUIERDO: adquisición de UN insumo ── */}
+          <div className="compra-panel compra-panel--config">
+            <div className="compra-panel__title">
+              {editingIdx != null ? `Editando insumo #${editingIdx + 1}` : 'Configurar insumo a añadir'}
             </div>
-            <div className="item-row">
-              <div className="item-field">
-                <label className="item-field-label">Insumo</label>
-                {form.proveedorId && insumosFiltrados.length > 0 ? (
-                  <BuscadorSelect
-                    value={item.insumoId}
-                    options={insumosFiltrados
-                      .filter(i => !form.items.some((it, i2) => i2 !== idx && it.insumoId && String(it.insumoId) === String(i.id)))
-                      .map(i => ({ value: i.id, label: i.nombre }))}
-                    onChange={(insumoId) => {
-                      const insumo = insumosFiltrados.find(i => String(i.id) === String(insumoId));
-                      if (insumo) handleInsumoSelect(idx, insumo.nombre);
-                    }}
-                    placeholder="Buscar insumo..."
-                    emptyMessage="Ningún insumo disponible coincide con esa búsqueda (los ya elegidos en otra línea no aparecen)."
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    placeholder={form.proveedorId ? 'Sin insumos para este proveedor' : 'Selecciona un proveedor primero'}
-                    value={item.insumo}
-                    readOnly
-                    style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}
-                  />
-                )}
-              </div>
 
-              <div className="item-field">
-                <label className="item-field-label">Unidad</label>
-                <input
-                  type="text"
-                  value={item.unidad}
-                  readOnly
-                  placeholder="—"
-                  style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}
+            <div className="fg">
+              <label>Insumo</label>
+              {insumosFiltrados.length > 0 ? (
+                <SearchSelect
+                  value={itemDraft.insumoId}
+                  options={insumosFiltrados
+                    .filter(i => !form.items.some((it, i2) => i2 !== editingIdx && it.insumoId && String(it.insumoId) === String(i.id)))
+                    .map(i => ({ value: i.id, label: i.nombre, sub: i.unidadMedida ? `Unidad: ${i.unidadMedida}` : '' }))}
+                  onChange={(insumoId) => {
+                    const insumo = insumosFiltrados.find(i => String(i.id) === String(insumoId));
+                    if (insumo) handleDraftInsumo(insumo.nombre);
+                  }}
+                  placeholder="Buscar insumo…"
+                  loading={todosInsumos.length === 0}
+                  emptyMessage="No hay insumos activos registrados."
                 />
-              </div>
-
-              <div className="item-field">
-                <label className="item-field-label">Cantidad</label>
-                <div className="item-presentacion-hint">Detalle abajo ↓</div>
-              </div>
-              <div className="item-field">
-                <label className="item-field-label">Precio de la compra</label>
-                <div className="item-presentacion-hint" aria-hidden="true"></div>
-              </div>
-
-              <div className="item-field">
-                <label className="item-field-label item-field-label--right">Subtotal</label>
-                <span className="item-subtotal">
-                  {formatCOP(subtotalItem(item))}
+              ) : (
+                <input type="text" placeholder="No hay insumos activos registrados" readOnly
+                  style={{ background: 'var(--bg-surface-2)', color: 'var(--text-muted)' }}/>
+              )}
+              {itemDraft.unidad && (
+                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                  Unidad de medida: <strong>{itemDraft.unidad}</strong>
                 </span>
-              </div>
-              <button
-                type="button" className="btn-remove-item"
-                onClick={() => removeItem(idx)}
-                disabled={form.items.length === 1}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
+              )}
+            </div>
 
+            {itemDraft.insumo && (() => {
+              const esUnitario = itemDraft.presentacionTipo === 'Unitario';
+              const contenidoEsEntero = itemDraft.unidad === 'unidad';
+              const insumoSel = todosInsumos.find(i => i.nombre === itemDraft.insumo);
+              const stockBajo = insumoSel && Number(insumoSel.stockActual) <= Number(insumoSel.stockMinimo);
+              return (
+              <>
+                {stockBajo && (
+                  <div className="item-stock-bajo-alert">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{flexShrink:0}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>Stock bajo de "{insumoSel.nombre}": quedan {insumoSel.stockActual} {insumoSel.unidadMedida} (mínimo {insumoSel.stockMinimo}).</span>
+                  </div>
+                )}
+                <div className="item-presentacion-panel">
+                  <div className="fg">
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span>Tipo de presentación</span>
+                      {onManagePresentaciones && (
+                        <button type="button" onClick={onManagePresentaciones}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+                          Gestionar tipos
+                        </button>
+                      )}
+                    </label>
+                    <select value={itemDraft.presentacionTipo} onChange={e => handleDraftPresentacion('presentacionTipo', e.target.value)}>
+                      <option value="">-- Seleccionar --</option>
+                      {TIPOS_PRESENTACION.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+
+                  {!esUnitario && (
+                    <div className="fg">
+                      <label>{itemDraft.presentacionTipo ? `Cantidad de ${pluralPresentacion(itemDraft.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
+                      <input type="number" step="1"
+                        placeholder={preguntaCantidadPresentacion(itemDraft.presentacionTipo)}
+                        value={itemDraft.presentacionCantidad}
+                        onChange={e => handleDraftPresentacion('presentacionCantidad', e.target.value)}
+                        onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                    </div>
+                  )}
+
+                  {!esUnitario && itemDraft.presentacionMultiNivel ? (
+                    <>
+                      <div className="fg">
+                        <label>{`¿Cuántas unidades trae cada ${(itemDraft.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
+                        <input type="number" step="1" placeholder="Ej: 10"
+                          value={itemDraft.presentacionUnidadesInternas}
+                          onChange={e => handleDraftPresentacion('presentacionUnidadesInternas', e.target.value)}
+                          onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                      </div>
+                      <div className="fg">
+                        <label>{`¿Cuánto contiene cada unidad interna${itemDraft.unidad ? ` (${itemDraft.unidad})` : ''}?`}</label>
+                        <input type="number" step={contenidoEsEntero ? '1' : '0.01'}
+                          placeholder={contenidoEsEntero ? 'Ej: 1' : 'Ej: 5'}
+                          value={itemDraft.presentacionContenidoUnidadInterna}
+                          onChange={e => handleDraftPresentacion('presentacionContenidoUnidadInterna', e.target.value)}
+                          onBlur={() => limpiarDraftCero('presentacionContenidoUnidadInterna')}
+                          onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="fg">
+                      <label>{esUnitario ? 'Cantidad recibida' : preguntaContenidoPresentacion(itemDraft.unidad, itemDraft.presentacionTipo)}</label>
+                      <input type="number" step={contenidoEsEntero ? '1' : '0.01'}
+                        placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
+                        value={itemDraft.presentacionContenido}
+                        onChange={e => handleDraftPresentacion('presentacionContenido', e.target.value)}
+                        onBlur={() => limpiarDraftCero('presentacionContenido')}
+                        onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                    </div>
+                  )}
+
+                  <div className="fg">
+                    <label>Precio por {(itemDraft.presentacionTipo || 'presentación').toLowerCase()}</label>
+                    <input type="number" step="1" placeholder="Ej: 10000 (mín. $1.000)"
+                      title="Escribe el precio en pesos, sin puntos ni comas."
+                      value={itemDraft.presentacionPrecio}
+                      onChange={e => handleDraftPresentacion('presentacionPrecio', e.target.value)}
+                      onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                  </div>
+
+                  {!esUnitario && (
+                    <div className="fg" style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                        <input type="checkbox" checked={!!itemDraft.presentacionMultiNivel} onChange={handleDraftToggleMulti}/>
+                        No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
+                      </label>
+                    </div>
+                  )}
+                  {stockRealItem(itemDraft) > 0 && (
+                    <div className="item-presentacion-info">
+                      ℹ Se sumarán <strong>{stockRealItem(itemDraft)} {itemDraft.unidad}</strong> al stock — informativo, no se usa para el valor de la compra.
+                    </div>
+                  )}
+                </div>
+              </>
+              );
+            })()}
+
+            {draftError && <div className="items-error-msg" style={{ margin: '8px 0 0' }}>{draftError}</div>}
+
+            <div className="compra-panel__actions">
+              {editingIdx != null && (
+                <button type="button" className="btn-form-cancel" onClick={limpiarDraft}>Cancelar</button>
+              )}
+              <button type="button" className="btn-add-item"
+                onClick={agregarItemDraft}
+                disabled={!itemDraft.insumo || !esItemValido(itemDraft)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                {editingIdx != null ? 'Guardar cambios' : 'Agregar a la compra'}
               </button>
             </div>
-
-            {(() => {
-              const insumoSel = todosInsumos.find(i => i.nombre === item.insumo);
-              const stockBajo = insumoSel && Number(insumoSel.stockActual) <= Number(insumoSel.stockMinimo);
-              if (!stockBajo) return null;
-              return (
-                <div className="item-stock-bajo-alert">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{flexShrink:0}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                  <span>Stock bajo de "{insumoSel.nombre}": quedan {insumoSel.stockActual} {insumoSel.unidadMedida} (mínimo {insumoSel.stockMinimo}) — buen momento para comprarlo.</span>
-                </div>
-              );
-            })()}
-
-            {(() => {
-              const esUnitario = item.presentacionTipo === 'Unitario';
-              return (
-              <div className="item-presentacion-panel">
-                <div className="fg">
-                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span>Tipo de presentación</span>
-                    {onManagePresentaciones && (
-                      <button type="button" onClick={onManagePresentaciones}
-                        style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
-                        Gestionar tipos
-                      </button>
-                    )}
-                  </label>
-                  <select value={item.presentacionTipo} onChange={e => handlePresentacionChange(idx, 'presentacionTipo', e.target.value)}>
-                    <option value="">-- Seleccionar --</option>
-                    {TIPOS_PRESENTACION.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-
-                {!esUnitario && (
-                  <div className="fg">
-                    <label>{item.presentacionTipo ? `Cantidad de ${pluralPresentacion(item.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
-                    <input
-                      type="number" step="1"
-                      placeholder={preguntaCantidadPresentacion(item.presentacionTipo)}
-                      value={item.presentacionCantidad}
-                      onChange={e => handlePresentacionChange(idx, 'presentacionCantidad', e.target.value)}
-                      onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                    />
-                  </div>
-                )}
-
-                {!esUnitario && item.presentacionMultiNivel ? (
-                  <>
-                    <div className="fg">
-                      <label>{`¿Cuántas unidades trae cada ${(item.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
-                      <input
-                        type="number" step="1"
-                        placeholder="Ej: 10"
-                        value={item.presentacionUnidadesInternas}
-                        onChange={e => handlePresentacionChange(idx, 'presentacionUnidadesInternas', e.target.value)}
-                        onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                      />
-                    </div>
-                    <div className="fg">
-                      <label>{`¿Cuánto contiene cada unidad interna${item.unidad ? ` (${item.unidad})` : ''}?`}</label>
-                      <input
-                        type="number" step={contenidoEsEntero ? '1' : '0.01'}
-                        placeholder={contenidoEsEntero ? 'Ej: 1' : 'Ej: 5'}
-                        value={item.presentacionContenidoUnidadInterna}
-                        onChange={e => handlePresentacionChange(idx, 'presentacionContenidoUnidadInterna', e.target.value)}
-                        onBlur={() => limpiarSiCeroAlSalir(idx, 'presentacionContenidoUnidadInterna')}
-                        onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="fg">
-                    <label>{esUnitario ? 'Cantidad recibida' : preguntaContenidoPresentacion(item.unidad, item.presentacionTipo)}</label>
-                    <input
-                      type="number" step={contenidoEsEntero ? '1' : '0.01'}
-                      placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
-                      value={item.presentacionContenido}
-                      onChange={e => handlePresentacionChange(idx, 'presentacionContenido', e.target.value)}
-                      onBlur={() => limpiarSiCeroAlSalir(idx, 'presentacionContenido')}
-                      onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                    />
-                  </div>
-                )}
-
-                <div className="fg">
-                  <label>Precio por {(item.presentacionTipo || 'presentación').toLowerCase()}</label>
-                  <input
-                    type="number" step="1" placeholder="Ej: 10000 (mín. $1.000)"
-                    title="Escribe el precio en pesos, sin puntos ni comas."
-                    value={item.presentacionPrecio}
-                    onChange={e => handlePresentacionChange(idx, 'presentacionPrecio', e.target.value)}
-                    onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}
-                  />
-                </div>
-
-                {/* Mini-presentación: opcional, desactivada por defecto —
-                    exclusiva de Caja/Paquete/Bolsa. "Unitario" no la usa.
-                    Va al final de todos los campos numéricos, no en medio,
-                    para que Tipo/Cantidad/Contenido/Precio queden en una
-                    sola fila alineada cuando está desmarcada (el caso por
-                    defecto). */}
-                {!esUnitario && (
-                  <div className="fg" style={{ gridColumn: '1 / -1' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={!!item.presentacionMultiNivel}
-                        onChange={() => handleTogglePresentacionMulti(idx)}
-                      />
-                      No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
-                    </label>
-                  </div>
-                )}
-                {stockRealItem(item) > 0 && (
-                  <div className="item-presentacion-info">
-                    ℹ Se sumarán <strong>{stockRealItem(item)} {item.unidad}</strong> al stock{item.insumo ? ` de "${item.insumo}"` : ''} — este número es informativo, no se usa para el valor de la compra.
-                  </div>
-                )}
-              </div>
-              );
-            })()}
           </div>
-          );
-        })}
+
+          {/* ── Panel DERECHO: lista de insumos añadidos ── */}
+          <div className="compra-panel compra-panel--list">
+            <div className="compra-panel__title">
+              Insumos añadidos
+              <span className="compra-items-count">{form.items.length}</span>
+            </div>
+            <div className="compra-panel__scroll">
+              {form.items.length === 0 ? (
+                <div className="compra-panel__empty">
+                  Todavía no has añadido ningún insumo. Configúralo a la izquierda y pulsa “Agregar a la compra”.
+                </div>
+              ) : form.items.map((it, idx) => (
+                <div key={idx} className={`compra-list-item ${editingIdx === idx ? 'is-editing' : ''} ${!esItemValido(it) ? 'is-invalid' : ''}`}>
+                  <span className="compra-list-item__n">{idx + 1}</span>
+                  <div className="compra-list-item__body">
+                    <div className="compra-list-item__name">{it.insumo}</div>
+                    <div className="compra-list-item__meta">
+                      {(it.presentacionTipo || 'Por presentación')} · {stockRealItem(it)} {it.unidad} · {formatCOP(subtotalItem(it))}
+                    </div>
+                  </div>
+                  <div className="compra-list-item__actions">
+                    <button type="button" title="Editar" onClick={() => editarItem(idx)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button type="button" title="Quitar" onClick={() => quitarItem(idx)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="compra-totales-wrap">

@@ -1,0 +1,46 @@
+/* DateRangeFilter — filtro de rango de fechas reutilizable */
+.drf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.drf__label {
+  font-size: 12px;
+  color: var(--text-muted, #999);
+  white-space: nowrap;
+}
+.drf__sep {
+  color: var(--text-muted, #999);
+  font-size: 13px;
+}
+.drf-input {
+  padding: 8px 10px;
+  border: 1.5px solid var(--border-input, #ccc);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--bg-input, var(--bg-surface, #fff));
+  color: var(--text-primary, #222);
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s;
+}
+.drf-input:focus { border-color: var(--color-green, #4CAF50); }
+.drf-input--sm { padding: 6px 9px; font-size: 12.5px; }
+.drf-input--lg { padding: 9px 12px; }
+/* El día deshabilitado por min/max ya lo pinta el propio calendario del
+   navegador; este color solo aclara el icono cuando el campo está topado. */
+.drf-input::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .6; }
+.drf-input:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+
+.drf__clear {
+  background: none;
+  border: none;
+  color: var(--text-muted, #999);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.drf__clear:hover { color: var(--color-red, #E53935); background: var(--bg-hover, rgba(0,0,0,.05)); }

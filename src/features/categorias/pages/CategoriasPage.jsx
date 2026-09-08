@@ -6,6 +6,8 @@ import categoriasService from '../services/categoriasService';
 import productosService from '../../productos/services/productosService';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
+import ImageUploader from '../../../shared/components/ImageUploader';
+import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import '../../insumos/pages/InsumosPage.css';
 import '../../productos/pages/Modulos.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
@@ -13,7 +15,9 @@ import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto'
 const fmt = iso => iso ? new Intl.DateTimeFormat('es-CO',{dateStyle:'medium'}).format(new Date(iso)) : '—';
 
 function CategoriaFormModal({ inicial, onClose, onSave }) {
-  const [form, setForm] = React.useState(inicial || { nombre:'', descripcion:'', estado:'Activo' });
+  const [form, setForm] = React.useState(inicial
+    ? { imagen:'', ...inicial }
+    : { nombre:'', descripcion:'', estado:'Activo', imagen:'' });
   const [error, setError] = React.useState('');
   const set = k => e => setForm(f => ({...f, [k]: e.target.value}));
 
@@ -46,6 +50,18 @@ function CategoriaFormModal({ inicial, onClose, onSave }) {
             <label>Descripción</label>
             <textarea value={form.descripcion} onChange={set('descripcion')} placeholder="Describe la categoría..." rows={3} maxLength={LIMITES.DESCRIPCION} />
             <div style={{fontSize:11,color:enElTope(form.descripcion,LIMITES.DESCRIPCION)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.descripcion,LIMITES.DESCRIPCION)}</div>
+          </div>
+
+          {/* batch 9 item 6 — imagen de la categoría (mismo componente de
+              subida que Productos y Adiciones). Se muestra en el listado
+              del admin y junto al nombre de la categoría en la vista del
+              cliente. */}
+          <div className="mod-form-group">
+            <ImageUploader
+              label="Imagen de la categoría (opcional)"
+              value={form.imagen}
+              onChange={val => setForm(f => ({ ...f, imagen: val }))}
+            />
           </div>
 
           <div className="switch-wrap">
@@ -223,17 +239,10 @@ export default function CategoriasPage() {
               {query && <button className="search-clear" onClick={()=>handleSearch('')}>✕</button>}
             </div>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:6}}>
-            <label style={{fontSize:12,color:'var(--text-muted)'}}>Creada entre</label>
-            <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPage(1); }}
-              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
-            <span style={{color:'var(--text-muted)',fontSize:13}}>–</span>
-            <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPage(1); }}
-              style={{padding:'8px 10px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:13,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none'}}/>
-            {(fechaDesde || fechaHasta) && (
-              <button className="search-clear" onClick={() => { setFechaDesde(''); setFechaHasta(''); setPage(1); }}>✕</button>
-            )}
-          </div>
+          <DateRangeFilter
+            label="Creada entre" desde={fechaDesde} hasta={fechaHasta} maxToday
+            onChange={({ desde, hasta }) => { setFechaDesde(desde); setFechaHasta(hasta); setPage(1); }}
+          />
           <select value={estadoFiltro} onChange={e => { setEstadoFiltro(e.target.value); setPage(1); }}
             title="Filtrar categorías por estado"
             style={{padding:'9px 12px',border:'1.5px solid var(--border-input)',borderRadius:8,fontSize:12.5,background:'var(--bg-input)',color:'var(--text-primary)',outline:'none',cursor:'pointer'}}>

@@ -1,7 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import proveedoresService from '../services/proveedoresService';
+import useCiudades from '../hooks/useCiudades';
+import ModalCiudades from './ModalCiudades';
+import SearchSelect from '../../../shared/components/SearchSelect';
 import './ProveedorForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
+
+// batch 7 item 1 — las 16 ciudades principales de Colombia. Sirven como
+// respaldo si el catálogo de la API (GET /ciudades) todavía viene vacío;
+// en cuanto la API las tenga, esa lista manda.
+const CIUDADES_PRINCIPALES = [
+  'Bogotá', 'Medellín', 'Cali', 'Barranquilla', 'Cartagena', 'Cúcuta',
+  'Bucaramanga', 'Pereira', 'Santa Marta', 'Ibagué', 'Villavicencio',
+  'Manizales', 'Pasto', 'Montería', 'Neiva', 'Armenia',
+];
 
 const EMPTY_FORM = {
   tipoPersona: 'Natural', // 'Natural' | 'Juridica' — decidido por el toggle, no es un campo seleccionable dentro del formulario
@@ -132,6 +144,9 @@ const filtrarNumeroDocumento = (tipo, v) => {
 const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFields = [] }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  // batch 7 item 1 — catálogo de ciudades + modal de gestión
+  const { ciudades, loading: ciudadesLoading } = useCiudades();
+  const [showCiudades, setShowCiudades] = useState(false);
   // Qué campos ya tocó el usuario (onBlur en texto, onChange en selects) —
   // solo esos muestran el check de válido; el error, en cambio, se muestra
   // apenas exista (incluido al enviar, para campos nunca tocados).
@@ -154,7 +169,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         telefono:        initialData.telefono        || '',
         correo:          initialData.correo          || '',
         direccion:       initialData.direccion       || '',
-        ciudad:          'Medellín',
+        ciudad:          initialData.ciudad          || 'Medellín',
         observaciones:   initialData.observaciones   || '',
         estado:          initialData.estado !== undefined ? initialData.estado : 'Activo'
       });
@@ -303,7 +318,19 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
     });
   };
 
+  const ciudadOptions = useMemo(() => {
+    const activas = (ciudades || [])
+      .filter(c => c.estado === true || c.estado === 'Activo')
+      .map(c => c.nombre);
+    const base = activas.length > 0 ? [...activas] : [...CIUDADES_PRINCIPALES];
+    // conserva la ciudad ya asignada aunque esté inactiva o fuera de la lista
+    if (form.ciudad && !base.includes(form.ciudad)) base.push(form.ciudad);
+    return [...new Set(base)].map(n => ({ value: n, label: n }));
+  }, [ciudades, form.ciudad]);
+
   return (
+    <>
+    {showCiudades && <ModalCiudades onClose={() => setShowCiudades(false)} />}
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
       {/* Toggle Persona Natural / Persona Jurídica — reemplaza cualquier
           campo seleccionable de "tipo de persona": es la propia elección
@@ -415,17 +442,25 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
             : touched.correo && form.correo.trim() && <span className="ok-msg">✓ Válido</span>}
         </div>
 
+        {/* batch 7 item 1 — Ciudad: selector real con buscador + enlace
+            "Añadir ciudad" encima. Gestión: crear / editar / activar—
+            desactivar (nunca eliminar). */}
         <div className="fg">
-          <label>Ciudad</label>
-          <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-            </svg>
-            Medellín
-          </div>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-            El sistema solo maneja proveedores de Medellín.
-          </span>
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span>Ciudad</span>
+            <button type="button" onClick={() => setShowCiudades(true)}
+              style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+              + Añadir ciudad
+            </button>
+          </label>
+          <SearchSelect
+            value={form.ciudad}
+            options={ciudadOptions}
+            onChange={(v) => { const nf = { ...form, ciudad: v }; setForm(nf); touchAndValidate('ciudad', nf); }}
+            loading={ciudadesLoading}
+            placeholder="Buscar ciudad…"
+            emptyMessage="No hay ciudades registradas."
+          />
         </div>
 
         <div className="fg">
@@ -476,6 +511,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
         </button>
       </div>
     </form>
+    </>
   );
 };
 

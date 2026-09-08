@@ -15,6 +15,7 @@ import ventasService from '../../ventas/services/ventasService';
 import devolucionesService from '../../devoluciones/services/devolucionesService';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import LocalFiltro from '../../../shared/components/LocalFiltro';
+import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import '../../insumos/pages/InsumosPage.css';
 import './DashboardPage.css';
 
@@ -336,9 +337,11 @@ export default function DashboardPage() {
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
             <div className="dash-datefilter__custom">
-              <input type="date" value={rangoCustom.desde} max={todayISO()} onChange={e => { setDatePreset('custom'); setRangoCustom(r => ({...r, desde: e.target.value})); }}/>
-              <span>—</span>
-              <input type="date" value={rangoCustom.hasta} max={todayISO()} onChange={e => { setDatePreset('custom'); setRangoCustom(r => ({...r, hasta: e.target.value})); }}/>
+              <DateRangeFilter
+                desde={rangoCustom.desde} hasta={rangoCustom.hasta} maxToday showClear={false}
+                title="Rango de fechas personalizado"
+                onChange={({ desde, hasta }) => { setDatePreset('custom'); setRangoCustom({ desde, hasta }); }}
+              />
             </div>
             <LocalFiltro value={localSel} onChange={setLocalSel} sedeUsuario={user?.sede} style={{marginLeft:8}}/>
             <button onClick={exportarResumenPDF}

@@ -6,6 +6,7 @@ import pedidosService from '../../pedidos/services/pedidosService';
 import devolucionesService from '../../devoluciones/services/devolucionesService';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import LocalFiltro from '../../../shared/components/LocalFiltro';
+import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import Tooltip from '../../../shared/components/Tooltip';
 import '../../insumos/pages/InsumosPage.css';
 import './VentasPage.css';
@@ -404,15 +405,12 @@ export default function VentasPage() {
                 <option value="vendido">Vendido</option>
                 <option value="devuelto">Devuelto</option>
               </select>
-              <div style={{display:'flex',alignItems:'center',gap:6}} title="Filtrar ventas por rango de fechas">
-                <input className="filtro-select" type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPagina(1); }}/>
-                <span style={{fontSize:12,color:'var(--text-muted)'}}>–</span>
-                <input className="filtro-select" type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPagina(1); }}/>
-                {(fechaDesde || fechaHasta) && (
-                  <button className="search-clear" title="Limpiar filtro de fechas"
-                    onClick={() => { setFechaDesde(''); setFechaHasta(''); setPagina(1); }}>✕</button>
-                )}
-              </div>
+              <DateRangeFilter
+                desde={fechaDesde} hasta={fechaHasta} maxToday
+                title="Filtrar ventas por rango de fechas"
+                inputClassName="filtro-select"
+                onChange={({ desde, hasta }) => { setFechaDesde(desde); setFechaHasta(hasta); setPagina(1); }}
+              />
               <LocalFiltro value={localSel} onChange={v => { setLocalSel(v); setPagina(1); }} sedeUsuario={user?.sede}/>
               <span style={{fontSize:13,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{filtradas.length} venta{filtradas.length!==1?'s':''}</span>
             </div>

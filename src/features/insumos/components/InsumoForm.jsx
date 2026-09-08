@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import insumosService from '../services/insumosService';
-import proveedoresService from '../../proveedores/services/proveedoresService';
 import categoriasInsumosService from '../services/categoriasInsumosService';
+import SearchSelect from '../../../shared/components/SearchSelect';
 import './InsumoForm.css';
 import { contador, enElTope } from '../../../shared/utils/limitesTexto';
-import { TIPO_USO_OPCIONES, tiposUsoDe, tiposUsoPayload, permiteDecimales, errorCantidad, localesStockPayload, desglosePorLocal } from '../../../shared/constants/insumoTipos';
+import { permiteDecimales, errorCantidad, localesStockPayload, desglosePorLocal } from '../../../shared/constants/insumoTipos';
 
 const EMPTY_FORM = {
   nombre: '',
@@ -13,18 +13,12 @@ const EMPTY_FORM = {
   unidadMedida: '',
   stockActual: '',
   stockMinimo: '',
-  proveedor: '',
-  proveedorId: '',
   descripcion: '',
   estado: 'Activo',
   tamanoOz: '',
-  // Cambio 4 — tipo de uso (selección múltiple, al menos uno). Mapean a
-  // los flags es_insumo / es_adicion_sin_costo / es_topping del backend.
-  // `esTopping` se mantiene además por compatibilidad con el código que
-  // aún lo lee (ver tiposUsoPayload en shared/constants/insumoTipos.js).
-  es_insumo: true,
-  es_adicion_sin_costo: false,
-  es_topping: false,
+  // batch 8 item 3 — la opción de "tipo de uso" (topping / adición) se
+  // eliminó del insumo. Esa configuración vive ahora en los módulos de
+  // Toppings y Adiciones (insumo + cantidad por uso).
 };
 
 // Los vasos ya NO son una categoría especial ni una lista definida en el
@@ -46,77 +40,6 @@ const DESCRIPCION_INSUMO_MAX = 200;
 // como primer carácter.
 const filtrarNombreInsumo = (v) => v.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s.,%()-]/g, '');
 const sinEspacioAlInicio = (v) => v.replace(/^\s+/, '');
-
-// Selector con buscador — mismo campo de siempre, pero con un input de
-// texto que filtra las opciones en tiempo real. Mismo componente ya usado
-// en el formulario de Compras, replicado acá para el selector de
-// Proveedor de este formulario.
-function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage }) {
-  const [open, setOpen] = useState(false);
-  const [texto, setTexto] = useState('');
-  const wrapRef = useRef(null);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    const onDocMouseDown = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        setOpen(false);
-        setTexto('');
-      }
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, []);
-
-  const selected = options.find(o => String(o.value) === String(value));
-  const filtrados = texto.trim()
-    ? options.filter(o => {
-        const t = texto.trim().toLowerCase();
-        return o.label.toLowerCase().includes(t) || (o.sub && o.sub.toLowerCase().includes(t));
-      })
-    : options;
-
-  const abrir = () => {
-    if (disabled) return;
-    setOpen(true);
-    setTimeout(() => inputRef.current?.select(), 0);
-  };
-
-  return (
-    <div ref={wrapRef} className="buscador-select-wrap">
-      <input
-        ref={inputRef}
-        type="text"
-        className="buscador-select-input"
-        disabled={disabled}
-        value={open ? (texto || (selected ? selected.label : '')) : (selected ? selected.label : '')}
-        onFocus={abrir}
-        onClick={abrir}
-        onChange={e => { setTexto(e.target.value); if (!open) setOpen(true); }}
-        placeholder={placeholder}
-        autoComplete="off"
-      />
-      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
-      {open && !disabled && (
-        <div className="buscador-dropdown">
-          {filtrados.length === 0 ? (
-            <div className="buscador-dropdown-empty">{emptyMessage || 'Sin resultados.'}</div>
-          ) : filtrados.map(o => (
-            <div
-              key={o.value}
-              className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
-              onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
-            >
-              {o.label}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, onManageCategorias, locales = [], localActivoId }) => {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -160,12 +83,9 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         unidadMedida: initialData.unidadMedida || '',
         stockActual:  initialData.stockActual  ?? 0,
         stockMinimo:  initialData.stockMinimo  ?? '',
-        proveedor:    initialData.proveedor    || '',
-        proveedorId:  initialData.proveedorId  || '',
         descripcion:  initialData.descripcion  || '',
         estado:       initialData.estado !== undefined ? initialData.estado : 'Activo',
         tamanoOz:     initialData.tamanoOz     ?? '',
-        ...tiposUsoDe(initialData),
       });
       setTamanoOzEsOtro(
         initialData.tamanoOz != null && initialData.tamanoOz !== '' && !TAMANOS_OZ_PRESET.includes(Number(initialData.tamanoOz))
@@ -225,16 +145,12 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
   // Registrar Compra ("Comprar por presentación"), nunca aquí.
   const unidades    = ['kg', 'g', 'lb', 'oz', 'L', 'mL', 'unidad'];
   const [categoriasDisponibles, setCategoriasDisponibles] = useState([]);
+  const [categoriasLoading, setCategoriasLoading] = useState(true);
   useEffect(() => {
     categoriasInsumosService.getAll()
       .then(d => setCategoriasDisponibles(Array.isArray(d) ? d.filter(c => c.estado === 'Activo') : []))
-      .catch(() => setCategoriasDisponibles([]));
-  }, []);
-  const [proveedores, setProveedores] = useState([]);
-  useEffect(() => {
-    proveedoresService.getAll()
-      .then(d => setProveedores(Array.isArray(d) ? d : []))
-      .catch(() => setProveedores([]));
+      .catch(() => setCategoriasDisponibles([]))
+      .finally(() => setCategoriasLoading(false));
   }, []);
 
   // Acepta un snapshot de formulario explícito (f) para poder validar el
@@ -249,7 +165,8 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       errs.tamanoOz = 'Selecciona o escribe el tamaño del vaso';
     }
     if (!f.unidadMedida)       errs.unidadMedida = 'Selecciona una unidad de medida';
-    if (!f.es_insumo && !f.es_adicion_sin_costo && !f.es_topping) errs.tipoUso = 'Marca al menos un tipo de uso';
+    // batch 7 item 2 — el proveedor ya no forma parte del insumo.
+    // batch 8 item 3 — el tipo de uso (topping/adición) ya no vive aquí.
     // batch 4 item 7 — en qué locales existe el insumo
     if ((locales || []).length > 0) {
       const elegidos = todosLocales ? locales.map(l => String(l.id)) : localesActivos;
@@ -271,7 +188,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       );
       if (filaMala) errs.localesStock = 'Corrige los valores de stock por local';
     }
-    if (proveedoresActivos.length > 0 && !f.proveedor.trim()) errs.proveedor = 'Selecciona un proveedor';
     return errs;
   };
 
@@ -313,45 +229,45 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
   // handleChange arriba), pero se deja como respaldo silencioso.
   const handleBlur = (e) => touchAndValidate(e.target.name);
 
-  const handleCategoriaChange = (e) => {
-    const selectedId = e.target.value;
-    const cat = categoriasDisponibles.find(c => String(c.id) === selectedId);
-    const nombreCat = cat ? cat.nombre : '';
-    const newForm = { ...form, categoriaId: selectedId, categoria: nombreCat };
+  const handleCategoriaChange = (selectedId) => {
+    const cat = categoriasDisponibles.find(c => String(c.id) === String(selectedId));
+    const newForm = { ...form, categoriaId: String(selectedId), categoria: cat ? cat.nombre : '' };
     setForm(newForm);
     touchAndValidate('categoria', newForm);
   };
 
-  // Cambio 4 — marca/desmarca un tipo de uso y revalida la regla de
-  // "al menos uno" en vivo.
-  const handleTipoUso = (key) => {
-    const newForm = { ...form, [key]: !form[key] };
-    setForm(newForm);
-    touchAndValidate('tipoUso', newForm);
+  // batch 7 item 3 — al abrir "¿Hay cantidad existente?" se autocompleta
+  // Observaciones (descripcion) con un texto por defecto, SOLO si el
+  // usuario todavía no escribió nada ahí (no se sobrescribe lo suyo).
+  const OBS_CANTIDAD_EXISTENTE = 'Comenzó con cantidad existente';
+  const abrirStockInicial = () => {
+    setStockInicialAbierto(true);
+    setForm(prev => prev.descripcion.trim()
+      ? prev
+      : { ...prev, descripcion: OBS_CANTIDAD_EXISTENTE });
   };
-
-  const handleProveedorChange = (e) => {
-    const selectedId = e.target.value;
-    const prov = proveedores.find(p => String(p.id) === String(selectedId));
-    const newForm = { ...form, proveedorId: selectedId, proveedor: prov ? prov.nombre : '' };
-    setForm(newForm);
-    touchAndValidate('proveedor', newForm);
+  const cerrarStockInicial = () => {
+    setStockInicialAbierto(false);
+    setStockInicial({ cantidad: '', localId: '' });
+    setErrors(prev => ({ ...prev, stockInicial: '' }));
+    // Si la observación quedó exactamente con el texto autocompletado
+    // (nunca lo editaron), se limpia al cancelar.
+    setForm(prev => prev.descripcion.trim() === OBS_CANTIDAD_EXISTENTE
+      ? { ...prev, descripcion: '' }
+      : prev);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (noHayProveedores) {
-      window.alert('No hay proveedores disponibles. Registra un proveedor o activa uno existente en Gestión de Proveedores antes de crear un insumo.');
-      return;
-    }
     const errs = validate();
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     const dec = permiteDecimales(form.unidadMedida);
     const num = (v) => (dec ? Number(v) : Math.round(Number(v))) || 0;
     const payload = {
       ...form,
+      // batch 7 item 2 — el insumo se guarda SIN proveedor.
+      proveedor: null, proveedorId: null,
       tamanoOz: form.unidadMedida === 'oz' && form.tamanoOz !== '' ? Number(form.tamanoOz) : null,
-      ...tiposUsoPayload(form),
     };
     // batch 4 item 7 — locales donde existe el insumo
     const localesIds = (todosLocales ? (locales || []).map(l => String(l.id)) : localesActivos)
@@ -382,17 +298,6 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     }
     onSubmit(payload);
   };
-
-  // "Disponible" significa que existe al menos un proveedor Activo — no basta
-  // con que existan proveedores si todos están inactivos.
-  const proveedoresActivos = proveedores.filter(p => p.estado === 'Activo');
-  const noHayProveedores = proveedoresActivos.length === 0;
-  // Al editar, si el proveedor ya asignado quedó inactivo mientras tanto,
-  // lo seguimos mostrando en la lista para no perder la selección actual.
-  const proveedorActualInactivo = isEditing && form.proveedorId && !proveedoresActivos.some(p => String(p.id) === String(form.proveedorId))
-    ? proveedores.find(p => String(p.id) === String(form.proveedorId))
-    : null;
-  const opcionesProveedor = proveedorActualInactivo ? [...proveedoresActivos, proveedorActualInactivo] : proveedoresActivos;
 
   return (
     <form className="insumo-form" onSubmit={handleSubmit} noValidate>
@@ -438,10 +343,15 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               </span>
             </div>
           ) : (
-            <select name="categoria" value={form.categoriaId} onChange={handleCategoriaChange}>
-              <option value="">-- Seleccionar --</option>
-              {categoriasDisponibles.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
+            <SearchSelect
+              value={form.categoriaId}
+              options={categoriasDisponibles.map(c => ({ value: c.id, label: c.nombre }))}
+              onChange={handleCategoriaChange}
+              loading={categoriasLoading}
+              placeholder="Buscar categoría…"
+              emptyMessage="No hay categorías activas."
+              hasError={!!errors.categoria}
+            />
           )}
           {errors.categoria
             ? <span className="err-msg">{errors.categoria}</span>
@@ -522,29 +432,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </div>
         )}
 
-        <div className={`fg ${errors.proveedor ? 'fg-error' : ''}`}>
-          <label>Proveedor <span className="req">*</span></label>
-          {noHayProveedores ? (
-            <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 12, color: '#C9A227', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              <span>No hay proveedores disponibles (no hay ninguno registrado, o todos están inactivos). Ve a Gestión de Proveedores para registrar o activar uno antes de continuar.</span>
-            </div>
-          ) : (
-            <BuscadorSelect
-              value={form.proveedorId}
-              options={opcionesProveedor.map(p => ({ value: p.id, label: `${p.nombre}${p.estado !== 'Activo' ? ' (Inactivo)' : ''}` }))}
-              onChange={(id) => handleProveedorChange({ target: { value: id } })}
-              placeholder="Buscar proveedor..."
-              emptyMessage="Ningún proveedor coincide con esa búsqueda."
-            />
-          )}
-          {errors.proveedor
-            ? <span className="err-msg">{errors.proveedor}</span>
-            : touched.proveedor && form.proveedor.trim() && <span className="ok-msg">✓ Válido</span>}
-        </div>
+        {/* batch 7 item 2 — el campo Proveedor se eliminó del insumo. */}
 
         {/* batch 4 item 7 — en qué locales EXISTE el insumo (no es el stock). */}
         {locales.length > 0 && (
@@ -610,13 +498,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
               <label>Stock actual</label>
               {!stockInicialAbierto ? (
                 <>
-                  <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
-                    0 {form.unidadMedida}
-                  </div>
-                  <button type="button" onClick={() => setStockInicialAbierto(true)}
-                    style={{ marginTop: 6, background: 'none', border: 'none', padding: 0, color: 'var(--color-green,#4CAF50)', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}>
-                    ¿Ya hay cantidad existente?
+                  <button type="button" onClick={abrirStockInicial}
+                    style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px dashed var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--color-green,#4CAF50)', fontWeight:700, cursor: 'pointer' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    ¿Hay cantidad existente?
                   </button>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                    Si no, el insumo se crea con 0 en todos los locales.
+                  </span>
                 </>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -634,7 +523,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     Solo este local recibe la cantidad inicial; el resto de locales queda en 0.
                   </span>
-                  <button type="button" onClick={() => { setStockInicialAbierto(false); setStockInicial({ cantidad: '', localId: '' }); setErrors(prev => ({ ...prev, stockInicial: '' })); }}
+                  <button type="button" onClick={cerrarStockInicial}
                     style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, color: 'var(--text-muted)', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
                     Cancelar — dejar todo en 0
                   </button>
@@ -700,42 +589,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </div>
         </div>
 
-        {/* Cambio 4 — Tipo de uso (selección múltiple: uno, dos o los tres).
-            Mapea a es_insumo / es_adicion_sin_costo / es_topping. */}
-        <div className={`fg fg-full ${errors.tipoUso ? 'fg-error' : ''}`}>
-          <label>Tipo de uso <span className="req">*</span></label>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:10, marginTop:4 }}>
-            {TIPO_USO_OPCIONES.map(op => {
-              const checked = !!form[op.key];
-              return (
-                <label key={op.key}
-                  style={{
-                    display:'flex', alignItems:'flex-start', gap:8, cursor:'pointer',
-                    padding:'10px 12px', borderRadius:10, flex:'1 1 180px',
-                    border:`1.5px solid ${checked ? '#4CAF50' : 'var(--border-input)'}`,
-                    background: checked ? 'rgba(76,175,80,0.10)' : 'var(--bg-surface)',
-                    transition:'all .15s',
-                  }}>
-                  <input type="checkbox" checked={checked} onChange={() => handleTipoUso(op.key)}
-                    style={{ width:16, height:16, marginTop:1, cursor:'pointer', accentColor:'#4CAF50' }}/>
-                  <span>
-                    <span style={{ display:'block', fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>{op.label}</span>
-                    <span style={{ display:'block', fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>{op.hint}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          {errors.tipoUso
-            ? <span className="err-msg">{errors.tipoUso}</span>
-            : (touched.tipoUso && <span className="ok-msg">✓ Válido</span>)}
-        </div>
+        {/* batch 8 item 3 — la sección "Tipo de uso" (topping / adición) se
+            eliminó: eso se configura en los módulos Toppings y Adiciones. */}
 
         <div className="fg fg-full">
-          <label>Descripción</label>
+          <label>Observaciones</label>
           <textarea name="descripcion" value={form.descripcion} onChange={handleChange}
             onBlur={() => setForm(prev => ({ ...prev, descripcion: prev.descripcion.trimEnd() }))}
-            placeholder="Descripción breve del insumo..." rows={3} maxLength={DESCRIPCION_INSUMO_MAX} />
+            placeholder="Observaciones del insumo..." rows={3} maxLength={DESCRIPCION_INSUMO_MAX} />
           <div style={{fontSize:11,color:enElTope(form.descripcion,DESCRIPCION_INSUMO_MAX)?'#E53935':'var(--text-muted)',textAlign:'right',marginTop:3}}>{contador(form.descripcion,DESCRIPCION_INSUMO_MAX)}</div>
         </div>
       </div>
@@ -747,7 +608,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           </svg>
           Cancelar
         </button>
-        <button type="submit" className="btn-form-submit" disabled={noHayProveedores || categoriasDisponibles.length === 0 || Object.values(errors).some(Boolean)}>
+        <button type="submit" className="btn-form-submit" disabled={categoriasDisponibles.length === 0 || Object.values(errors).some(Boolean)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             {isEditing
               ? <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>

@@ -199,6 +199,17 @@ export const combosApi = {
   remove:        (id)     => del (`/combos/${id}`),
 };
 
+// ── CIUDADES (catálogo para el campo Ciudad de Proveedores) ──────
+// Mismo patrón que categoriasInsumosApi / tiposPresentacionApi. Sin
+// `remove` a propósito: una ciudad nunca se elimina, solo se desactiva
+// (los proveedores que ya la tenían la siguen mostrando).
+export const ciudadesApi = {
+  getAll:       ()       => get   ('/ciudades', true),
+  create:       (data)   => post  ('/ciudades', data),
+  update:       (id, d)  => put   (`/ciudades/${id}`, d),
+  toggleEstado: (id)     => patch (`/ciudades/${id}/estado`),
+};
+
 // ── PROVEEDORES ──────────────────────────────────────────────
 export const proveedoresApi = {
   getAll:        ()       => get ('/proveedores'),

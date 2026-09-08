@@ -9,6 +9,7 @@ import { useAuth } from '../../../shared/contexts/AuthContext';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
+import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import combosService from '../services/combosService';
 import productosService from '../../productos/services/productosService';
 import adicionesService from '../../adiciones/services/adicionesService';
@@ -536,17 +537,11 @@ export default function CombosPage() {
               onChange={e => { setPrecioMax(e.target.value); setPage(1); }}
               style={{ width: 105, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Filtrar combos por vigencia">
-            <input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setPage(1); }}
-              style={{ padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
-            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>–</span>
-            <input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setPage(1); }}
-              style={{ padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
-            {(fechaDesde || fechaHasta) && (
-              <button className="search-clear" title="Limpiar filtro de fechas"
-                onClick={() => { setFechaDesde(''); setFechaHasta(''); setPage(1); }}>✕</button>
-            )}
-          </div>
+          <DateRangeFilter
+            desde={fechaDesde} hasta={fechaHasta} size="sm"
+            title="Filtrar combos por vigencia"
+            onChange={({ desde, hasta }) => { setFechaDesde(desde); setFechaHasta(hasta); setPage(1); }}
+          />
           {hayFiltros && (
             <button className="btn-limpiar-filtros" title="Limpiar filtros"
               onClick={() => { setQuery(''); setEstadoFiltro('Todos'); setPrecioMin(''); setPrecioMax(''); setFechaDesde(''); setFechaHasta(''); setPage(1); }}>
