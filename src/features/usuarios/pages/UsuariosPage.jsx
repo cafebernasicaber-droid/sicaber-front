@@ -428,7 +428,7 @@ function ModalFormUsuario({ usuario, roles, tipoFijo, isSuperAdmin, onCreate, on
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
               <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
               <button type="submit" className="btn-confirm-primary" disabled={loading}>
-                {loading ? 'Guardando...' : isEdit ? '💾 Guardar cambios' : '✅ Crear'}
+                {loading ? 'Guardando...' : isEdit ? '💾 Guardar cambios' : '✅ Registrar'}
               </button>
             </div>
           </form>

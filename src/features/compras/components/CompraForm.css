@@ -377,6 +377,31 @@
   text-align: center;
 }
 
+/* ── Toggle "Modo de compra": unitaria vs. por presentación ── */
+.compra-modo-toggle {
+  display: flex;
+  gap: 8px;
+}
+.compra-modo-toggle__btn {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-input);
+  background: var(--bg-surface-2);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.compra-modo-toggle__btn.is-active {
+  background: rgba(76,175,80,.15);
+  border-color: #4CAF50;
+  color: #4CAF50;
+}
+
 .item-presentacion-panel {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -442,14 +467,22 @@
   margin: 0 18px 10px;
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(230,115,0,0.10);
-  border: 1px solid rgba(230,115,0,0.28);
-  color: #E65100;
+  background: rgba(245,127,23,0.13);
+  border: 1px solid #FFD54F;
+  color: #F57F17;
   font-size: 12px;
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: 6px;
+}
+/* ronda 22 / A — "bajo el mínimo" y "agotado" se ven MÁS críticos que el
+   aviso temprano "stock bajo": rojo, barra izquierda gruesa. */
+.item-stock-bajo-alert--critico {
+  background: rgba(216,67,21,0.13);
+  border-color: #FF8A65;
+  border-left: 4px solid #D84315;
+  color: #D84315;
 }
 
 /* Alerta de advertencia genérica — mismo estándar visual que

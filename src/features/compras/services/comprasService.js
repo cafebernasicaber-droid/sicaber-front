@@ -6,7 +6,7 @@ const comprasService = {
   getHistorial: ()           => comprasApi.getHistorial(),
   getById:      (id)         => comprasApi.getById(id),
   create:       (data)       => comprasApi.create(data),
-  anular:       (id, motivo) => comprasApi.anular(id, motivo),
+  anular:       (id, motivo, items) => comprasApi.anular(id, motivo, items),
 };
 
 export default comprasService;

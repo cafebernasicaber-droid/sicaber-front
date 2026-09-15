@@ -102,9 +102,26 @@ export const AuthProvider = ({ children }) => {
       setUser(u);
       localStorage.setItem('sicaber_session', JSON.stringify(u));
       const rol = u.role.toLowerCase();
+      // CAUSA RAÍZ del "Acceso no autorizado" en un rol recién creado con
+      // permisos reales (ej. rol "ejempolo": pedidos/ventas/devoluciones/
+      // fichas/compras, SIN ver_dashboard): esto devolvía '/admin/dashboard'
+      // fijo para CUALQUIER rol que no tuviera "cajero"/"bartender" en el
+      // NOMBRE — sin importar qué permisos tuviera de verdad. Ese rol
+      // aterrizaba en Dashboard, PrivateRoute veía que no tenía
+      // "ver_dashboard" y lo mandaba directo a /acceso-no-autorizado, ANTES
+      // de que el usuario llegara a ver ninguno de los módulos que sí tenía
+      // habilitados. HomeRedirect.jsx ya existía, ya resolvía esto
+      // exactamente (Administrador → Dashboard; cualquier otro rol → su
+      // primer módulo con permiso), pero nada lo montaba: ni este
+      // `redirectTo` ni la ruta "/admin" (ver routes.jsx) lo usaban. Ahora
+      // el destino por defecto es "/admin", que routes.jsx monta como
+      // <HomeRedirect/> — Cajero/Bartender conservan su atajo directo a su
+      // propia pantalla (sin pasar por HomeRedirect, que ni siquiera los
+      // busca en NAV_GROUPS), y Administrador/cualquier otro rol quedan en
+      // manos de la misma lógica ya probada de HomeRedirect.
       const redirectTo = rol.includes('bartender') ? '/bartender'
         : rol.includes('cajero') ? '/cajero'
-        : '/admin/dashboard';
+        : '/admin';
       return { success: true, redirectTo };
     } catch (e) {
       return { success: false, error: e.message || 'Credenciales inválidas' };

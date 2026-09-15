@@ -12,9 +12,11 @@ import { normalizarComparacion } from '../../../shared/utils/textFormat';
 import ImageLightbox from '../../../shared/components/ImageLightbox';
 import '../../../shared/components/ImageLightbox.css';
 import Layout from '../../../shared/components/Layout';
+import SearchSelect from '../../../shared/components/SearchSelect';
 import '../components/CompraForm.css';
 import './RegistrarCompraPage.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
+import { perteneceALocal } from '../../../shared/constants/insumoTipos';
 
 // ── Mismas constantes/helpers de CompraForm.jsx — sin ningún cambio de
 // lógica de cálculo, solo reestructuración de layout. ──────────────────
@@ -55,12 +57,18 @@ const normalizarTexto = (s) =>
 const subtotalItem = (it) =>
   Number(it.presentacionCantidad || 0) * Number(it.presentacionPrecio || 0);
 
+// Redondea a 2 decimales y corta el ruido de coma flotante de JS (ej.
+// 3 * 0.1 = 0.30000000000000004) — con multiplicaciones de 3 factores
+// (cantidad × unidades internas × contenido) ese ruido aparecía seguido en
+// "Se sumarán X al stock" apenas alguno de los factores traía decimales.
+const redondearCantidad = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 const stockRealItem = (it) => {
   const cantidadPresentaciones = Number(it.presentacionCantidad || 0);
   if (it.presentacionMultiNivel) {
-    return cantidadPresentaciones * Number(it.presentacionUnidadesInternas || 0) * Number(it.presentacionContenidoUnidadInterna || 0);
+    return redondearCantidad(cantidadPresentaciones * Number(it.presentacionUnidadesInternas || 0) * Number(it.presentacionContenidoUnidadInterna || 0));
   }
-  return cantidadPresentaciones * Number(it.presentacionContenido || 0);
+  return redondearCantidad(cantidadPresentaciones * Number(it.presentacionContenido || 0));
 };
 
 const cuantosCuantas = (tipo, unidad) => {
@@ -78,73 +86,14 @@ const preguntaContenidoPresentacion = (unidad, tipo) => {
   return `¿${cuantosCuantas(null, unidad)} ${cantidadLabel} trae cada ${tipoLabel}?`;
 };
 
-// Mismo BuscadorSelect de siempre, sin cambios.
-function BuscadorSelect({ value, options, onChange, placeholder, disabled, emptyMessage }) {
-  const [open, setOpen] = useState(false);
-  const [texto, setTexto] = useState('');
-  const wrapRef = useRef(null);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    const onDocMouseDown = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        setOpen(false);
-        setTexto('');
-      }
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, []);
-
-  const selected = options.find(o => String(o.value) === String(value));
-  const filtrados = texto.trim()
-    ? options.filter(o => {
-        const t = texto.trim().toLowerCase();
-        return o.label.toLowerCase().includes(t) || (o.sub && o.sub.toLowerCase().includes(t));
-      })
-    : options;
-
-  const abrir = () => {
-    if (disabled) return;
-    setOpen(true);
-    setTimeout(() => inputRef.current?.select(), 0);
-  };
-
-  return (
-    <div ref={wrapRef} className="buscador-select-wrap">
-      <input
-        ref={inputRef}
-        type="text"
-        className="buscador-select-input"
-        disabled={disabled}
-        value={open ? (texto || (selected ? selected.label : '')) : (selected ? selected.label : '')}
-        onFocus={abrir}
-        onClick={abrir}
-        onChange={e => { setTexto(e.target.value); if (!open) setOpen(true); }}
-        placeholder={placeholder}
-        autoComplete="off"
-      />
-      <svg className="buscador-select-icon-lupa" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
-      {open && !disabled && (
-        <div className="buscador-dropdown">
-          {filtrados.length === 0 ? (
-            <div className="buscador-dropdown-empty">{emptyMessage || 'Sin resultados.'}</div>
-          ) : filtrados.map(o => (
-            <div
-              key={o.value}
-              className={`buscador-dropdown-item ${selected && String(selected.value) === String(o.value) ? 'is-selected' : ''}`}
-              onMouseDown={() => { onChange(o.value); setOpen(false); setTexto(''); }}
-            >
-              {o.label}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// El BuscadorSelect local que vivía acá se quitó: su desplegable se
+// renderizaba con `position: absolute` dentro del propio formulario, así
+// que cualquier ancestro con overflow (el modal de "Registrar Compra" tiene
+// overflow-y:auto para poder hacer scroll) lo recortaba — se veía "a la
+// mitad". Se reemplaza por el SearchSelect compartido (mismo props:
+// value/options/onChange/placeholder/disabled/emptyMessage), que ya
+// resuelve esto renderizando el desplegable en un portal sobre <body> con
+// posición fija, fuera del alcance de ese overflow.
 
 // ── Modal: Gestionar tipos de presentación — copia idéntica de la que
 // vivía en ComprasPage.jsx, movida acá porque el trigger ("Gestionar
@@ -339,6 +288,14 @@ const RegistrarCompraPage = () => {
   // — separado de form.items (el Listado ya confirmado). Nunca se muestra
   // el formulario completo de edición dentro del Listado: solo acá.
   const [itemActual, setItemActual] = useState({ ...EMPTY_ITEM });
+  // Estado del toggle "Modo de compra" (null | 'unitaria' | 'presentacion').
+  // NO se puede derivar solo de itemActual.presentacionTipo === '' porque
+  // ese mismo valor vacío representa DOS cosas distintas: "todavía no elegí
+  // ningún modo" y "elegí 'Por presentación' pero aún no el tipo concreto
+  // (Caja/Paquete/...)" — sin este estado aparte, el botón "Por
+  // presentación" no hacía nada la primera vez que estaba vacío (String
+  // '' -> '' es un no-op) y el texto de ayuda mostraba el modo equivocado.
+  const [modoCompra, setModoCompra] = useState(null);
   // null = agregando un insumo nuevo. Si no es null, es la _key (no el
   // índice del arreglo) del ítem que se está editando — usar la key en
   // vez del índice evita que una edición se "pierda" o apunte al ítem
@@ -402,7 +359,6 @@ const RegistrarCompraPage = () => {
     toggleEstado: toggleEstadoTipoPresentacion,
   } = useTiposPresentacion();
   const tiposPresentacionActivos = tiposPresentacionCatalogo.filter(t => t.estado === 'Activo').map(t => t.nombre);
-  const TIPOS_PRESENTACION = ['Unitario', ...tiposPresentacionActivos];
   const [todosInsumos, setTodosInsumos] = useState([]);
   useEffect(() => {
     insumosService.getAll()
@@ -410,11 +366,22 @@ const RegistrarCompraPage = () => {
       .catch(() => setTodosInsumos([]));
   }, []);
 
+  // Fix: el insumo no tiene un `localId` único (puede pertenecer a
+  // varios locales a la vez) — el backend expone eso en el desglose
+  // `porLocal`. `perteneceALocal` ya sabe leer ese desglose y exigir
+  // `activo === true` para el local elegido; con `i.localId` (undefined
+  // siempre) el filtro nunca coincidía y la lista quedaba vacía.
   const insumosFiltrados = form.localId
-    ? todosInsumos.filter(i => String(i.localId) === String(form.localId))
+    ? todosInsumos.filter(i => perteneceALocal(i, form.localId))
     : [];
 
-  const comprobanteEsObligatorio = form.items.some(it => it.presentacionTipo !== 'Unitario');
+  // El comprobante de compra es SIEMPRE opcional (nunca lo exigió el
+  // backend: comprobante_url no tiene NOT NULL ni ninguna validación que
+  // lo requiera — esta obligatoriedad era puramente del formulario). Se
+  // deja la constante (en vez de borrar todo lo que la usa) para no tener
+  // que tocar el resto del flujo de validación/confirmación del OCR más
+  // abajo, que sigue aplicando igual CUANDO sí se adjunta un comprobante.
+  const comprobanteEsObligatorio = false;
 
   // ── Validación de UN ítem — misma lógica exacta que ya existía ──────
   const esItemValido = (it) => {
@@ -453,7 +420,7 @@ const RegistrarCompraPage = () => {
       .filter(it => it.insumo && it.insumoId)
       .filter(it => {
         const ins = todosInsumos.find(i => String(i.id) === String(it.insumoId));
-        return !ins || String(ins.localId) !== String(form.localId);
+        return !ins || !perteneceALocal(ins, form.localId);
       })
       .map(it => it.insumo);
   };
@@ -502,6 +469,7 @@ const RegistrarCompraPage = () => {
     const loc = locales.find(l => String(l.id) === String(value));
     setForm(prev => ({ ...prev, localId: value, localNombre: loc ? loc.nombre : '', items: [] }));
     setItemActual({ ...EMPTY_ITEM });
+    setModoCompra(null);
     setEditandoKey(null);
     setTouchedItemActual({});
     setTouched(prev => ({ ...prev, localId: true }));
@@ -535,6 +503,7 @@ const RegistrarCompraPage = () => {
       presentacionTipo: '', presentacionCantidad: '', presentacionContenido: '', presentacionPrecio: '',
       presentacionMultiNivel: false, presentacionUnidadesInternas: '', presentacionContenidoUnidadInterna: '',
     }));
+    setModoCompra(null);
     setTouchedItemActual({});
     setErrorItemActual('');
   };
@@ -620,6 +589,7 @@ const RegistrarCompraPage = () => {
       return { ...prev, items };
     });
     setItemActual({ ...EMPTY_ITEM });
+    setModoCompra(null);
     setEditandoKey(null);
     setTouchedItemActual({});
     setErrorItemActual('');
@@ -630,6 +600,9 @@ const RegistrarCompraPage = () => {
     const it = form.items.find(i => i._key === key);
     if (!it) return;
     setItemActual({ ...it });
+    // El ítem ya guardado sí trae un presentacionTipo real (nunca ''), así
+    // que acá el modo SÍ se puede inferir directo de su valor.
+    setModoCompra(it.presentacionTipo === 'Unitario' ? 'unitaria' : 'presentacion');
     setEditandoKey(key);
     setTouchedItemActual({});
     setErrorItemActual('');
@@ -638,6 +611,7 @@ const RegistrarCompraPage = () => {
 
   const cancelarEdicionItem = () => {
     setItemActual({ ...EMPTY_ITEM });
+    setModoCompra(null);
     setEditandoKey(null);
     setTouchedItemActual({});
     setErrorItemActual('');
@@ -649,6 +623,7 @@ const RegistrarCompraPage = () => {
     // Panel de Gestión para no dejarlo "editando" un ítem que ya no existe.
     if (editandoKey === key) {
       setItemActual({ ...EMPTY_ITEM });
+      setModoCompra(null);
       setEditandoKey(null);
       setTouchedItemActual({});
     }
@@ -769,7 +744,11 @@ const RegistrarCompraPage = () => {
     } else {
       contenidoPorPresentacion = Number(it.presentacionContenido) || 0;
     }
-    const cantidadReal = cantidadPresentaciones * contenidoPorPresentacion;
+    // Redondeado con el mismo criterio que stockRealItem (2 decimales): lo
+    // que se manda al backend —y termina sumado a insumo_local.stock— debe
+    // coincidir con el número que ya se le mostró al usuario en el resumen,
+    // no un float sin redondear con más precisión "escondida".
+    const cantidadReal = redondearCantidad(cantidadPresentaciones * contenidoPorPresentacion);
     const precioUnitarioEfectivo = cantidadReal > 0
       ? (precioPresentacion * cantidadPresentaciones) / cantidadReal
       : 0;
@@ -896,7 +875,7 @@ const RegistrarCompraPage = () => {
             <div ref={localRef} className={`fg ${errors.localId ? 'fg-error' : ''}`}>
               <label>Local <span className="req">*</span></label>
               {locales.length > 0 ? (
-                <BuscadorSelect
+                <SearchSelect
                   value={form.localId}
                   options={locales.map(l => ({ value: l.id, label: l.nombre, sub: l.direccion || '' }))}
                   onChange={seleccionarLocal}
@@ -920,7 +899,7 @@ const RegistrarCompraPage = () => {
             <div ref={proveedorRef} className={`fg ${errors.proveedorNombre ? 'fg-error' : ''}`}>
               <label>Proveedor <span className="req">*</span></label>
               {proveedores.length > 0 ? (
-                <BuscadorSelect
+                <SearchSelect
                   value={form.proveedorId}
                   options={proveedores.map(p => ({ value: p.id, label: p.nombre, sub: [p.nit, p.numeroDocumento].filter(Boolean).join(' ') }))}
                   onChange={seleccionarProveedor}
@@ -998,7 +977,7 @@ const RegistrarCompraPage = () => {
                     <div className="item-row" style={{ gridTemplateColumns: '2fr 0.8fr' }}>
                       <div className="item-field">
                         <label className="item-field-label">Insumo</label>
-                        <BuscadorSelect
+                        <SearchSelect
                           value={itemActual.insumoId}
                           options={insumosFiltrados
                             .filter(i => !form.items.some(it => it._key !== editandoKey && it.insumoId && String(it.insumoId) === String(i.id)))
@@ -1030,25 +1009,63 @@ const RegistrarCompraPage = () => {
                       );
                     })()}
 
-                    {itemActual.insumo && (
-                      <div className={`fg ${claseCampo('presentacionTipo')}`} style={{ marginTop: 12 }}>
-                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          <span>Tipo de presentación</span>
-                          <button type="button" onClick={() => setShowTiposModal(true)}
-                            style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
-                            Gestionar tipos
-                          </button>
-                        </label>
-                        <BuscadorSelect
-                          value={itemActual.presentacionTipo}
-                          options={TIPOS_PRESENTACION.map(t => ({ value: t, label: t }))}
-                          onChange={(v) => handlePresentacionChangeActual('presentacionTipo', v)}
-                          placeholder="Buscar tipo de presentación..."
-                          emptyMessage="Ningún tipo coincide con esa búsqueda."
-                        />
-                        {mensajeCampo('presentacionTipo') && <span className="err-msg">{mensajeCampo('presentacionTipo')}</span>}
+                    {itemActual.insumo && (() => {
+                      // Antes "Unitario" era una opción más del mismo
+                      // buscador de "Tipo de presentación" junto con Caja/
+                      // Paquete/Bolsa — funcionaba, pero mezclaba dos MODOS
+                      // de compra distintos (uno no tiene presentación en
+                      // absoluto) en un solo campo. Ahora un toggle elige el
+                      // modo primero (estado propio `modoCompra`, no
+                      // derivado de presentacionTipo — ver por qué en su
+                      // declaración), y el buscador de tipos de presentación
+                      // solo aparece cuando el modo es "presentación".
+                      return (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="fg">
+                          <label>Modo de compra</label>
+                          <div className="compra-modo-toggle" role="tablist" aria-label="Modo de compra">
+                            <button type="button" role="tab" aria-selected={modoCompra === 'unitaria'}
+                              className={`compra-modo-toggle__btn ${modoCompra === 'unitaria' ? 'is-active' : ''}`}
+                              onClick={() => { setModoCompra('unitaria'); handlePresentacionChangeActual('presentacionTipo', 'Unitario'); }}>
+                              Compra unitaria (directa)
+                            </button>
+                            <button type="button" role="tab" aria-selected={modoCompra === 'presentacion'}
+                              className={`compra-modo-toggle__btn ${modoCompra === 'presentacion' ? 'is-active' : ''}`}
+                              onClick={() => { setModoCompra('presentacion'); handlePresentacionChangeActual('presentacionTipo', ''); }}>
+                              Por presentación
+                            </button>
+                          </div>
+                          {modoCompra && (
+                            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                              {modoCompra === 'unitaria'
+                                ? 'Compraste el insumo directo, sin caja/paquete/bolsa que lo agrupe.'
+                                : 'El insumo vino agrupado en una presentación (caja, paquete, bolsa...).'}
+                            </span>
+                          )}
+                        </div>
+
+                        {modoCompra === 'presentacion' && (
+                          <div className={`fg ${claseCampo('presentacionTipo')}`} style={{ marginTop: 10 }}>
+                            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                              <span>Tipo de presentación</span>
+                              <button type="button" onClick={() => setShowTiposModal(true)}
+                                style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+                                Gestionar tipos
+                              </button>
+                            </label>
+                            <SearchSelect
+                              value={itemActual.presentacionTipo}
+                              options={tiposPresentacionActivos.map(t => ({ value: t, label: t }))}
+                              onChange={(v) => handlePresentacionChangeActual('presentacionTipo', v)}
+                              placeholder="Buscar tipo de presentación..."
+                              emptyMessage="Ningún tipo coincide con esa búsqueda."
+                            />
+                            {mensajeCampo('presentacionTipo') && <span className="err-msg">{mensajeCampo('presentacionTipo')}</span>}
+                          </div>
+                        )}
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
 
                   {/* ── Grupo 2: cantidad y precio ── */}
@@ -1294,10 +1311,17 @@ const RegistrarCompraPage = () => {
             </div>
           </div>
 
+          {/* Punto 1 — el comprobante SIEMPRE fue opcional en el backend
+              (comprobante_url no tiene NOT NULL ni ninguna validación que lo
+              exija); el asterisco de "obligatorio" que había acá era pura
+              apariencia visual, contradecía la validación real (ya en
+              `false`, ver comprobanteEsObligatorio). Se cambia por
+              "(opcional)" para que el formulario dé la misma señal que el
+              backend siempre exigió. */}
           <div ref={comprobanteRef} className={`fg fg-full ${errors.comprobante ? 'fg-error' : ''}`} style={{ marginTop: 20 }}>
-            <label>Comprobante de compra <span className="req">*</span></label>
+            <label>Comprobante de compra <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>(opcional)</span></label>
             <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
-              Sube una foto o captura clara del comprobante (JPG, JPEG o PNG). El sistema lee el total automáticamente y lo compara con el total de esta compra ({formatCOP(totalFinal)}) — es solo informativo, no impide guardar.
+              Sube una foto o captura clara del comprobante (JPG, JPEG o PNG) si tienes una a mano. El sistema lee el total automáticamente y lo compara con el total de esta compra ({formatCOP(totalFinal)}) — es solo informativo, no impide guardar.
             </p>
             <div
               onClick={() => comprobanteInputRef.current?.click()}

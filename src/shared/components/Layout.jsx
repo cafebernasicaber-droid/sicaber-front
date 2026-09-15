@@ -71,7 +71,12 @@ const icons = {
 // rolesService.js MODULOS_PERMISOS). Un item solo se muestra si
 // hasAnyPermiso(modulo) es true (al menos un permiso sobre ese módulo);
 // ver el filtrado de NAV_GROUPS más abajo, dentro del componente.
-const NAV_GROUPS = [
+// Exportada (además de usarse acá abajo): HomeRedirect.jsx la necesita
+// para saber a qué módulo mandar a un rol no-Administrador después del
+// login — antes no estaba exportada, así que ese import fallaba en
+// silencio mientras nada montaba HomeRedirect; se destapó recién al
+// conectarlo de verdad en routes.jsx.
+export const NAV_GROUPS = [
   { label: 'Principal', items: [
     { path: '/admin/dashboard', label: 'Dashboard',      icon: icons.dashboard,    modulo: 'dashboard',    match: p => p === '/admin/dashboard' },
   ]},

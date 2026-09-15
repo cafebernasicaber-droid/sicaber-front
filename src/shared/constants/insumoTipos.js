@@ -10,19 +10,36 @@
 //  API_ASSUMPTIONS.md en la raíz del repo.
 // ─────────────────────────────────────────────────────────────
 
-// ── Estado de stock calculado por la API (cambios 1 y 2) ──────
-// Se asume que GET /insumos devuelve, por cada insumo, un campo
-// con el estado ya calculado en el backend. Aceptamos varias
-// grafías por robustez; el valor se normaliza a minúsculas.
-export const STOCK_OK       = 'ok';
-export const STOCK_BAJO     = 'bajo';
-export const STOCK_SIN      = 'sin_stock';
+// ── Estado de stock calculado por la API (ronda 22, sección A) ──────
+// `GET /insumos` devuelve, en CADA entrada de `porLocal` y en
+// `GET /insumos?local_id=`, el campo `estadoStock` (dato, no texto
+// formateado) con UNO de estos 4 valores — contrato documentado por el
+// backend en CAMBIOS.md:
+//   agotado     → stock = 0
+//   bajo_minimo → 0 < stock < stockMinimo          (POR DEBAJO DEL MÍNIMO — crítico)
+//   agotandose  → stock > 0 y stock ≤ stockMinimo × 1.2  ("stock bajo": aviso temprano)
+//   ok          → el resto
+// El estado se calcula SIEMPRE por local, nunca sumando locales.
+export const STOCK_OK           = 'ok';
+export const STOCK_AGOTANDOSE   = 'agotandose';   // "stock bajo" — aviso temprano
+export const STOCK_BAJO_MINIMO  = 'bajo_minimo';  // por debajo del mínimo — más crítico
+export const STOCK_AGOTADO      = 'agotado';      // stock = 0
 
-// Lee el estado de stock de un insumo tal como lo entrega la API.
-// Orden de preferencia de campos: estadoStock (camelCase, patrón
-// actual del front) → estado_stock (snake_case) → variantes.
-// Si la API no lo trae, se deriva de stockActual/stockMinimo para
-// que la UI degrade con gracia.
+// Alias legados: código escrito antes de que el backend expusiera los 4
+// estados. `STOCK_SIN` = agotado; `STOCK_BAJO` = agotándose (el aviso
+// temprano). El estado "bajo mínimo" no tenía equivalente antiguo.
+export const STOCK_SIN  = STOCK_AGOTADO;
+export const STOCK_BAJO = STOCK_AGOTANDOSE;
+
+// ¿Este estado necesita que el usuario reaccione (comprar / reponer)?
+// Los 3 que no son 'ok'.
+export const STOCK_ESTADOS_ALERTA = [STOCK_AGOTADO, STOCK_BAJO_MINIMO, STOCK_AGOTANDOSE];
+
+// Lee el estado de stock de un insumo / fila-por-local tal como lo
+// entrega la API. Orden de preferencia: estadoStock (camelCase) →
+// estado_stock (snake) → variantes. Si la API no lo trae, se deriva de
+// stock/stockMinimo con las MISMAS bandas del backend, para que la UI
+// degrade con gracia.
 export function estadoStockDe(insumo) {
   if (!insumo) return STOCK_OK;
   const raw =
@@ -33,24 +50,33 @@ export function estadoStockDe(insumo) {
     null;
   if (raw != null && raw !== '') {
     const v = String(raw).toLowerCase().replace(/[\s-]+/g, '_');
-    if (v === STOCK_SIN || v === 'sinstock' || v === 'agotado') return STOCK_SIN;
-    if (v === STOCK_BAJO || v === 'low' || v === 'stock_bajo')  return STOCK_BAJO;
+    if (v === 'agotado' || v === 'sin_stock' || v === 'sinstock') return STOCK_AGOTADO;
+    if (v === 'bajo_minimo' || v === 'bajominimo') return STOCK_BAJO_MINIMO;
+    if (v === 'agotandose' || v === 'agotándose' || v === 'stock_bajo' || v === 'bajo' || v === 'low') return STOCK_AGOTANDOSE;
     return STOCK_OK;
   }
-  const actual = Number(insumo.stockActual ?? insumo.stock_actual ?? 0);
+  const actual = Number(insumo.stockActual ?? insumo.stock_actual ?? insumo.stock ?? 0);
   const minimo = Number(insumo.stockMinimo ?? insumo.stock_minimo ?? 0);
-  if (actual <= 0) return STOCK_SIN;
-  if (minimo > 0 && actual <= minimo) return STOCK_BAJO;
+  if (actual <= 0) return STOCK_AGOTADO;
+  if (minimo > 0 && actual < minimo) return STOCK_BAJO_MINIMO;
+  if (minimo > 0 && actual <= minimo * 1.2) return STOCK_AGOTANDOSE;
   return STOCK_OK;
 }
 
 // ── Desglose de stock por local (batch 3, entidad insumo_local) ──────
 // La API expone, en la respuesta consolidada de GET /insumos, el desglose
-// por local de cada insumo. Aceptamos varias grafías del arreglo y de sus
-// campos. Cada fila: { localId, localNombre, stockActual, stockMinimo,
-// estadoStock }.
+// por local de cada insumo bajo la llave `porLocal` (ver GET /insumos en
+// sicaber-back/src/routes/index.js). Cada fila del backend:
+//   { localId, localNombre, localEstado, stock, stockMinimo, activo,
+//     estadoStock }
+// OJO: el stock viene como `stock` (no `stockActual`), y cada fila trae
+// `activo` — el backend crea una fila insumo_local por CADA local (para
+// que el insumo nunca dé error donde aún no se ha comprado) pero marca
+// activo=true SOLO en los locales donde el insumo realmente se ofrece.
+// Aceptamos varias grafías por robustez ante despliegues distintos.
 export function desglosePorLocal(insumo) {
   const arr =
+    insumo?.porLocal ||
     insumo?.locales ||
     insumo?.stockPorLocal ||
     insumo?.insumoLocal ||
@@ -61,9 +87,14 @@ export function desglosePorLocal(insumo) {
   return arr.map(r => ({
     localId:     String(r.localId ?? r.local_id ?? r.idLocal ?? r.id ?? ''),
     localNombre: r.localNombre ?? r.local_nombre ?? r.nombre ?? r.nombreLocal ?? '',
-    stockActual: Number(r.stockActual ?? r.stock_actual ?? 0),
+    stockActual: Number(r.stockActual ?? r.stock_actual ?? r.stock ?? 0),
     stockMinimo: Number(r.stockMinimo ?? r.stock_minimo ?? 0),
     estadoStock: (r.estadoStock ?? r.estado_stock) || null,
+    // Si el backend no manda `activo` (deploy viejo), se asume true para
+    // no ocultar filas por un dato ausente.
+    activo: r.activo === undefined || r.activo === null
+      ? true
+      : (r.activo === true || r.activo === 1 || r.activo === '1' || r.activo === 'true'),
   }));
 }
 
@@ -90,23 +121,28 @@ export function insumoEnLocal(insumo, localId) {
   };
 }
 
-// ── Pertenencia de un insumo a un local (batch 9 item 1) ──────────────
-// El backend ahora devuelve los contadores por local. Un insumo
-// "pertenece" a un local si tiene fila insumo_local ahí (aparece en su
-// desglose) o si el backend manda la lista de ids de locales del insumo.
-// Si no hay NINGÚN dato por local (deploy sin desglose) no se puede
-// excluir: se asume que pertenece a todos para no vaciar la tabla.
+// ── Pertenencia de un insumo a un local (batch 9 item 1 / batch 10) ───
+// Un insumo "pertenece" (se OFRECE) en un local solo si su fila
+// insumo_local para ese local tiene `activo === true`. NO basta con que
+// exista la fila: el backend crea una fila por CADA local (en 0 e
+// inactiva) para no dar error donde aún no se ha comprado — filtrar solo
+// por "tiene fila" hacía que el insumo saliera en TODAS las pestañas de
+// local. Si el backend NO manda ningún desglose (deploy viejo) se cae a
+// la lista de ids explícita, y si tampoco hay eso, no se puede excluir.
 export function perteneceALocal(insumo, localId) {
   if (!localId || localId === 'todos') return true;
+  const desg = desglosePorLocal(insumo);
+  if (desg.length) {
+    const fila = desg.find(f => String(f.localId) === String(localId));
+    return !!fila && fila.activo === true;
+  }
   const ids =
     insumo?.localesIds || insumo?.locales_ids ||
     insumo?.localIds  || insumo?.local_ids || null;
   if (Array.isArray(ids) && ids.length) {
     return ids.some(x => String(x) === String(localId));
   }
-  const desg = desglosePorLocal(insumo);
-  if (!desg.length) return true;
-  return desg.some(f => String(f.localId) === String(localId));
+  return true;
 }
 
 // Stock/mínimo "efectivos" del insumo para el local activo (cambio 2).
@@ -153,20 +189,13 @@ export function errorCantidad(valor, unidadMedida, { min = 0, obligatorio = true
   return '';
 }
 
-// Payload de stock por local para PUT /insumos/:id (edición): una fila por
-// local con su stock actual y su mínimo. El backend hace upsert en
-// insumo_local. Se envía snake y camel por robustez.
-export function localesStockPayload(filas) {
-  const norm = (filas || []).map(f => ({
-    local_id: f.localId,
-    localId: f.localId,
-    stock_actual: Number(f.stockActual) || 0,
-    stockActual: Number(f.stockActual) || 0,
-    stock_minimo: Number(f.stockMinimo) || 0,
-    stockMinimo: Number(f.stockMinimo) || 0,
-  }));
-  return { locales_stock: norm, localesStock: norm };
-}
+// Cambio 1 (edición de insumos por local) — `localesStockPayload` mandaba
+// una fila de stock por CADA local al PUT /insumos/:id global; se eliminó
+// junto con la tabla "Stock por local" de los 4 en InsumoForm.jsx. La
+// edición ahora manda un único local al endpoint dedicado
+// (PUT /insumos/:id/locales/:localId, ver insumosApi.updateLocal) — no
+// hace falta un armador de payload aparte para eso, el body es directo:
+// `{ stockMinimo, activo }`.
 
 // ── Tipos de uso de un insumo (cambio 4) ─────────────────────
 // Selección múltiple: un insumo puede ser normal, y/o topping (el

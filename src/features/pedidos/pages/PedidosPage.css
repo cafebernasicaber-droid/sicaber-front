@@ -31,33 +31,24 @@
 
 /* MODAL */
 .pd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; animation: fadeIn 0.15s ease; padding: 20px; }
-.pd-modal {
-  background: var(--bg-surface); border-radius: 16px; padding: 24px;
-  width: 100%; max-height: 90vh; overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.25); animation: slideUp 0.2s ease;
-}
-.pd-modal-wide { max-width: 860px; }
-.pd-modal-head {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  background: linear-gradient(135deg, #2d6a3f, #4CAF50); border-radius: 10px;
-  padding: 16px 20px; margin: -24px -24px 20px; color: white;
-}
+/* `.pd-modal-eyebrow`/`.pd-modal-id` siguen en uso (encabezado de
+   ModalNuevoPedidoAdmin, el modal de "Nuevo pedido"/"Editar pedido") — el
+   resto de clases `.pd-modal*`/`.pd-info-*`/`.pd-prod-*`/`.pd-detalle-*`
+   que vivían acá eran EXCLUSIVAS de "Ver detalle" de pedidos y quedaron
+   sin uso: Cambio 2 (rediseño de "Ver detalle") reemplazó ese modal por
+   las clases COMPARTIDAS de shared/styles/modales.css (modal-overlay,
+   modal-box, modal-seccion, modal-fila…) — las mismas que ya usa el
+   detalle de Ventas — en vez de mantener una copia de estilos aparte. */
 .pd-modal-eyebrow { font-size: 10px; color: rgba(255,255,255,0.7); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 2px; }
 .pd-modal-id { font-size: 20px; font-weight: 800; font-family: 'Montserrat', sans-serif; }
-.pd-modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-.pd-info-card { background: var(--bg-surface); border-radius: 8px; padding: 10px 12px; }
-.pd-info-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 3px; }
-.pd-info-val { font-size: 13px; color: var(--text-primary); font-weight: 500; }
-.pd-total-card { background: var(--bg-surface); border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
-.pd-total-amt { font-size: 22px; font-weight: 800; color: #2E7D32; font-family: 'Montserrat', sans-serif; }
-.pd-productos-section { margin-bottom: 16px; }
-.pd-prod-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 6px; margin-bottom: 3px; }
-.pd-prod-row-alt { background: rgba(255,255,255,.04); }
-.pd-prod-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.pd-prod-qty-badge { margin-left: 6px; background: #2d6a3f; color: white; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
-.pd-prod-sub { font-size: 13px; font-weight: 700; color: #2E7D32; }
-.pd-no-prods { font-size: 13px; color: var(--text-secondary); }
-.pd-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+/* Cambio 2 — el grid de "Información general"/"Pago y entrega" queda a 2
+   columnas en pantallas normales (igual que Ventas) pero se apila a 1 en
+   angosto: 2 columnas de ~140px con etiqueta+valor ya no caben legibles en
+   un celular, y Ventas tampoco tenía este ajuste — se agrega acá porque el
+   usuario pidió explícitamente que se viera bien en pantalla pequeña. */
+@media (max-width: 480px) {
+  .pd-detalle-2col { grid-template-columns: 1fr !important; }
+}
 
 /* FORM */
 .pd-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }

@@ -16,6 +16,7 @@ export default function ModalCiudades({ onClose }) {
   const [editNombre, setEditNombre] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [toggleLoadingId, setToggleLoadingId] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
 
   const existeEquivalente = (valor, ignorarId = null) => {
     const n = normalizarComparacion(valor);
@@ -99,13 +100,36 @@ export default function ModalCiudades({ onClose }) {
             </button>
           </form>
 
+          {ciudades.length > 0 && (
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input
+                type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre..."
+                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 36px 9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              />
+              <svg style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+          )}
           {ciudades.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
               Aún no hay ciudades registradas.
             </div>
-          ) : (
+          ) : (() => {
+            const ciudadesFiltradas = busqueda.trim()
+              ? ciudades.filter(c => normalizarComparacion(c.nombre).includes(normalizarComparacion(busqueda)))
+              : ciudades;
+            if (ciudadesFiltradas.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Ninguna ciudad coincide con "{busqueda}".
+                </div>
+              );
+            }
+            return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {ciudades.map(c => (
+              {ciudadesFiltradas.map(c => (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
                   {editId === c.id ? (
                     <>
@@ -148,7 +172,8 @@ export default function ModalCiudades({ onClose }) {
                 </div>
               ))}
             </div>
-          )}
+            );
+          })()}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
           </div>

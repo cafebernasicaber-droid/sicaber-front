@@ -129,7 +129,7 @@ const UsuarioFormPage = ({ mode }) => {
             <div className="form-actions">
               <button type="button" className="btn-cancel" onClick={() => navigate('/admin/usuarios')}>Cancelar</button>
               <button type="submit" className="btn-nuevo" disabled={loading}>
-                {loading ? 'Guardando...' : (isEdit ? '💾 Guardar cambios' : '✅ Crear usuario')}
+                {loading ? 'Guardando...' : (isEdit ? '💾 Guardar cambios' : '✅ Registrar')}
               </button>
             </div>
           </form>

@@ -11,39 +11,58 @@ import './InsumosPage.css';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
-import { estadoStockDe, STOCK_BAJO, STOCK_SIN, STOCK_OK, insumoEnLocal, perteneceALocal } from '../../../shared/constants/insumoTipos';
+import { estadoStockDe, STOCK_AGOTANDOSE, STOCK_BAJO_MINIMO, STOCK_AGOTADO, STOCK_OK, insumoEnLocal, perteneceALocal } from '../../../shared/constants/insumoTipos';
 
 const fmtNum = n => {
   const v = Number(n) || 0;
   return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
 };
 
-// Desglose por local completo: todos los locales ACTIVOS, con 0/0 para los
-// que el insumo no tiene fila insumo_local (nunca ausentes).
+// Desglose por local: SOLO los locales donde el insumo está activo (fila
+// insumo_local con activo=true) — el backend crea una fila por cada local
+// pero solo marca activo=true donde el insumo realmente se ofrece. Si no
+// hay ningún dato por local (deploy viejo) se listan todos los locales
+// activos con 0/0.
 function desgloseCompleto(insumo, locales) {
   const filas = insumo?.desglose || [];
-  return (locales || []).map(l => {
-    const row = filas.find(d => String(d.localId) === String(l.id));
-    return {
-      localId: String(l.id),
-      localNombre: l.nombre,
-      stockActual: row ? row.stockActual : 0,
-      stockMinimo: row ? row.stockMinimo : 0,
-      estadoStock: row ? (row.estadoStock || estadoStockDe(row)) : STOCK_SIN,
-    };
-  });
+  const tieneActivoFlag = filas.some(f => 'activo' in f);
+  return (locales || [])
+    .map(l => {
+      const row = filas.find(d => String(d.localId) === String(l.id));
+      return {
+        localId: String(l.id),
+        localNombre: l.nombre,
+        activo: row ? row.activo !== false : !tieneActivoFlag,
+        stockActual: row ? row.stockActual : 0,
+        stockMinimo: row ? row.stockMinimo : 0,
+        estadoStock: row ? (row.estadoStock || estadoStockDe(row)) : STOCK_AGOTADO,
+      };
+    })
+    .filter(d => d.activo);
 }
 
+// ronda 22 / A — las 3 alertas de stock son VISUALMENTE DISTINTAS entre sí
+// (no deben verse iguales): "agotado" y "bajo mínimo" son críticas (rojo),
+// "agotándose" es un aviso temprano (ámbar). El estado viene por local.
+// `clase` es lo nuevo: conecta EstadoStockBadge/AvisoStockBajo/la caja de
+// alerta del modal con sus estilos en InsumosPage.css
+// (.insumo-badge-estado--<clase>, etc.) en vez de armar el color inline acá.
+// fg/bg/bd se conservan tal cual para los pocos usos que siguen siendo
+// solo "texto de color" suelto (stockColor, la fila de stock por local) —
+// no son "alertas" con caja propia, así que no hacía falta moverlos.
 const ESTADO_STOCK_META = {
-  [STOCK_SIN]:  { label: 'Agotado',      fg: '#EF5350', bg: 'rgba(229,57,53,0.12)',  bd: '#EF9A9A' },
-  [STOCK_BAJO]: { label: 'Por agotarse', fg: '#E65100', bg: 'rgba(230,115,0,0.15)',  bd: '#FFCC80' },
-  [STOCK_OK]:   { label: 'Disponible',   fg: '#2E7D32', bg: 'rgba(76,175,80,0.14)',  bd: 'rgba(76,175,80,0.45)' },
+  [STOCK_AGOTADO]:     { label: 'Agotado',     corto: 'Agotado',     emoji: '⛔', critico: true,  clase: 'agotado',     fg: '#C62828', bg: 'rgba(198,40,40,0.14)',  bd: '#EF9A9A' },
+  [STOCK_BAJO_MINIMO]: { label: 'Bajo mínimo', corto: 'Bajo mínimo', emoji: '🔴', critico: true,  clase: 'bajo-minimo', fg: '#D84315', bg: 'rgba(216,67,21,0.15)',  bd: '#FF8A65' },
+  [STOCK_AGOTANDOSE]:  { label: 'Stock bajo',  corto: 'Stock bajo',  emoji: '⚠️', critico: false, clase: 'agotandose',  fg: '#F57F17', bg: 'rgba(245,127,23,0.13)', bd: '#FFD54F' },
+  [STOCK_OK]:          { label: 'Disponible',  corto: 'Disponible',  emoji: '',   critico: false, clase: 'ok',          fg: '#2E7D32', bg: 'rgba(76,175,80,0.14)',  bd: 'rgba(76,175,80,0.45)' },
 };
+export const metaEstadoStock = (estado) => ESTADO_STOCK_META[estado] || ESTADO_STOCK_META[STOCK_OK];
+
 function EstadoStockBadge({ estado }) {
-  const m = ESTADO_STOCK_META[estado] || ESTADO_STOCK_META[STOCK_OK];
+  const m = metaEstadoStock(estado);
   return (
-    <span style={{ padding:'1px 8px', borderRadius:20, fontSize:11, fontWeight:700, background:m.bg, color:m.fg, border:`1px solid ${m.bd}` }}>
-      {m.label}
+    <span className={`insumo-badge-estado insumo-badge-estado--${m.clase}`}>
+      {m.emoji && <span aria-hidden>{m.emoji}</span>}{m.label}
     </span>
   );
 }
@@ -51,15 +70,36 @@ function EstadoStockBadge({ estado }) {
 // batch 8 item 3 — los badges de tipo de uso (topping / adición) se
 // quitaron del listado: el insumo ya no lleva esos flags.
 
-// Emoji ⚠️ antes del nombre cuando el estado de stock que devuelve la API es
-// "bajo". El tooltip nativo (title) se ve bien en claro y oscuro sin CSS extra.
-function AvisoStockBajo({ insumo }) {
+// Marca antes del nombre en la tabla. Solo 2 alertas: 🚨 (en cero /
+// agotado) vs ⚠️ (en el mínimo o por debajo, mientras no llegue a cero).
+// Tooltip con estilos propios (componente Tooltip) en vez del title
+// nativo del navegador, y el texto dice explícitamente si está "en cero"
+// o "por debajo/en el mínimo".
+function AvisoStockBajo({ insumo, estado }) {
+  const est = estado || estadoStockDe(insumo);
+  if (est === STOCK_OK) return null;
+  const enCero = est === STOCK_AGOTADO;
+  const emoji = enCero ? '🚨' : '⚠️';
+  const quedan = Math.max(0, Number(insumo.stockActual) || 0);
+  const label = enCero
+    ? `En cero — agotado (mínimo: ${insumo.stockMinimo} ${insumo.unidadMedida || ''})`
+    : est === STOCK_BAJO_MINIMO
+      ? `Por debajo del mínimo — quedan ${quedan} ${insumo.unidadMedida || ''} (mínimo: ${insumo.stockMinimo})`
+      : `En el mínimo — quedan ${quedan} ${insumo.unidadMedida || ''} (mínimo: ${insumo.stockMinimo})`;
+  // agotado / bajo_minimo son críticos (tono rojo); "agotándose" es un
+  // aviso temprano (tono ámbar) — el tooltip hereda el mismo color-code
+  // que ya usan los badges de estado, en vez de verse igual para los 3.
+  const tone = (enCero || est === STOCK_BAJO_MINIMO) ? 'danger' : 'warning';
   return (
-    <span
-      title={`Quedan ${Math.max(0, Number(insumo.stockActual) || 0)} ${insumo.unidadMedida || ''} (mínimo: ${insumo.stockMinimo})`}
-      aria-label={`Stock bajo: quedan ${Math.max(0, Number(insumo.stockActual) || 0)} (mínimo ${insumo.stockMinimo})`}
-      style={{ cursor:'help', marginRight:6, fontSize:14, lineHeight:1 }}
-    >⚠️</span>
+    // position="bottom" — en la fila de arriba de la tabla, un tooltip
+    // hacia arriba queda cortado por el contenedor con scroll (ins-table-
+    // scroll). Hacia abajo siempre tiene espacio dentro de la tabla.
+    <Tooltip label={label} position="bottom" tone={tone}>
+      <span
+        aria-label={label}
+        className={`insumo-aviso-icon ${enCero ? 'insumo-aviso-icon--critico' : 'insumo-aviso-icon--warning'}`}
+      >{emoji}</span>
+    </Tooltip>
   );
 }
 
@@ -73,10 +113,11 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
   // Cambio 1 — estado de stock según la API. Rojo solo para "sin_stock";
   // "bajo" se muestra en naranja (nunca rojo).
   const estadoStk = estadoStockDe(insumo);
-  const esSin  = estadoStk === STOCK_SIN;
-  const esBajo = estadoStk === STOCK_BAJO;
-  const stockOk = !esSin && !esBajo;
-  const stockColor = stockOk ? '#81C784' : (esSin ? '#EF5350' : '#E65100');
+  const metaStk = metaEstadoStock(estadoStk);
+  const esAgotado    = estadoStk === STOCK_AGOTADO;
+  const esBajoMinimo = estadoStk === STOCK_BAJO_MINIMO;
+  const stockOk = estadoStk === STOCK_OK;
+  const stockColor = metaStk.fg;
   // batch 3 item 4 — desglose de stock por local (local, actual, mínimo,
   // estado). El estado de cada fila se evalúa por local, nunca sumando.
   const desglose = desgloseCompleto(insumo, locales);
@@ -99,8 +140,17 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
               <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
                 <span className="badge-cat">{insumo.categoria}</span>
                 <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:insumo.estado==='Activo'?'#E8F5E9':'#F5F5F5',color:insumo.estado==='Activo'?'#2E7D32':'#888',border:`1px solid ${insumo.estado==='Activo'?'#A5D6A7':'#ccc'}` }}>{insumo.estado==='Activo'?'Activo':'Inactivo'}</span>
-                {esSin && <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>Sin stock</span>}
-                {esBajo && <span title={`Quedan ${Math.max(0, Number(insumo.stockActual)||0)} ${insumo.unidadMedida||''} (mínimo: ${insumo.stockMinimo})`} style={{ cursor:'help',padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(230,115,0,0.15)',color:'#E65100',border:'1px solid #FFCC80' }}>⚠️ Stock bajo</span>}
+                {!stockOk && (
+                  <Tooltip
+                    label={`Quedan ${Math.max(0, Number(insumo.stockActual)||0)} ${insumo.unidadMedida||''} (mínimo: ${insumo.stockMinimo})`}
+                    position="bottom"
+                    tone={estadoStk === STOCK_AGOTANDOSE ? 'warning' : 'danger'}
+                  >
+                    <span style={{ cursor:'help' }}>
+                      <EstadoStockBadge estado={estadoStk} />
+                    </span>
+                  </Tooltip>
+                )}
               </div>
             </div>
           </div>
@@ -156,13 +206,19 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
                 <div style={{ fontWeight:700, color:'var(--text-muted)' }}>Estado</div>
                 {desglose.map(d => {
                   const est = estadoStockDe(d);
+                  const m = metaEstadoStock(est);
                   return (
                     <React.Fragment key={d.localId}>
                       <div style={{ color:'var(--text-primary)', fontWeight:600 }}>{d.localNombre}</div>
-                      <div title={`Quedan ${fmtNum(d.stockActual)} ${insumo.unidadMedida||''} (mínimo: ${fmtNum(d.stockMinimo)})`}
-                        style={{ cursor:'help', color: est===STOCK_SIN ? '#EF5350' : est===STOCK_BAJO ? '#E65100' : 'var(--text-primary)', fontWeight:700 }}>
-                        {est===STOCK_BAJO && '⚠️ '}{fmtNum(d.stockActual)} {insumo.unidadMedida}
-                      </div>
+                      <Tooltip
+                        label={`Quedan ${fmtNum(d.stockActual)} ${insumo.unidadMedida||''} (mínimo: ${fmtNum(d.stockMinimo)})`}
+                        position="bottom"
+                        tone={est === STOCK_AGOTANDOSE ? 'warning' : est === STOCK_OK ? 'default' : 'danger'}
+                      >
+                        <div style={{ cursor:'help', color: est===STOCK_OK ? 'var(--text-primary)' : m.fg, fontWeight:700 }}>
+                          {m.emoji && `${m.emoji} `}{fmtNum(d.stockActual)} {insumo.unidadMedida}
+                        </div>
+                      </Tooltip>
                       <div>{fmtNum(d.stockMinimo)} {insumo.unidadMedida}</div>
                       <div><EstadoStockBadge estado={est} /></div>
                     </React.Fragment>
@@ -178,12 +234,20 @@ function ModalVerInsumo({ insumo, locales = [], onClose, onEditar, onEliminar, o
             <div style={{ marginTop:10,fontSize:12,color:'var(--text-secondary)' }}>Registrado: {formatDate(insumo.fechaCreacion)}</div>
           </div>
           {!stockOk && (
-            <div style={{ display:'flex',alignItems:'center',gap:10,padding:'12px 16px',
-              background: esSin ? 'rgba(229,57,53,0.10)' : 'rgba(230,115,0,0.10)',
-              border: `1px solid ${esSin ? 'rgba(229,57,53,0.28)' : 'rgba(230,115,0,0.28)'}`,
-              borderRadius:10,marginBottom:14,fontSize:13,color: esSin ? '#C62828' : '#E65100' }}>
+            // Mismo `clase` que ya arma EstadoStockBadge (agotado/bajo-minimo/
+            // agotandose) — conserva los 3 tonos distintos que ya tenía cada
+            // uno (antes venían de metaStk.fg/bg/bd inline), no solo 2.
+            <div className={`insumo-alert-stock insumo-alert-stock--${metaStk.clase}`}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-              <span><strong>{esSin ? 'Sin stock:' : 'Alerta de stock:'}</strong> {esSin ? 'Este insumo está agotado.' : 'El stock actual está por debajo del mínimo requerido.'}</span>
+              <span><strong>
+                {esAgotado ? 'Agotado: ' : esBajoMinimo ? 'Bajo mínimo: ' : 'Stock bajo: '}
+              </strong>
+              {esAgotado
+                ? 'este insumo está en 0 en este local.'
+                : esBajoMinimo
+                  ? `el stock actual (${fmtNum(insumo.stockActual)} ${insumo.unidadMedida}) está por debajo del mínimo (${fmtNum(insumo.stockMinimo)}).`
+                  : `el stock actual (${fmtNum(insumo.stockActual)} ${insumo.unidadMedida}) se acerca al mínimo (${fmtNum(insumo.stockMinimo)}) — conviene reponer pronto.`}
+              </span>
             </div>
           )}
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
@@ -256,15 +320,21 @@ function ModalFormInsumo({ insumo, prefill, onCreate, onUpdate, onClose, onManag
 
 // ── Modal: Gestionar categorías de insumos ───────────────────────────────────
 function ModalCategoriasInsumo({ onClose }) {
-  const { categorias, create, update, remove, toggleEstado, recategorizar } = useCategoriasInsumos();
+  // Ronda 23 item 4 — sin eliminar: el backend nunca tuvo (ni tiene)
+  // DELETE /categorias-insumos/:id (confirmado: 404), así que el botón de
+  // eliminar y todo el flujo de recategorización que dependía de él (el
+  // 409 "tiene insumos asociados") quedan quitados — Activo/Inactivo es
+  // la única forma de cambiar su disponibilidad. Mismo criterio que
+  // Ciudades (ver ModalCiudades).
+  const { categorias, create, update, toggleEstado } = useCategoriasInsumos();
   const [nombre, setNombre] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
   const [editId, setEditId] = useState(null);
   const [editNombre, setEditNombre] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [toggleLoadingId, setToggleLoadingId] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
 
   const existeCategoriaEquivalente = (valor, ignorarId = null) => {
     const normalizado = normalizarComparacion(valor);
@@ -333,23 +403,6 @@ function ModalCategoriasInsumo({ onClose }) {
     }
   };
 
-  const [recategorizarTarget, setRecategorizarTarget] = useState(null);
-
-  const handleDelete = async () => {
-    try {
-      await remove(deleteTarget.id);
-      setDeleteTarget(null);
-    } catch (err) {
-      if (err.status === 409 && err.insumosAsociados) {
-        setRecategorizarTarget({ id: deleteTarget.id, nombre: deleteTarget.nombre, insumos: err.insumos || [], insumosAsociados: err.insumosAsociados });
-        setDeleteTarget(null);
-        return;
-      }
-      setError(err.message || 'No se pudo eliminar la categoría.');
-      setDeleteTarget(null);
-    }
-  };
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
@@ -381,13 +434,36 @@ function ModalCategoriasInsumo({ onClose }) {
             </button>
           </form>
 
+          {categorias.length > 0 && (
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <input
+                type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre..."
+                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 36px 9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+              />
+              <svg style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+          )}
           {categorias.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
               Aún no hay categorías registradas.
             </div>
-          ) : (
+          ) : (() => {
+            const categoriasFiltradas = busqueda.trim()
+              ? categorias.filter(c => normalizarComparacion(c.nombre).includes(normalizarComparacion(busqueda)))
+              : categorias;
+            if (categoriasFiltradas.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Ninguna categoría coincide con "{busqueda}".
+                </div>
+              );
+            }
+            return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {categorias.map(c => (
+              {categoriasFiltradas.map(c => (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
                   {editId === c.id ? (
                     <>
@@ -428,142 +504,16 @@ function ModalCategoriasInsumo({ onClose }) {
                           style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                         </button>
-                        <AnularButton size={14} className="" onClick={() => setDeleteTarget(c)}
-                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(229,57,53,0.12)', color: '#EF5350', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}/>
                       </div>
                     </>
                   )}
                 </div>
               ))}
             </div>
-          )}
+            );
+          })()}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
-          </div>
-        </div>
-
-        {deleteTarget && (
-          <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
-            <div className="modal-box" onClick={e => e.stopPropagation()}>
-              <div className="modal-icon modal-icon-danger">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-              </div>
-              <h3>¿Eliminar "{deleteTarget.nombre}"?</h3>
-              <p>Si tiene insumos asociados, te pediremos recategorizarlos primero. Si solo quieres dejar de usarla para insumos nuevos sin perder el historial, considera <strong>desactivarla</strong> en vez de eliminarla.</p>
-              <div className="modal-actions">
-                <button className="btn-cancel" onClick={() => setDeleteTarget(null)}>Cancelar</button>
-                <button className="btn-confirm-danger" onClick={handleDelete}>Sí, eliminar</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {recategorizarTarget && (
-          <ModalRecategorizar
-            target={recategorizarTarget}
-            categorias={categorias.filter(c => c.id !== recategorizarTarget.id && c.estado === 'Activo')}
-            onRecategorizar={recategorizar}
-            onClose={() => setRecategorizarTarget(null)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Modal: Recategorizar insumos antes de eliminar una categoría ───────────
-function ModalRecategorizar({ target, categorias, onRecategorizar, onClose }) {
-  const [modo, setModo] = useState('existente');
-  const [categoriaId, setCategoriaId] = useState('');
-  const [nuevoNombre, setNuevoNombre] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleConfirmar = async () => {
-    setError('');
-    if (modo === 'existente' && !categoriaId) { setError('Selecciona la nueva categoría.'); return; }
-    if (modo === 'nueva' && !nuevoNombre.trim()) { setError('Escribe el nombre de la nueva categoría.'); return; }
-    setLoading(true);
-    try {
-      const payload = modo === 'existente'
-        ? { nuevaCategoriaId: categoriaId }
-        : { nuevaCategoriaNombre: nuevoNombre.trim() };
-      const r = await onRecategorizar(target.id, payload);
-      if (r?.error) { setError(r.error); return; }
-      onClose();
-    } catch (err) {
-      setError(err.message || 'No se pudo recategorizar los insumos.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 460,
-        boxShadow: 'var(--shadow-lg)', animation: 'popIn .22s ease',
-      }}>
-        <div style={{ padding: '22px 24px 4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(245,124,0,0.15)', color: '#F57C00', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>"{target.nombre}" tiene insumos</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{target.insumosAsociados} insumo{target.insumosAsociados !== 1 ? 's' : ''} registrado{target.insumosAsociados !== 1 ? 's' : ''}: {target.insumos.slice(0, 4).join(', ')}{target.insumos.length > 4 ? '…' : ''}</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ padding: '14px 24px 24px' }}>
-          {error && (
-            <div style={{ background: 'rgba(229,57,53,0.12)', color: '#EF5350', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
-              ⚠ {error}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-            <button type="button" onClick={() => setModo('existente')}
-              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-                border: modo === 'existente' ? '1.5px solid var(--color-green,#4CAF50)' : '1.5px solid var(--border-input)',
-                background: modo === 'existente' ? 'rgba(76,175,80,0.10)' : 'transparent',
-                color: modo === 'existente' ? 'var(--color-green,#4CAF50)' : 'var(--text-secondary)' }}>
-              Mover a categoría existente
-            </button>
-            <button type="button" onClick={() => setModo('nueva')}
-              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-                border: modo === 'nueva' ? '1.5px solid var(--color-green,#4CAF50)' : '1.5px solid var(--border-input)',
-                background: modo === 'nueva' ? 'rgba(76,175,80,0.10)' : 'transparent',
-                color: modo === 'nueva' ? 'var(--color-green,#4CAF50)' : 'var(--text-secondary)' }}>
-              Crear categoría nueva
-            </button>
-          </div>
-
-          {modo === 'existente' ? (
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>Nueva categoría</label>
-              <select value={categoriaId} onChange={e => setCategoriaId(e.target.value)}
-                style={{ width: '100%', padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
-                <option value="">-- Seleccionar --</option>
-                {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </select>
-              {categorias.length === 0 && (
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>No hay otras categorías activas. Crea una nueva en su lugar.</div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>Nombre de la nueva categoría</label>
-              <input type="text" value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} placeholder="Ej: Desechables"
-                style={{ width: '100%', padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }} />
-            </div>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-            <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
-            <button type="button" className="btn-confirm-primary" disabled={loading} onClick={handleConfirmar}>
-              {loading ? 'Aplicando...' : 'Recategorizar y eliminar'}
-            </button>
           </div>
         </div>
       </div>
@@ -665,17 +615,19 @@ const InsumosPage = () => {
         (i.categoria || '').toLowerCase().includes(q))
     : insumosLocal;
 
-  // Cambio 1 / batch 3 item 5 — el estado de stock lo calcula la API POR
-  // LOCAL (estadoStockDe lee ese campo, con fallback a stockActual/
-  // stockMinimo). Nunca se suman locales: 30 kg en uno y 0 en otro → el
-  // segundo aparece en alerta. "bajo" → emoji ⚠️; "sin_stock" → etiqueta roja.
-  const esStockBajo = i => i.estado === 'Activo' && estadoStockDe(i) === STOCK_BAJO;
-  const esSinStock  = i => estadoStockDe(i) === STOCK_SIN;
-  // "Ver solo stock bajo" incluye también los "Sin stock" (agotados):
-  // ambos son insumos que necesitan reposición en el local activo.
+  // ronda 22 / A — el estado de stock lo calcula la API POR LOCAL
+  // (estadoStockDe lee `estadoStock`, con fallback a stock/stockMinimo).
+  // Nunca se suman locales: 30 kg en uno y 0 en otro → el segundo aparece
+  // en alerta. 4 estados: ok / agotandose ("stock bajo") / bajo_minimo
+  // (crítico) / agotado.
+  const estadoDe = i => estadoStockDe(i);
+  const esAgotandose = i => i.estado === 'Activo' && estadoDe(i) === STOCK_AGOTANDOSE;
+  const esBajoMinimo = i => i.estado === 'Activo' && estadoDe(i) === STOCK_BAJO_MINIMO;
+  const esAgotado    = i => estadoDe(i) === STOCK_AGOTADO;
+  // "Ver solo stock bajo" = cualquiera de los 3 estados de alerta en un
+  // insumo activo (necesita reposición en el local activo).
   const necesitaReposicion = i =>
-    i.estado === 'Activo' &&
-    (estadoStockDe(i) === STOCK_BAJO || estadoStockDe(i) === STOCK_SIN);
+    i.estado === 'Activo' && estadoDe(i) !== STOCK_OK;
 
   const displayedBase = (tabFiltro === 'activos'
     ? base.filter(i => i.estado === 'Activo')
@@ -1026,13 +978,13 @@ const InsumosPage = () => {
                 <tbody>
                   {paginated.map(ins => {
                     const stockReal = Math.max(0, Number(ins.stockActual) || 0);
-                    const sinStock  = esSinStock(ins);
-                    const stockBajo = esStockBajo(ins);
+                    const estStock  = estadoStockDe(ins);
+                    const enAlerta  = ins.estado === 'Activo' && estStock !== STOCK_OK;
                     return (
                       <tr key={ins.id}>
                         <td className="td-nombre">
                           <span className="td-nombre__line" title={ins.nombre}>
-                            {stockBajo && <AvisoStockBajo insumo={ins} />}
+                            {enAlerta && <AvisoStockBajo insumo={ins} estado={estStock} />}
                             <span className="td-trunc">{ins.nombre}</span>
                           </span>
                           {/* en móvil, la categoría/unidad ocultas se muestran aquí */}
@@ -1043,12 +995,6 @@ const InsumosPage = () => {
                         <td className="td-stock">
                           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
                             <span>{fmtNum(stockReal)} {ins.unidadMedida}</span>
-                            {sinStock && (
-                              <span style={{ display:'inline-flex',alignItems:'center',gap:3,padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(229,57,53,0.12)',color:'#EF5350',border:'1px solid #EF9A9A' }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                                Sin stock
-                              </span>
-                            )}
                           </div>
                         </td>
                         <td className="td-stock col-min"><span>{fmtNum(ins.stockMinimo)} {ins.unidadMedida}</span></td>

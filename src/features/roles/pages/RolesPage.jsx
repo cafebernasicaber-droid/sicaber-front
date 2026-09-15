@@ -13,12 +13,14 @@ import './Roles.css';
 const RolesPage = () => {
   const navigate = useNavigate();
   const { hasPermiso } = useAuth();
-  const { roles, remove } = useRoles();
+  const { roles, remove, toggleEstado } = useRoles();
   const { usuarios } = useUsuarios();
   const [query, setQuery] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [success, setSuccess] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [toggleLoadingId, setToggleLoadingId] = useState(null);
   const location = useLocation();
 
 useEffect(() => {
@@ -43,6 +45,34 @@ useEffect(() => {
   // sistema) se usa el mapeo estático por nombre como respaldo.
   const getColor = (rol) => rol.color || rolesService.getColor(rol.nombre);
   const getIcon  = (rol) => rolesService.getIcon(rol.nombre);
+  // Roles creados antes de que existiera esta columna no traen `estado`
+  // (undefined/null) — se tratan como Activo, no como un tercer estado.
+  const esActivo = (rol) => rol.estado !== 'Inactivo';
+
+  // PATCH /roles/:id/estado invierte el estado actual y, si el rol queda
+  // Inactivo, desactiva en cascada a sus usuarios — la respuesta trae
+  // `usuariosDesactivados` con el conteo real (no se adivina ni se cuenta
+  // aparte). Desactivar "Administrador" responde 409 con un mensaje ya
+  // armado por el backend; se muestra tal cual, nunca uno genérico.
+  const handleToggleEstado = async (rol) => {
+    setErrorMsg('');
+    setToggleLoadingId(rol.id);
+    try {
+      const r = await toggleEstado(rol.id);
+      const msg = r.estado === 'Activo'
+        ? `Rol "${rol.nombre}" activado.`
+        : `Rol "${rol.nombre}" desactivado.${r.usuariosDesactivados > 0
+            ? ` ${r.usuariosDesactivados} usuario${r.usuariosDesactivados !== 1 ? 's' : ''} fueron desactivados también.`
+            : ''}`;
+      setSuccess(msg);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      setErrorMsg(err.message || 'No se pudo cambiar el estado del rol.');
+      setTimeout(() => setErrorMsg(''), 5000);
+    } finally {
+      setToggleLoadingId(null);
+    }
+  };
 
   const shownFiltered = query.trim()
     ? roles.filter(r => r.nombre.toLowerCase().includes(query.toLowerCase()) || (r.descripcion||'').toLowerCase().includes(query.toLowerCase()))
@@ -69,6 +99,7 @@ useEffect(() => {
     <Layout>
       <div className="mod-root roles-page-root">
         {success && <div className="toast toast-success">✓ {success}</div>}
+        {errorMsg && <div className="toast toast-error">⚠ {errorMsg}</div>}
 
         <div className="page-header roles-page-header" style={{display:'flex', alignItems:'flex-start', justifyContent:'space-between'}}>
           <div>
@@ -115,6 +146,7 @@ useEffect(() => {
               const permisos = getPermisos(rol);
               const color = getColor(rol);
               const pct = total > 0 ? Math.round((permisos.length / total) * 100) : 0;
+              const activo = esActivo(rol);
               return (
                 <div className="rol-card" key={rol.id}>
                   <div className="rol-card__stripe" style={{background: color}}/>
@@ -123,7 +155,14 @@ useEffect(() => {
                       <span style={{fontSize:20}}>{getIcon(rol)}</span>
                     </div>
                     <div className="rol-card__info">
-                      <div className="rol-card__name">{rol.nombre}</div>
+                      <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+                        <div className="rol-card__name">{rol.nombre}</div>
+                        <span style={{padding:'2px 8px', borderRadius:20, fontSize:10.5, fontWeight:700,
+                          background: activo ? 'rgba(76,175,80,.15)' : 'rgba(158,158,158,.18)',
+                          color: activo ? '#4CAF50' : '#9E9E9E'}}>
+                          {activo ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </div>
                       <div className="rol-card__date">{rol.created_at ? new Intl.DateTimeFormat('es-CO',{dateStyle:'medium'}).format(new Date(rol.created_at)) : '—'}</div>
                     </div>
                   </div>
@@ -137,6 +176,17 @@ useEffect(() => {
                     <div className="perm-pct">{pct}% de cobertura</div>
                   </div>
                   <div className="rol-card__actions">
+                    {hasPermiso('roles', 'editar') && (
+                      <Tooltip label={activo ? 'Desactivar rol' : 'Activar rol'}>
+                        <button
+                          className={`toggle-btn ${activo ? 'toggle-on' : 'toggle-off'}`}
+                          disabled={toggleLoadingId === rol.id}
+                          style={{opacity: toggleLoadingId === rol.id ? 0.5 : 1}}
+                          onClick={() => handleToggleEstado(rol)}>
+                          <span className="toggle-thumb"/>
+                        </button>
+                      </Tooltip>
+                    )}
                     {hasPermiso('roles', 'ver') && (
                       <Tooltip label="Ver detalle">
                         <button className="btn-ver" onClick={() => navigate(`/admin/roles/ver/${rol.id}`)}>

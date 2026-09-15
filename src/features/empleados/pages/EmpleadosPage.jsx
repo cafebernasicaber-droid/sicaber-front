@@ -4,6 +4,7 @@ import Layout from '../../../shared/components/Layout';
 import useEmpleados from '../hooks/useEmpleados';
 import empleadosService from '../services/empleadosService';
 import localesService from '../../../shared/services/localesService';
+import insumosService from '../../insumos/services/insumosService';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
 import { errorPassword } from '../../../shared/utils/passwordPolicy';
@@ -99,13 +100,14 @@ export function EmpleadoModal({ initial, onClose, onSave, cargoFijo }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ maxWidth: 480, textAlign: 'left', padding: '32px 36px' }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ marginBottom: 4 }}>{initial ? 'Editar empleado' : `Nuevo ${(cargoFijo || 'empleado').toLowerCase()}`}</h3>
+        {/* El tipo de cuenta ya se eligió en la pantalla anterior
+            ("¿Qué deseas registrar?"); repetirlo aquí en el título/botón
+            era redundante, así que el formulario queda genérico. */}
+        <h3 style={{ marginBottom: 4 }}>{initial ? 'Editar empleado' : 'Registrar'}</h3>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
           {initial
             ? `Modificando: ${initial.nombre}`
-            : (cargoFijo
-                ? `Registra un ${cargoFijo.toLowerCase()} con su cuenta de acceso al sistema`
-                : 'Agrega un empleado al equipo')}
+            : 'Completa los datos y la cuenta de acceso al sistema'}
         </p>
         {error && <div style={{ background:'rgba(229,57,53,0.12)',color:'var(--color-red)',padding:'10px 14px',borderRadius:8,marginBottom:16,fontSize:13 }}>⚠ {error}</div>}
         <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -232,7 +234,7 @@ export function EmpleadoModal({ initial, onClose, onSave, cargoFijo }) {
           <div className="modal-actions" style={{ justifyContent:'flex-end', marginTop:4 }}>
             <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn-confirm-primary" disabled={saving}>
-              {saving ? 'Guardando…' : (initial ? '💾 Guardar cambios' : '✅ Crear empleado')}
+              {saving ? 'Guardando…' : (initial ? '💾 Guardar cambios' : '✅ Registrar')}
             </button>
           </div>
         </form>
@@ -384,7 +386,7 @@ function LocalFormModal({ inicial, onClose, onSave }) {
           <div className="modal-actions" style={{ justifyContent:'flex-end', marginTop:4 }}>
             <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn-confirm-primary" disabled={saving}>
-              {saving ? 'Guardando…' : (inicial ? '💾 Guardar cambios' : '✅ Crear local')}
+              {saving ? 'Guardando…' : (inicial ? '💾 Guardar cambios' : '✅ Registrar local')}
             </button>
           </div>
         </form>
@@ -398,6 +400,12 @@ function LocalesTab({ showOk }) {
   const [locales, setLocales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
+  // Conteo real de insumos por local — GET /insumos/contadores?local_id=
+  // no viene incluido en GET /locales/todos (ese endpoint no sabe nada de
+  // insumos), así que se pide aparte, uno por local, y se guarda acá como
+  // { [localId]: cantidad }. Antes esto se leía de campos que el backend
+  // nunca mandaba (insumosCount/cantidadInsumos/...) y siempre daba "—".
+  const [insumosCount, setInsumosCount] = useState({});
   const [modal, setModal]     = useState(null); // null | 'new' | local
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError]   = useState('');
@@ -421,9 +429,36 @@ function LocalesTab({ showOk }) {
   };
   useEffect(() => { refresh(); }, []);
 
+  // Una vez cargados los locales, se pide el conteo de insumos de cada uno
+  // en paralelo. Se usa "activos" (insumo_local.activo=true PARA ESE
+  // local), no "todos": el backend crea una fila de insumo_local por CADA
+  // local al crear un insumo (para que nunca falte, ver POST /insumos), así
+  // que "todos" siempre da el mismo total en TODOS los locales — no sirve
+  // para diferenciar. "activos" sí refleja qué insumos están realmente
+  // habilitados/ofrecidos en ESE local específico (mismo criterio que la
+  // pestaña "Activos (N)" de Gestión de Insumos). Si algún local falla (ej.
+  // permisos), simplemente se queda sin conteo ("—") en vez de romper la
+  // pantalla entera.
+  useEffect(() => {
+    if (locales.length === 0) return;
+    let cancelado = false;
+    Promise.all(locales.map(l =>
+      insumosService.getContadores(l.id)
+        .then(r => [l.id, r?.activos ?? null])
+        .catch(() => [l.id, null])
+    )).then(pares => {
+      if (cancelado) return;
+      setInsumosCount(Object.fromEntries(pares));
+    });
+    return () => { cancelado = true; };
+  }, [locales]);
+
   const esActivo = loc => loc.estado === true || loc.estado === 'Activo';
   const numEmpleados = loc => loc.empleadosAsignados ?? loc.cantidadEmpleados ?? loc.empleados_count ?? loc.empleados ?? null;
-  const numInsumos   = loc => loc.insumosCount ?? loc.cantidadInsumos ?? loc.insumos_count ?? loc.insumos ?? null;
+  // Prioriza el conteo real pedido a /insumos/contadores; si todavía no ha
+  // llegado (o falló) para ese local, cae a los campos legados por si algún
+  // día el backend los llega a mandar en GET /locales/todos.
+  const numInsumos = loc => insumosCount[loc.id] ?? loc.insumosCount ?? loc.cantidadInsumos ?? loc.insumos_count ?? loc.insumos ?? null;
   const handleToggle = async loc => {
     try {
       await localesService.toggleEstado(loc.id);
@@ -554,7 +589,7 @@ function LocalesTab({ showOk }) {
         <div style={{ display:'flex', justifyContent:'flex-end', padding:'16px 20px 0' }}>
           <button className="btn-add" onClick={() => setModal('new')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Nuevo local
+            Registrar local
           </button>
         </div>
       )}
@@ -571,7 +606,7 @@ function LocalesTab({ showOk }) {
         <div className="empty-state">
           <div className="empty-icon">🏠</div>
           <h3>No hay locales registrados</h3>
-          <p>Crea el primer local con el botón "Nuevo local" de arriba</p>
+          <p>Registra el primer local con el botón "Registrar local" de arriba</p>
         </div>
       ) : (
         /* item 9 — tarjetas en vez de tabla plana: más contexto (dirección,
@@ -729,7 +764,7 @@ export default function EmpleadosPage() {
           {tab === 'empleados' && hasPermiso('empleados', 'crear') && (
             <button className="btn-add" onClick={() => setModal('new')}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Agregar empleado
+              Registrar empleado
             </button>
           )}
         </div>
@@ -787,8 +822,8 @@ export default function EmpleadosPage() {
             <div className="empty-state">
               <div className="empty-icon">👤</div>
               <h3>{query ? 'Sin coincidencias' : 'No hay empleados'}</h3>
-              <p>{query ? `Sin resultados para "${query}"` : 'Agrega el primer empleado'}</p>
-              {!query && hasPermiso('empleados', 'crear') && <button className="btn-add" onClick={() => setModal('new')}>Agregar empleado</button>}
+              <p>{query ? `Sin resultados para "${query}"` : 'Registra el primer empleado'}</p>
+              {!query && hasPermiso('empleados', 'crear') && <button className="btn-add" onClick={() => setModal('new')}>Registrar empleado</button>}
             </div>
           ) : (
             <div className="table-wrap">

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import Layout from '../../../shared/components/Layout';
 import pedidosService from '../services/pedidosService';
 import empleadosService from '../../empleados/services/empleadosService';
@@ -9,6 +9,8 @@ import ventasService from '../../ventas/services/ventasService';
 import notificacionesService from '../../notificaciones/services/notificacionesService';
 import localesService from '../../../shared/services/localesService';
 import { ESTADO_CONFIG } from '../data/datos';
+import { configEstadoPedido, etiquetaMetodoPago, mensajeErrorEstadoPedido, estadoDevolucionDe, puedeEditarProductosPedido, estadoPagoDe } from '../../../shared/utils/pedidoEstados';
+import { EstadoPagoBadge } from '../../../shared/components/EstadosPedido';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import LocalFiltro from '../../../shared/components/LocalFiltro';
 import Tooltip from '../../../shared/components/Tooltip';
@@ -20,32 +22,64 @@ import './PedidosPage.css';
 // el Cajero, presentado como modal amplio con scroll interno propio. Cierra
 // con X / Escape / click en el fondo, pidiendo confirmación si el carrito
 // tiene ítems.
-function ModalNuevoPedidoAdmin({ onClose, onCreated, showToast }) {
-  const [cartLleno, setCartLleno] = useState(false);
+//
+// Punto 3 del pedido del usuario: este MISMO modal ahora también sirve para
+// "Editar pedido" — se le pasa `pedidoEditar` (el pedido completo) y
+// NuevoPedidoPanel entra en modo edición (carrito precargado, todo lo demás
+// oculto/fijo). Antes existía un `ModalPedido` aparte con su propio
+// formulario completo (cliente/local/atendido-por/tipo/productos editables
+// a la vez) que fue divergiendo del de creación real — el 6º caso del
+// patrón de "componentes gemelos" de este proyecto (ver
+// sicaber-verificar-componente-real) — se eliminó en vez de mantener dos.
+function ModalNuevoPedidoAdmin({ onClose, onCreated, showToast, pedidoEditar = null }) {
+  const modoEdicion = !!pedidoEditar;
+  const [cartLleno, setCartLleno] = useState(modoEdicion);
   const intentarCerrar = () => {
-    if (cartLleno && !window.confirm('Tienes productos en el carrito sin confirmar. ¿Cerrar de todas formas?')) return;
+    // En edición, el carrito arranca lleno con los productos que YA tenía
+    // el pedido (no es un carrito "sin confirmar" recién armado) — solo
+    // pedir confirmación si de verdad se modificó algo, no por el simple
+    // hecho de abrir el modal.
+    const mensaje = modoEdicion
+      ? 'Tienes cambios sin guardar en este pedido. ¿Cerrar de todas formas?'
+      : 'Tienes productos en el carrito sin confirmar. ¿Cerrar de todas formas?';
+    if (cartLleno && cambiado && !window.confirm(mensaje)) return;
     onClose();
   };
+  // Solo relevante en edición: distingue "el carrito sigue igual a como
+  // llegó" de "se agregó/quitó/cambió algo" — así el cierre sin cambios no
+  // interrumpe con un confirm innecesario. `onCartChange` (NuevoPedidoPanel)
+  // dispara también en el montaje inicial (el carrito ya llega precargado
+  // con los productos del pedido) — `primerAviso` descarta esa primera
+  // llamada para que "cambiado" solo pase a true con una edición real del
+  // usuario, no con la carga inicial.
+  const [cambiado, setCambiado] = useState(!modoEdicion);
+  const primerAviso = useRef(true);
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') intentarCerrar(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
     // eslint-disable-next-line
-  }, [cartLleno]);
+  }, [cartLleno, cambiado]);
   return (
     <div className="pd-overlay" onClick={intentarCerrar}>
       <div className="pd-nuevo-modal" onClick={e => e.stopPropagation()}>
         <div className="pd-nuevo-modal__head">
           <div>
-            <div className="pd-modal-eyebrow">Nuevo pedido</div>
-            <div className="pd-modal-id" style={{ fontSize: 18 }}>Catálogo y carrito</div>
+            <div className="pd-modal-eyebrow">{modoEdicion ? 'Editar pedido' : 'Nuevo pedido'}</div>
+            <div className="pd-modal-id" style={{ fontSize: 18 }}>{modoEdicion ? `Pedido #${pedidoEditar.id}` : 'Catálogo y carrito'}</div>
           </div>
           <button className="pd-nuevo-modal__x" onClick={intentarCerrar} aria-label="Cerrar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div className="pd-nuevo-modal__body">
-          <NuevoPedidoPanel modo="admin" showToast={showToast} onCartChange={setCartLleno}
+          <NuevoPedidoPanel modo="admin" showToast={showToast} pedidoEditar={pedidoEditar}
+            onCartChange={n => {
+              setCartLleno(n);
+              if (modoEdicion) {
+                if (primerAviso.current) { primerAviso.current = false; } else { setCambiado(true); }
+              }
+            }}
             onCreated={() => { onCreated(); }} />
         </div>
       </div>
@@ -53,7 +87,8 @@ function ModalNuevoPedidoAdmin({ onClose, onCreated, showToast }) {
   );
 }
 
-const METODOS_PAGO_LABEL = { nequi: 'Nequi', transferencia: 'Transferencia', efectivo: 'Efectivo en caja' };
+// B1 — "transferencia" se muestra "Llave Bancolombia" (el valor NO cambia).
+const METODOS_PAGO_LABEL = { nequi: 'Nequi', transferencia: 'Llave Bancolombia', efectivo: 'Efectivo' };
 
 const fmt = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n || 0);
 const POR_PAGINA = 8;
@@ -62,461 +97,172 @@ const POR_PAGINA = 8;
 function ModalDetalle({ pedido, onClose, onCambiarEstado, onAprobarPago, onRechazarPago }) {
   const { hasPermiso } = useAuth();
   const puedeGestionar = hasPermiso('pedidos', 'gestionar');
-  const cfg = ESTADO_CONFIG[pedido.estado] || {};
+  const cfg = configEstadoPedido(pedido.estado, pedido.tipo);
   // El backend guarda los productos en la columna "items" y la imagen del
   // comprobante en "comprobante_img". El listado ya tenía este fallback,
   // pero el modal de detalle no, así que siempre mostraba "Sin productos
   // registrados" y nunca la imagen del comprobante aunque sí existieran.
   const productos     = Array.isArray(pedido.productos) ? pedido.productos : (Array.isArray(pedido.items) ? pedido.items : []);
   const comprobanteImg = pedido.comprobanteImg || pedido.comprobante_img || null;
+  const hora = pedido.hora || (pedido.created_at ? new Date(pedido.created_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}) : '—');
+  const fecha = pedido.created_at ? new Date(pedido.created_at).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'}) : null;
+  // Cambio 2 (pedido del usuario) — "de verdad hace falta" mostrar el
+  // estado del pago solo cuando dice algo que el estado del pedido no dice
+  // ya (verificando/aprobado/rechazado); en 'pendiente' es redundante con
+  // el badge principal del encabezado, así que esa fila ni aparece.
+  const estadoPago = estadoPagoDe(pedido);
+  const mostrarEstadoPago = estadoPago !== 'pendiente';
   return (
-    <div className="pd-overlay" onClick={onClose}>
-      <div className="pd-modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
-        <div className="pd-modal-head">
-          <div>
-            <div className="pd-modal-eyebrow">Pedido</div>
-            <div className="pd-modal-id">#{pedido.id}</div>
-          </div>
-          <span className="pd-badge" style={{ background: cfg.bg, color: cfg.color }}>{cfg.label || pedido.estado}</span>
-        </div>
-        <div className="pd-modal-grid">
-          {[
-            ['Cliente',        pedido.cliente      || pedido.mesa || '—', true],
-            ['Tipo',           pedido.tipo === 'domicilio' ? 'A domicilio' : 'En local'],
-            ['Local',          pedido.sede          || '—'],
-            ['Método de pago', pedido.pago          || '—'],
-            ['Hora',           pedido.hora || (pedido.created_at ? new Date(pedido.created_at).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}) : '—')],
-            ['Atendido por',   pedido.barista       || '—'],
-          ].map(([label, val, bold], i) => (
-            <div className="pd-info-card" key={i}>
-              <div className="pd-info-label">{label}</div>
-              <div className="pd-info-val" style={bold ? { fontWeight: 700 } : {}}>{val}</div>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 620, textAlign: 'left', padding: 0 }} onClick={e => e.stopPropagation()}>
+        {/* Cambio 2 — mismo encabezado compacto que ya usa el detalle de
+            Ventas (número + cliente + fecha/hora en una sola línea, UNA
+            sola etiqueta de estado a la derecha) en vez del bloque verde
+            grande que antes ocupaba mucho espacio para poca información,
+            y de las DOS etiquetas de estado apiladas (pedido + pago). */}
+        <div className="modal-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="modal-head__icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
             </div>
-          ))}
-        </div>
-        <div className="pd-total-card">
-          <span className="pd-info-label">Total</span>
-          <span className="pd-total-amt">{fmt(pedido.total)}</span>
-        </div>
-        {pedido.comprobante && (
-          <div className="pd-info-card" style={{marginBottom:14}}>
-            <div className="pd-info-label">Comprobante de pago</div>
-            <div className="pd-info-val">{pedido.comprobante}</div>
-            {comprobanteImg && (
-              <img src={comprobanteImg} alt="Comprobante"
-                style={{marginTop:10,width:'100%',maxHeight:320,objectFit:'contain',borderRadius:10,border:'1.5px solid var(--border)',cursor:'zoom-in',background:'#fafafa'}}
-                onClick={() => window.open(comprobanteImg, '_blank')}/>
-            )}
+            <div>
+              <div className="modal-head__title">Pedido #{pedido.id}</div>
+              <div className="modal-head__sub">{pedido.cliente || pedido.mesa || 'Sin cliente'} · {fecha ? `${fecha} · ` : ''}{hora}</div>
+            </div>
           </div>
-        )}
-        <div className="pd-productos-section">
-          <div className="pd-info-label" style={{ marginBottom: 10 }}>Productos</div>
-          {productos.length > 0
-            ? productos.map((x, i) => {
-                const nombre = x.nombre || (typeof x === 'string' ? x : 'Producto');
-                const cant = x.cantidad || 1;
-                const sub = x.precio ? x.precio * cant : null;
-                return (
-                  <div key={i} className={`pd-prod-row ${i % 2 === 0 ? 'pd-prod-row-alt' : ''}`}>
-                    <span className="pd-prod-name">
-                      {nombre}
-                      {cant > 1 && <span className="pd-prod-qty-badge">x{cant}</span>}
-                      {x.adiciones && x.adiciones.length > 0 && (
-                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>{x.adiciones.map(a=>a.nombre||a).join(', ')}</div>
-                      )}
-                    </span>
-                    {sub && <span className="pd-prod-sub">{fmt(sub)}</span>}
-                  </div>
-                );
-              })
-            : <p className="pd-no-prods">Sin productos registrados</p>
-          }
-        </div>
-        {pedido.estado === 'pendiente_verificacion' && onCambiarEstado && puedeGestionar && (
-          <div style={{background:'rgba(173,20,87,0.1)',color:'#AD1457',padding:'8px 12px',borderRadius:8,marginBottom:10,fontSize:12.5,fontWeight:600}}>
-            ⚠ Verifica el comprobante de pago para continuar. El pedido no puede pasar a "En preparación" hasta aprobarlo.
-          </div>
-        )}
-        <div className="pd-modal-actions">
-          {pedido.estado === 'pendiente_verificacion' && onCambiarEstado && puedeGestionar ? (
-            <>
-              {/* Mismo criterio que ModalDetallePedido: en el pie del modal
-                  van los botones de confirmación, no los de acción de tabla. */}
-              <button className="btn-confirm-danger" onClick={() => { onClose(); onRechazarPago ? onRechazarPago(pedido) : onCambiarEstado(pedido.id, 'cancelado'); }}>✕ Rechazar pago</button>
-              <button className="btn-confirm-primary" onClick={() => { onClose(); onAprobarPago ? onAprobarPago(pedido) : onCambiarEstado(pedido.id, 'en_proceso'); }}>✓ Aprobar pago</button>
-            </>
-          ) : (
-            <button className="btn-cancel" onClick={onClose}>Cerrar</button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── MODAL NUEVO / EDITAR PEDIDO ── */
-function ModalPedido({ pedido, onClose, onSave }) {
-  const isEdit = !!pedido;
-  const [empleados,     setEmpleados]     = useState([]);
-  const [clientesLista, setClientesLista] = useState([]);
-  const [productosMenu, setProductosMenu] = useState([]);
-  const [adiciones,     setAdiciones]     = useState([]);
-  // 3 — locales físicos de recogida (GET /locales), para el selector que
-  // aparece cuando el tipo de entrega es "En el Local" — distinto de
-  // `sede` (Local 1/Local 2, a quién atiende el pedido).
-  const [locales, setLocales] = useState([]);
-
-  useEffect(() => {
-    const load = async () => {
-      const [emps, cls, prods, adics, locs] = await Promise.allSettled([
-        empleadosService.getAll(),
-        clientesService.getAll(),
-        productosService.getActivos ? productosService.getActivos() : productosService.getAll(),
-        adicionesService.getAll ? adicionesService.getAll() : Promise.resolve([]),
-        localesService.getActivos(),
-      ]);
-      if (emps.status  === 'fulfilled') setEmpleados(emps.value   || []);
-      if (cls.status   === 'fulfilled') setClientesLista((cls.value || []).filter(c => c.estado !== false));
-      if (prods.status === 'fulfilled') setProductosMenu(prods.value || []);
-      if (adics.status === 'fulfilled') setAdiciones(adics.value  || []);
-      if (locs.status  === 'fulfilled') setLocales((Array.isArray(locs.value) ? locs.value : []).filter(l => l.estado !== false && l.estado !== 'Inactivo'));
-    };
-    load();
-  }, []);
-
-  const atienden = empleados.filter(e => e.estado === 'Activo' && e.cargo !== 'Domiciliario');
-  const domis    = empleados.filter(e => e.estado === 'Activo' && e.cargo === 'Domiciliario');
-  const cats     = ['Todos', ...new Set(productosMenu.map(p => p.categoria))];
-
-  // Al editar, partimos de los productos ya guardados en el pedido
-  // (backend: "items", alias "productos"). Normalizamos precioTotal/
-  // cantidad porque pedidos creados desde la landing usan "precioFinal"
-  // en vez de "precioTotal".
-  const productosIniciales = pedido
-    ? (Array.isArray(pedido.productos) ? pedido.productos : (Array.isArray(pedido.items) ? pedido.items : []))
-        .map(x => ({ ...x, precioTotal: x.precioTotal ?? x.precioFinal ?? x.precio, cantidad: x.cantidad || 1 }))
-    : [];
-
-  const [f, setF] = useState({
-    cliente:      pedido?.cliente || '',
-    tipo:         pedido?.tipo || 'local',
-    pago:         pedido?.pago || 'efectivo',
-    productos:    productosIniciales,
-    barista:      pedido?.barista || '',
-    domiciliario: pedido?.domiciliario || '',
-    // Local para el que es este pedido. El admin gestiona los dos locales,
-    // así que debe elegir a cuál va destinado cada pedido que crea.
-    sede:         pedido?.sede || '',
-    // 3 — local físico de recogida (tabla `locales`, GET /locales) — solo
-    // aplica cuando tipo:'local'. Mismo campo que ya usa la Landing.
-    localId:      pedido?.localId ? String(pedido.localId) : '',
-    localNombre:  pedido?.localNombre || '',
-  });
-  const [cat, setCat]            = useState('Todos');
-  const [busquedaProd, setBusquedaProd] = useState('');
-  const [prodSel, setProdSel]    = useState(null);
-  const [adicsSelec, setAdicsSelec] = useState([]);
-  const [cantSel, setCantSel]    = useState(1);
-
-  // 4 — las adiciones son universales: aplican a todos los productos por
-  // igual, nunca filtradas por categoría ni producto (la tabla "adiciones"
-  // ni siquiera tiene columna "categoria" — el filtro anterior comparaba
-  // contra un campo que no existe y por eso nunca hacía nada; se deja
-  // explícito para que no parezca un filtro real y alguien confíe en él).
-  const adicsParaProd = prodSel ? adiciones : [];
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  const getCant = id => (f.productos.find(x => x.id === id) || {}).cantidad || 0;
-
-  const seleccionarProd = (prod) => { setProdSel(prod); setAdicsSelec([]); setCantSel(1); };
-  const toggleAdic = (a) => setAdicsSelec(prev => prev.find(x => x.id === a.id) ? prev.filter(x => x.id !== a.id) : [...prev, a]);
-
-  const confirmarAgregar = () => {
-    const extraTotal = adicsSelec.reduce((s, a) => s + a.precio, 0);
-    const precioTotal = prodSel.precio + extraTotal;
-    const item = { ...prodSel, adiciones: adicsSelec, precioTotal, cantidad: cantSel };
-    const existe = f.productos.find(x => x.id === prodSel.id);
-    set('productos', existe ? f.productos.map(x => x.id === prodSel.id ? item : x) : [...f.productos, item]);
-    setProdSel(null); setAdicsSelec([]); setCantSel(1);
-  };
-
-  const removeProd = id => set('productos', f.productos.filter(x => x.id !== id));
-  const cambiarCant = (id, delta) => {
-    const nueva = (getCant(id) || 0) + delta;
-    if (nueva <= 0) removeProd(id);
-    else set('productos', f.productos.map(x => x.id === id ? { ...x, cantidad: nueva } : x));
-  };
-
-  const prods = (() => {
-    let list = cat === 'Todos' ? productosMenu : productosMenu.filter(p => p.categoria === cat);
-    if (busquedaProd.trim()) list = list.filter(p => p.nombre.toLowerCase().includes(busquedaProd.toLowerCase()));
-    return list;
-  })();
-
-  const total = f.productos.reduce((s, p) => s + (p.precioTotal || p.precio) * (p.cantidad || 1), 0);
-
-  const crear = () => {
-    if (!f.productos.length) { alert('Selecciona al menos un producto'); return; }
-    if (!f.barista)          { alert('Selecciona quién atiende el pedido'); return; }
-    if (!f.sede)             { alert('Selecciona el local de este pedido'); return; }
-    // "Local de recogida" y "Local *" apuntaban al mismo local físico
-    // (mismo `locales`/GET /locales) y se pedían dos veces en dos campos
-    // distintos — ahora un único selector ("Local *") llena ambos: `sede`
-    // (a quién se le asigna el pedido) y localId/localNombre (local de
-    // recogida real, mismo campo que ya usa el checkout del cliente).
-    if (f.tipo === 'local' && !f.localId) { alert('Selecciona el local donde el cliente recogerá el pedido'); return; }
-    if (f.tipo === 'domicilio' && !f.domiciliario) { alert('Selecciona un domiciliario'); return; }
-    if (f.tipo === 'domicilio' && (!isEdit || pedido.tipo !== 'domicilio')) {
-      const ok = window.confirm('⚠️ El servicio a domicilio solo cubre la comuna 8 y 9 de Medellín.\n\n¿Continuar?');
-      if (!ok) return;
-    }
-    if (isEdit) {
-      onSave({ ...f, total, id: pedido.id });
-    } else {
-      onSave({ ...f, total, hora: new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}), estado: 'pendiente' });
-    }
-  };
-
-  return (
-    <div className="pd-overlay" onClick={onClose}>
-      <div className="pd-modal pd-modal-wide" onClick={e => e.stopPropagation()}>
-        <div className="pd-modal-head">
-          <div>
-            <div className="pd-modal-eyebrow">{isEdit ? 'Editar pedido' : 'Nuevo pedido'}</div>
-            <div className="pd-modal-id" style={{ fontSize: 18 }}>{isEdit ? `Pedido #${pedido.id}` : 'Completa los datos'}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ background: cfg.bg, color: cfg.color, padding: '5px 14px', borderRadius: 100, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>{cfg.label || pedido.estado}</span>
+            <button onClick={onClose} title="Cerrar" className="modal-close-btn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
         </div>
 
-        <div className="pd-form-row">
-          <div className="pd-form-group">
-            <label>Cliente <span style={{color:'var(--text-muted)',fontWeight:400,fontSize:12}}>(opcional)</span></label>
-            <input
-              type="text"
-              placeholder="Nombre del cliente o dejar vacío"
-              value={f.cliente}
-              onChange={e => set('cliente', e.target.value)}
-              list="clientes-sugeridos"
-            />
-            <datalist id="clientes-sugeridos">
-              {clientesLista.map(c => <option key={c.id} value={c.nombre}>{c.nombre} — {c.correo}</option>)}
-            </datalist>
-          </div>
-          <div className="pd-form-group">
-            <label>Método de pago</label>
-            <select value={f.pago} onChange={e => set('pago', e.target.value)}>
-              {/* Mismos 3 métodos que Landing/Cajero — sin Tarjeta ni Daviplata. */}
-              {['efectivo','nequi','transferencia'].map(p => <option key={p} value={p}>{METODOS_PAGO_LABEL[p]}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div className="pd-form-group">
-          <label>Tipo de entrega</label>
-          {/* Los domicilios solo aplican a pedidos que el cliente hace por su
-              cuenta desde la tienda/app — un pedido creado a mano por el
-              admin siempre es para recoger en el local. Se mantiene la
-              opción "A Domicilio" únicamente si se está editando un pedido
-              que YA es a domicilio (no se le cambia el tipo a un pedido real
-              del cliente solo por abrirlo en el admin). */}
-          {(isEdit && pedido.tipo === 'domicilio') ? (
-            <div className="pd-tipo-selector">
-              {[{val:'local',lbl:'En el Local',ic:'🏠'},{val:'domicilio',lbl:'A Domicilio',ic:'🛵'}].map(t => (
-                <div key={t.val} className={`pd-tipo-option ${f.tipo===t.val?'pd-tipo-selected':''}`} onClick={() => set('tipo', t.val)}>
-                  <span>{t.ic}</span><span>{t.lbl}</span>
+        <div style={{ padding: '20px 24px' }}>
+          {/* Cambio 2 — dos tarjetas lado a lado (mismas clases
+              `modal-seccion`/`modal-fila` que ya usa Ventas — no se
+              inventó CSS nuevo) en vez de 6 tarjetas sueltas apiladas:
+              etiqueta a la izquierda, valor a la derecha, se escanea de
+              un vistazo en vez de leer etiqueta-arriba/valor-abajo x6. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }} className="pd-detalle-2col">
+            <div className="modal-seccion" style={{ marginBottom: 0 }}>
+              <div className="modal-seccion__titulo">Información general</div>
+              {[
+                ['Cliente', pedido.cliente || pedido.mesa || '—'],
+                ['Fecha',   fecha || '—'],
+                ['Hora',    hora],
+                // Prioriza atendidoPorNombre (JOIN real con usuarios vía
+                // atendido_por, ver PEDIDO_SELECT) sobre `barista` (texto
+                // libre suelto) — mismo criterio ya usado en el listado.
+                ['Atendido por', pedido.atendidoPorNombre || pedido.barista || '—'],
+              ].map(([k, v]) => (
+                <div key={k} className="modal-fila">
+                  <span className="modal-fila__k">{k}</span>
+                  <span className="modal-fila__v">{v}</span>
                 </div>
               ))}
             </div>
-          ) : (
-            <>
-              <div className="pd-tipo-selector">
-                <div className="pd-tipo-option pd-tipo-selected">
-                  <span>🏠</span><span>En el Local</span>
-                </div>
-              </div>
-              <p className="pd-hint" style={{marginTop:6}}>
-                Los pedidos a domicilio solo se piden desde la tienda del cliente.
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Antes: dos campos pidiendo lo mismo — "Local de recogida"
-            (select) y "Local *" (botones), ambos sacados del mismo GET
-            /locales. Ahora un único selector llena los dos campos que
-            espera el backend: `sede` (a qué local/personal se asigna el
-            pedido) y localId/localNombre (local de recogida, mismo campo
-            que ya usa el checkout del cliente). */}
-        <div className="pd-form-group">
-          <label>Local <span className="required">*</span></label>
-          {locales.length === 0 ? (
-            <p className="pd-hint">No hay locales activos registrados.</p>
-          ) : (
-            <div className="pd-tipo-selector">
-              {locales.map(l => (
-                <div key={l.id} className={`pd-tipo-option ${f.sede===l.nombre?'pd-tipo-selected':''}`}
-                  onClick={() => setF(p => ({ ...p, sede: l.nombre, localId: String(l.id), localNombre: l.nombre }))}>
-                  <span>🏪</span><span>{l.nombre}</span>
+            <div className="modal-seccion" style={{ marginBottom: 0 }}>
+              <div className="modal-seccion__titulo">Pago y entrega</div>
+              {[
+                ['Método', etiquetaMetodoPago(pedido.pago)],
+                ['Tipo',   pedido.tipo === 'domicilio' ? 'A domicilio' : 'En local'],
+                ['Local',  pedido.sede || '—'],
+                // Solo aparece cuando dice algo que el badge del
+                // encabezado no dice ya (ver `mostrarEstadoPago`) — nunca
+                // las dos etiquetas de estado a la vez.
+                ...(mostrarEstadoPago ? [['Estado de pago', <EstadoPagoBadge key="ep" pedido={pedido} />]] : []),
+              ].map(([k, v]) => (
+                <div key={k} className="modal-fila">
+                  <span className="modal-fila__k">{k}</span>
+                  <span className="modal-fila__v">{v}</span>
                 </div>
               ))}
             </div>
-          )}
-          <p className="pd-hint" style={{marginTop:6}}>
-            {f.tipo === 'local'
-              ? 'El local donde el cliente recogerá el pedido, y el único cajero/bartender que lo verá.'
-              : 'El pedido solo aparecerá para el cajero y el bartender de ese local.'}
-          </p>
-        </div>
+          </div>
 
-        <div className="pd-personal-section">
-          <div className="pd-personal-title">Personal asignado</div>
-          <div className="pd-personal-cols">
-            <div className="pd-personal-col">
-              <label>Atendido por *</label>
-              {atienden.length === 0 ? <p className="pd-hint">Sin trabajadores activos</p> : (
-                <div className="pd-worker-grid">
-                  {atienden.map(e => (
-                    <div key={e.id} className={`pd-worker-card ${f.barista===e.nombre?'pd-worker-sel':''}`} onClick={() => set('barista', e.nombre)}>
-                      <div className="pd-worker-av">{e.nombre.split(' ').map(n=>n[0]).join('').slice(0,2)}</div>
-                      <div className="pd-worker-name">{e.nombre.split(' ')[0]}</div>
-                      <div className="pd-worker-cargo">{e.cargo}</div>
-                      {f.barista===e.nombre && <div className="pd-worker-check">✓</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {f.tipo === 'domicilio' && (
-              <div className="pd-personal-col">
-                <label>Domiciliario *</label>
-                {domis.length === 0 ? (
-                  <div className="pd-domi-empty"><span>🛵</span><span>Sin domiciliarios activos.</span></div>
-                ) : (
-                  <div className="pd-worker-grid">
-                    {domis.map(e => (
-                      <div key={e.id} className={`pd-worker-card pd-domi-card ${f.domiciliario===e.nombre?'pd-worker-sel':''}`} onClick={() => set('domiciliario', e.nombre)}>
-                        <div className="pd-worker-av pd-domi-av">{e.nombre.split(' ').map(n=>n[0]).join('').slice(0,2)}</div>
-                        <div className="pd-worker-name">{e.nombre.split(' ')[0]}</div>
-                        <div className="pd-worker-cargo">🛵</div>
-                        {f.domiciliario===e.nombre && <div className="pd-worker-check">✓</div>}
-                      </div>
-                    ))}
-                  </div>
+          {/* El total en su propia franja destacada, DESPUÉS de los datos
+              del pedido (antes aparecía suelto arriba de todo, antes que
+              el cliente/tipo/local — mismo lugar y estilo que ya usa
+              Ventas para su "Total de la venta"). */}
+          <div className="modal-seccion" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px' }}>
+            <span style={{ fontWeight: 700, color: 'var(--text-secondary)', fontSize: 13 }}>Total del pedido</span>
+            <span className="modal-monto" style={{ fontSize: 22 }}>{fmt(pedido.total)}</span>
+          </div>
+
+          {/* Comprobante: sección propia (puede llevar una imagen grande,
+              no cabe como una fila más de "Pago y entrega"). Antes esta
+              tarjeta desaparecía por completo sin comprobante (ej. pago en
+              efectivo), sin decir si "no hace falta" o "falta subirlo" —
+              se muestra siempre, con un mensaje según el método (mismo
+              criterio ya aplicado en Compras). */}
+          <div className="modal-seccion">
+            <div className="modal-seccion__titulo">Comprobante de pago</div>
+            {pedido.comprobante ? (
+              <>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>{pedido.comprobante}</div>
+                {comprobanteImg && (
+                  <img src={comprobanteImg} alt="Comprobante"
+                    style={{ marginTop: 10, width: '100%', maxHeight: 320, objectFit: 'contain', borderRadius: 10, border: '1.5px solid var(--border)', cursor: 'zoom-in', background: '#fafafa' }}
+                    onClick={() => window.open(comprobanteImg, '_blank')}/>
                 )}
-              </div>
+              </>
+            ) : pedido.pago === 'efectivo' ? (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>— Pago en efectivo: no requiere comprobante.</p>
+            ) : (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>— Sin comprobante adjunto.</p>
             )}
           </div>
-        </div>
 
-        <div className="pd-form-group">
-          <label>Productos del menú</label>
-          <div className="pd-prod-search-wrap">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input className="pd-prod-search-input" placeholder="Buscar producto..." value={busquedaProd} onChange={e => setBusquedaProd(e.target.value)}/>
-            {busquedaProd && <button className="pd-prod-search-clear" onClick={() => setBusquedaProd('')}>✕</button>}
-          </div>
-          <div className="pd-cats">
-            {cats.map(c => <button key={c} className={`pd-cat-btn ${cat===c?'pd-cat-on':''}`} onClick={() => setCat(c)}>{c}</button>)}
-          </div>
-          <div className="pd-prod-grid-v2">
-            {prods.length === 0 ? (
-              <div className="pd-prod-grid-v2__empty">Sin productos{busquedaProd ? ` para "${busquedaProd}"` : ''}</div>
-            ) : prods.map(p => {
-              const cant = getCant(p.id);
-              const activo = prodSel?.id === p.id;
+          {/* Productos: mismo formato que Ventas — tarjeta por línea, badge
+              de cantidad junto al nombre, precio alineado a la derecha
+              (antes: etiqueta arriba, precio abajo a la derecha del todo,
+              menos legible en una fila angosta). */}
+          <div className="modal-seccion">
+            <div className="modal-seccion__titulo">Productos ({productos.length})</div>
+            {productos.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Sin productos registrados.</p>
+            ) : productos.map((x, i) => {
+              const nombre = x.nombre || (typeof x === 'string' ? x : 'Producto');
+              const cant = x.cantidad || 1;
+              const sub = x.precio ? x.precio * cant : null;
+              const adiciones = Array.isArray(x.adiciones) ? x.adiciones : [];
               return (
-                <div key={p.id} className={`pd-prod-card-v2${cant>0?' pd-prod-card-v2--sel':''}${activo?' pd-prod-card-v2--active':''}`} onClick={() => seleccionarProd(p)}>
-                  {cant > 0 && <div className="pd-prod-card-v2__badge">{cant}</div>}
-                  <div className="pd-prod-card-v2__body">
-                    <div className="pd-prod-card-v2__cat">{p.categoria}</div>
-                    <div className="pd-prod-card-v2__name">{p.nombre}</div>
-                    <div className="pd-prod-card-v2__price">{fmt(p.precio)}</div>
+                <div key={i} style={{ padding: '8px 10px', borderRadius: 8, background: i % 2 === 0 ? 'var(--bg-hover)' : 'transparent', marginBottom: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                      {nombre}
+                      {cant > 1 && <span style={{ background: 'var(--color-green)', color: '#fff', padding: '1px 6px', borderRadius: 4, fontSize: 10, marginLeft: 6, fontWeight: 700 }}>x{cant}</span>}
+                    </span>
+                    {sub != null && <span style={{ fontWeight: 700, color: 'var(--color-green)', whiteSpace: 'nowrap' }}>{fmt(sub)}</span>}
                   </div>
-                  <div className="pd-prod-card-v2__add-btn">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                  </div>
+                  {adiciones.map((a, j) => (
+                    <div key={j} style={{ fontSize: 12, color: 'var(--text-secondary)', paddingLeft: 12, marginTop: 3 }}>+ {a.nombre || a}</div>
+                  ))}
                 </div>
               );
             })}
           </div>
 
-          {prodSel && (
-            <div className="pd-add-panel">
-              <div className="pd-add-panel__head">
-                <div>
-                  <div className="pd-add-panel__prod-name">{prodSel.nombre}</div>
-                  <div className="pd-add-panel__prod-price">Precio base: {fmt(prodSel.precio)}</div>
-                </div>
-                <button className="pd-add-panel__close" onClick={() => { setProdSel(null); setAdicsSelec([]); setCantSel(1); }}>✕</button>
-              </div>
-              {adicsParaProd.length > 0 ? (
-                <div className="pd-add-panel__section">
-                  <div className="pd-add-panel__label">Adiciones disponibles</div>
-                  <div className="pd-add-chips">
-                    {adicsParaProd.map(a => {
-                      const sel = adicsSelec.find(x => x.id === a.id);
-                      return (
-                        <button key={a.id} onClick={() => toggleAdic(a)} className={`pd-add-chip${sel?' pd-add-chip--sel':''}`}>
-                          {a.nombre}<span className="pd-add-chip__price"> +{fmt(a.precio)}</span>
-                          {sel && <span className="pd-add-chip__check"> ✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : <p className="pd-add-panel__empty">No hay adiciones disponibles.</p>}
-              <div className="pd-add-panel__footer">
-                <div className="pd-add-panel__qty">
-                  <span className="pd-add-panel__label">Cantidad</span>
-                  <div style={{display:'flex',alignItems:'center',gap:6}}>
-                    <button className="pd-sel-qty-btn" onClick={() => setCantSel(c => Math.max(1,c-1))}>−</button>
-                    <span style={{fontWeight:700,minWidth:20,textAlign:'center',fontSize:14}}>{cantSel}</span>
-                    <button className="pd-sel-qty-btn" onClick={() => setCantSel(c => c+1)}>+</button>
-                  </div>
-                </div>
-                <div className="pd-add-panel__total">Total: <strong>{fmt((prodSel.precio + adicsSelec.reduce((s,a)=>s+a.precio,0))*cantSel)}</strong></div>
-                <div className="pd-add-panel__actions">
-                  <button className="btn-cancel" onClick={() => { setProdSel(null); setAdicsSelec([]); setCantSel(1); }}>Cancelar</button>
-                  <button className="btn-confirm-primary" onClick={confirmarAgregar}>Agregar al pedido</button>
-                </div>
-              </div>
+          {pedido.estado === 'pendiente_verificacion' && onCambiarEstado && puedeGestionar && (
+            <div style={{ background: 'rgba(173,20,87,0.1)', color: '#AD1457', padding: '8px 12px', borderRadius: 8, marginBottom: 10, fontSize: 12.5, fontWeight: 600 }}>
+              ⚠ Verifica el comprobante de pago para continuar. El pedido no puede pasar a "En preparación" hasta aprobarlo.
             </div>
           )}
-        </div>
-
-        {f.productos.length > 0 && (
-          <div className="pd-form-group">
-            <label>Seleccionados ({f.productos.length})</label>
-            <div style={{display:'flex',flexDirection:'column',gap:6}}>
-              {f.productos.map(p => (
-                <div key={p.id} className="pd-sel-item">
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:700,fontSize:13}}>{p.nombre}</div>
-                    {p.adiciones?.length > 0 && <div className="pd-sel-item__adics">+ {p.adiciones.map(a=>a.nombre).join(', ')}</div>}
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
-                    <div style={{display:'flex',alignItems:'center',gap:4}}>
-                      <button onClick={() => cambiarCant(p.id,-1)} className="pd-sel-qty-btn">−</button>
-                      <span style={{fontWeight:700,minWidth:18,textAlign:'center',fontSize:13}}>{p.cantidad}</span>
-                      <button onClick={() => cambiarCant(p.id,+1)} className="pd-sel-qty-btn">+</button>
-                    </div>
-                    <span style={{fontWeight:700,color:'#2E7D32',minWidth:64,textAlign:'right',fontSize:13}}>{fmt((p.precioTotal||p.precio)*p.cantidad)}</span>
-                    <button onClick={() => removeProd(p.id)} style={{background:'none',border:'none',color:'#E53935',cursor:'pointer',fontSize:18,lineHeight:1,padding:0}}>×</button>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="modal-pie">
+            {pedido.estado === 'pendiente_verificacion' && onCambiarEstado && puedeGestionar ? (
+              <>
+                {/* Mismo criterio que ModalDetallePedido: en el pie del modal
+                    van los botones de confirmación, no los de acción de tabla. */}
+                <button className="btn-confirm-danger" onClick={() => { onClose(); onRechazarPago ? onRechazarPago(pedido) : onCambiarEstado(pedido.id, 'cancelado'); }}>✕ Rechazar pago</button>
+                <button className="btn-confirm-primary" onClick={() => { onClose(); onAprobarPago ? onAprobarPago(pedido) : onCambiarEstado(pedido.id, 'en_proceso'); }}>✓ Aprobar pago</button>
+              </>
+            ) : (
+              <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+            )}
           </div>
-        )}
-
-        {f.productos.length > 0 && (
-          <div className="pd-resumen">
-            <span>{f.productos.length} producto{f.productos.length!==1?'s':''}</span>
-            <strong>Total: {fmt(total)}</strong>
-          </div>
-        )}
-
-        <div className="pd-modal-actions">
-          <button className="btn-cancel" onClick={onClose}>Cancelar</button>
-          <button className="btn-confirm-primary" onClick={crear}>{isEdit ? '💾 Guardar cambios' : 'Crear pedido'}</button>
         </div>
       </div>
     </div>
@@ -560,22 +306,6 @@ const [vista,         setVista]   = useState('activos');
   const [error, setError] = useState('');
   const showErr = msg => { setError(msg); setTimeout(() => setError(''), 5000); };
 
-  const guardar = async f => {
-    try {
-      if (f.id) {
-        await pedidosService.update(f.id, f);
-        await refresh();
-        setEditTarget(null); setPagina(1); showOk(`Pedido #${f.id} actualizado correctamente`);
-      } else {
-        await pedidosService.create(f);
-        await refresh();
-        setModal(false); setPagina(1); showOk('Pedido creado correctamente');
-      }
-    } catch (err) {
-      showErr(err.message || 'No se pudo guardar el pedido. Revisa tu conexión con la API.');
-    }
-  };
-
   // Devuelve true/false para que quien llame (aprobarPago, confirmarRechazo,
   // handleAnularPedido, ...) sepa si el cambio realmente ocurrió antes de
   // seguir con sus propias acciones "de éxito" (notificar al cliente,
@@ -617,11 +347,23 @@ const [vista,         setVista]   = useState('activos');
   // ── Aprobar / Rechazar pago (módulo "Pagos pendientes") ──────────────────
   // Además de cambiar el estado, se le avisa al cliente mediante el sistema
   // de notificaciones de la landing (localStorage, sin backend nuevo).
+  //
+  // Fix: antes esta función llamaba a cambiarEstado(pedido.id, 'en_proceso')
+  // directo, saltándose el paso obligatorio de aprobar el comprobante. El
+  // backend lo rechazaba con "...su comprobante todavía no fue aprobado.
+  // Aprobalo con PATCH /pedidos/:id/comprobante/aprobar antes de pasarlo a
+  // 'en_proceso'." y ese texto crudo se mostraba tal cual en el toast.
+  // Ahora llama al endpoint correcto (igual que ya hacía, sin este bug,
+  // PagosPendientesPanel.jsx): aprobar el comprobante SÍ mueve el pedido a
+  // 'en_proceso' del lado del backend, no hace falta el segundo paso.
   const aprobarPago = async (pedido) => {
-    // Si el backend rechazó el cambio, cambiarEstado ya mostró el error —
-    // no seguimos con la notificación al cliente ni el toast de éxito.
-    const ok = await cambiarEstado(pedido.id, 'en_proceso');
-    if (!ok) return;
+    try {
+      await pedidosService.aprobarComprobante(pedido.id);
+    } catch (err) {
+      showErr(mensajeErrorEstadoPedido(err, 'No se pudo aprobar el pago.'));
+      return false;
+    }
+    await refresh();
     notificacionesService.create({
       clienteId: pedido.cliente_id,
       pedidoId: pedido.id,
@@ -669,7 +411,10 @@ const [vista,         setVista]   = useState('activos');
   const pedidosLocal = localSel === 'todos' ? pedidos : pedidos.filter(p => p.sede === localSel);
   // "En Stop" se eliminó del todo: ya no existe una vista intermedia
   // reversible aparte de Anular — un pedido anulado queda anulado.
-  const activos = pedidosLocal.filter(p => p.estado !== 'anulado');
+  // Un pedido con devolución aprobada (parcial o total) ya no es un pedido
+  // "activo" — deja de listarse acá (con badge "Devuelto" o sin él): a
+  // partir de ahora solo se consulta desde el módulo de Devoluciones.
+  const activos = pedidosLocal.filter(p => p.estado !== 'anulado' && estadoDevolucionDe(p) === 'ninguna');
 const pagosPendientes = pedidosLocal.filter(p => p.estado === 'pendiente_verificacion');
 const base = activos;
 
@@ -712,7 +457,11 @@ const filtrados = lq
         {modal      && <ModalNuevoPedidoAdmin
           onClose={() => setModal(false)} showToast={showOk}
           onCreated={() => { setModal(false); setPagina(1); refresh(); showOk('Pedido creado correctamente'); }} />}
-        {editTarget && <ModalPedido pedido={editTarget} onClose={() => setEditTarget(null)} onSave={guardar} />}
+        {/* Punto 3 — "Editar pedido" reutiliza el mismo modal/formulario que
+            "Nuevo pedido" (ver el comentario largo en ModalNuevoPedidoAdmin),
+            en vez del `ModalPedido` que existía aparte. */}
+        {editTarget && <ModalNuevoPedidoAdmin pedidoEditar={editTarget} onClose={() => setEditTarget(null)} showToast={showOk}
+          onCreated={() => { setEditTarget(null); setPagina(1); refresh(); }} />}
         {detalle && <ModalDetalle onClose={() => setDetalle(null)} pedido={detalle} onCambiarEstado={cambiarEstado} onAprobarPago={aprobarPago} onRechazarPago={abrirRechazo} />}
         {rechazoTarget && (
           <div className="modal-overlay" onClick={() => setRechazoTarget(null)}>
@@ -900,11 +649,17 @@ const filtrados = lq
                         <td className="td-nombre">{p.cliente || p.mesa || '—'}</td>
                         <td>
                           <span className={`badge-cat ${p.tipo==='domicilio'?'pd-badge-domi':'pd-badge-local'}`}>
-                            {p.tipo==='domicilio'?'🛵 Domicilio':'🏠 Local'}
+                            {p.tipo==='domicilio'?'Domicilio':'Local'}
                           </span>
                         </td>
-                        <td>{p.sede ? <span className="badge-cat" style={{background:'rgba(25,118,210,0.12)',color:'#1976D2'}}>{p.sede}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                        <td>{p.barista ? <span className="pd-pill-barista">{p.barista}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                        <td>{p.sede ? <span className="badge-cat" style={{background:'rgba(25,118,210,0.12)',color:'#1976D2'}}>{p.sede.replace(/^local\s+/i, '')}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
+                        {/* Punto 2 — prioriza atendidoPorNombre (viene de un
+                            JOIN real con `usuarios` vía atendido_por, ver
+                            PEDIDO_SELECT en el backend) sobre `barista`
+                            (texto libre, sin vínculo a ninguna cuenta) —
+                            pedidos viejos o de un cajero autoatendiéndose
+                            siguen mostrando algo gracias al respaldo. */}
+                        <td>{(p.atendidoPorNombre || p.barista) ? <span className="pd-pill-barista">{p.atendidoPorNombre || p.barista}</span> : <span style={{color:'var(--text-muted)'}}>—</span>}</td>
                         <td style={{fontSize:12,color:'var(--text-secondary)',maxWidth:180}}>
                           {vis}
                           <button className="btn-ver-mas" onClick={() => setDetalle(p)} style={{marginLeft:4}}>
@@ -914,15 +669,21 @@ const filtrados = lq
                         <td style={{fontWeight:700,color:'#2E7D32',fontSize:13}}>{fmt(p.total)}</td>
                         <td style={{fontSize:12,color:'var(--text-muted)'}}>{hora}</td>
                         <td>
+                          <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-start'}}>
                           {!hasPermiso('pedidos', 'gestionar') ? (
                             <span className="pd-badge" style={{background:cfg.bg,color:cfg.color}}>{cfg.label}</span>
                           ) : p.estado==='anulado' ? (
                             <span className="pd-badge" style={{background:cfg.bg,color:cfg.color}}>{cfg.label}</span>
-                          ) : (p.estado==='listo'||p.estado==='entregado'||p.estado==='en_camino') ? (
-                            <select className="pd-estado-select" value={p.estado} style={{background:cfg.bg,color:cfg.color,borderColor:cfg.color+'55'}} onChange={e => cambiarEstado(p.id, e.target.value)}>
-                              <option value="listo">{ESTADO_CONFIG.listo?.label||'Listo'}</option>
-                              {p.tipo==='domicilio' && <option value="en_camino">{ESTADO_CONFIG.en_camino?.label||'En camino'}</option>}
-                              <option value="entregado">{ESTADO_CONFIG.entregado?.label||'Entregado'}</option>
+                          ) : p.estado==='entregado' ? (
+                            // Terminal: sin transiciones (el backend rechaza cualquier cambio).
+                            <span className="pd-badge" style={{background:cfg.bg,color:cfg.color}}>{cfg.label}</span>
+                          ) : (p.estado==='listo'||p.estado==='en_camino') ? (
+                            // C1/C3 — 'listo' es un valor legado que el backend ya
+                            // no acepta: la única transición real desde "En camino /
+                            // Listo para recoger" es "Entregado".
+                            <select className="pd-estado-select" value={'en_camino'} style={{background:cfg.bg,color:cfg.color,borderColor:cfg.color+'55'}} onChange={e => cambiarEstado(p.id, e.target.value)}>
+                              <option value="en_camino">{configEstadoPedido('en_camino', p.tipo).label}</option>
+                              <option value="entregado">{ESTADO_CONFIG.entregado.label}</option>
                             </select>
                           ) : p.estado==='pendiente_verificacion' ? (
                             // 2 — mientras no se apruebe el comprobante, la
@@ -944,9 +705,10 @@ const filtrados = lq
                                   pedido solo debe pasar por el botón
                                   dedicado (con motivo), no como una
                                   transición más de este selector genérico. */}
-                              {Object.entries(ESTADO_CONFIG).filter(([k]) => k!=='entregado'&&k!=='pendiente_verificacion'&&k!=='anulado').map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+                              {Object.keys(ESTADO_CONFIG).filter(k => k!=='entregado'&&k!=='pendiente_verificacion'&&k!=='anulado').map(k => <option key={k} value={k}>{configEstadoPedido(k, p.tipo).label}</option>)}
                             </select>
                           )}
+                          </div>
                         </td>
                         <td>
                           <div className="actions-group">
@@ -957,7 +719,15 @@ const filtrados = lq
                                 </button>
                               </Tooltip>
                             )}
-                            {p.estado!=='entregado'&&p.estado!=='cancelado' && hasPermiso('pedidos', 'gestionar') && (
+                            {/* Punto 3 — "Editar pedido" (agregar/quitar
+                                productos) solo tiene sentido MIENTRAS el
+                                pedido no ha llegado a "Listo para recoger":
+                                una vez ahí ya se dio por terminado, cambiar
+                                el carrito no cambiaría nada real. Antes el
+                                botón se ocultaba solo en 'entregado'/
+                                'cancelado' — seguía apareciendo también en
+                                'en_camino' ("Listo para recoger"). */}
+                            {puedeEditarProductosPedido(p.estado) && hasPermiso('pedidos', 'gestionar') && (
                               <Tooltip label="Editar pedido">
                                 <button className="btn-editar" onClick={() => setEditTarget(p)}>
                                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

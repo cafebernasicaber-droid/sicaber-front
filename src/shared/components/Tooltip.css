@@ -1,8 +1,11 @@
-/* ── Tooltip moderno para botones de solo ícono ─────────────────────────
+/* ── Tooltip moderno para botones de solo ícono y avisos de estado ───────
    Usado por Tooltip.jsx en todos los módulos con botones de acción
-   (Ver/Editar/Anular/etc.). No ocupa espacio cuando está oculto (position:
-   absolute + opacity/visibility), y aparece con una transición corta al
-   pasar el cursor o al enfocar con teclado. */
+   (Ver/Editar/Anular/etc.) y con los avisos de stock bajo/agotado. No ocupa
+   espacio cuando está oculto (position: absolute + opacity/visibility), y
+   aparece con una transición corta al pasar el cursor o al enfocar con
+   teclado. `tone` (--warning/--danger) le da al acento izquierdo y a la
+   flechita el mismo color que la severidad del aviso, para reconocerla sin
+   tener que leer el texto. */
 .sicaber-tip-wrap {
   position: relative;
   display: inline-flex;
@@ -10,29 +13,58 @@
 .sicaber-tip {
   position: absolute;
   left: 50%;
-  transform: translateX(-50%) translateY(2px);
+  transform: translateX(-50%) translateY(2px) scale(.97);
+  transform-origin: center bottom;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   background: #1c2a1e;
   color: #f0ece4;
   border: 1px solid rgba(93, 187, 99, .35);
-  padding: 5px 10px;
-  border-radius: 7px;
+  border-left: 3px solid rgba(93, 187, 99, .7);
+  padding: 6px 12px;
+  border-radius: 8px;
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: 600;
   font-family: 'Open Sans', sans-serif;
+  letter-spacing: .1px;
   white-space: nowrap;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .4);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: opacity .14s ease, transform .14s ease;
   z-index: 60;
 }
-.sicaber-tip--top { bottom: calc(100% + 7px); }
-.sicaber-tip--bottom { top: calc(100% + 7px); }
+/* Flechita apuntando al elemento que disparó el tooltip, para que quede
+   claro a qué ícono/badge pertenece en vez de flotar suelto. */
+.sicaber-tip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: #1c2a1e;
+  border-right: 1px solid rgba(93, 187, 99, .35);
+  border-bottom: 1px solid rgba(93, 187, 99, .35);
+}
+.sicaber-tip--top { bottom: calc(100% + 9px); }
+.sicaber-tip--top::after { top: 100%; margin-top: -5px; }
+.sicaber-tip--bottom { top: calc(100% + 9px); }
+.sicaber-tip--bottom::after { bottom: 100%; margin-bottom: -5px; border-right: none; border-bottom: none; border-left: 1px solid rgba(93, 187, 99, .35); border-top: 1px solid rgba(93, 187, 99, .35); }
+
+/* Aviso temprano (stock agóndose / por debajo del mínimo, sin llegar a 0):
+   ámbar, menos alarmante. */
+.sicaber-tip--warning { border-color: rgba(255, 179, 0, .45); border-left-color: #FFB300; }
+.sicaber-tip--warning::after { border-color: rgba(255, 179, 0, .45); }
+/* Crítico (en cero / muy por debajo del mínimo): rojo. */
+.sicaber-tip--danger { border-color: rgba(239, 83, 80, .5); border-left-color: #EF5350; }
+.sicaber-tip--danger::after { border-color: rgba(239, 83, 80, .5); }
 
 .sicaber-tip-wrap:hover .sicaber-tip,
 .sicaber-tip-wrap:focus-within .sicaber-tip {
   opacity: 1;
   visibility: visible;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(-50%) translateY(0) scale(1);
 }

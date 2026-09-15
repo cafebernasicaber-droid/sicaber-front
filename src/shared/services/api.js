@@ -140,6 +140,12 @@ export const rolesApi = {
   create:   (data)   => post('/roles', data),
   update:   (id, d)  => put (`/roles/${id}`, d),
   remove:   (id)     => del (`/roles/${id}`),
+  // Activa/desactiva el rol (el backend decide el estado nuevo — invierte
+  // el actual). Desactivar desactiva EN CASCADA a los usuarios con ese rol;
+  // la respuesta trae `usuariosDesactivados` con el conteo real. Desactivar
+  // "Administrador" siempre responde 409 (mensaje ya viene armado del
+  // backend, se propaga tal cual vía el throw de request()).
+  toggleEstado: (id) => patch(`/roles/${id}/estado`),
 };
 
 // ── USUARIOS ─────────────────────────────────────────────────
@@ -165,7 +171,10 @@ export const clientesApi = {
 
 // ── EMPLEADOS ────────────────────────────────────────────────
 export const empleadosApi = {
-  getAll:  ()       => get ('/empleados'),
+  // localId opcional — el backend ya soporta filtrar por local (?local_id=)
+  // para listar "los empleados de este local" sin traer todos y filtrar acá
+  // (punto 2: selector de cajeros por local en Nuevo Pedido).
+  getAll:  (localId)  => get (localId ? `/empleados?local_id=${localId}` : '/empleados'),
   getById: (id)     => get (`/empleados/${id}`),
   create:  (data)   => post('/empleados', data),
   update:  (id, d)  => put (`/empleados/${id}`, d),
@@ -193,6 +202,25 @@ export const localesApi = {
   update:       (id, d)  => put (`/locales/${id}`, d),
   remove:       (id)     => del (`/locales/${id}`),
   toggleEstado: (id)     => patch(`/locales/${id}/estado`),
+};
+
+// ── MÉTODOS DE PAGO ────────────────────────────────────────────
+// El QR se sube directo a Cloudinary desde el frontend (cloudinaryService.js,
+// mismo patrón que el comprobante de una compra) — acá solo se manda/lee la
+// URL resultante como texto (`url_qr`). Esta tabla es solo lo que se
+// MUESTRA en el checkout de la Landing; no reemplaza el enum real de
+// pedidos.pago ('efectivo'/'nequi'/'transferencia').
+export const metodosPagoApi = {
+  // Solo activos, público — el checkout de la Landing los lista sin sesión.
+  getActivos:   ()        => get ('/metodos-pago', true),
+  // Todos (activos e inactivos), protegido — para la pantalla de gestión.
+  getAll:       ()        => get ('/metodos-pago/todos'),
+  getById:      (id)      => get (`/metodos-pago/${id}`),
+  create:       (data)    => post('/metodos-pago', data),
+  update:       (id, d)   => put (`/metodos-pago/${id}`, d),
+  // Cambiar (o quitar, mandando null) solo el QR sin reenviar todo el form.
+  updateQr:     (id, url) => patch(`/metodos-pago/${id}/qr`, { url_qr: url }),
+  toggleEstado: (id)      => patch(`/metodos-pago/${id}/estado`),
 };
 
 // ── CATEGORÍAS ───────────────────────────────────────────────
@@ -248,7 +276,14 @@ export const combosApi = {
 // `remove` a propósito: una ciudad nunca se elimina, solo se desactiva
 // (los proveedores que ya la tenían la siguen mostrando).
 export const ciudadesApi = {
-  getAll:       ()       => get   ('/ciudades', true),
+  // Nota: GET /ciudades SÍ exige token en el backend (auth en las 4 rutas
+  // de ciudadesRouter) — el `true` que había acá lo marcaba como ruta
+  // pública, así que request() nunca mandaba el Authorization header y la
+  // llamada moría con 401 "Token requerido" para cualquier usuario
+  // logueado. Encontrado al verificar el buscador de "Gestionar
+  // ciudades" (Ronda 23 item 4): la lista aparecía vacía porque el
+  // fetch fallaba en silencio (el catch de useCiudades la deja en []).
+  getAll:       ()       => get   ('/ciudades'),
   create:       (data)   => post  ('/ciudades', data),
   update:       (id, d)  => put   (`/ciudades/${id}`, d),
   toggleEstado: (id)     => patch (`/ciudades/${id}/estado`),
@@ -265,24 +300,32 @@ export const proveedoresApi = {
 };
 
 // ── INSUMOS ──────────────────────────────────────────────────
+// ── INSUMOS ──────────────────────────────────────────────────
 export const insumosApi = {
-  // `opts.local` → GET /insumos?local=<id>: la API devuelve stockActual/
-  // stockMinimo/estadoStock referidos a ese local (cambio 2). Sin él, valores
-  // consolidados. `opts.tipo` → GET /insumos?tipo=topping|adicion_sin_costo
-  // para los selectores filtrados de Ficha Técnica/Toppings/Adiciones (cambio 5).
   getAll:  (opts = {})  => {
     const qs = new URLSearchParams();
-    if (opts.local != null && opts.local !== '' && opts.local !== 'todos') qs.set('local', opts.local);
-    if (opts.tipo) qs.set('tipo', opts.tipo);
+    if (opts.local != null && opts.local !== '' && opts.local !== 'todos') qs.set('local_id', opts.local);
     const q = qs.toString();
     return get(`/insumos${q ? `?${q}` : ''}`);
   },
-  getByTipo: (tipo)     => get (`/insumos?tipo=${encodeURIComponent(tipo)}`),
   getById: (id)     => get (`/insumos/${id}`),
   create:  (data)   => post('/insumos', data),
   update:  (id, d)  => put (`/insumos/${id}`, d),
   remove:  (id)     => del (`/insumos/${id}`),
   toggleEstado: (id)   => patch(`/insumos/${id}/estado`),
+  // Edición de insumos POR LOCAL — endpoint ya existente en el backend, sin
+  // usar desde el frontend hasta ahora. A diferencia de `update` (arriba),
+  // que solo toca las columnas GLOBALES del insumo (nombre/categoría/
+  // unidad/estado/descripción — PUT /insumos/:id nunca leyó nada de
+  // locales), este PATCH por local no puede afectar a ningún otro local:
+  // el id del local va en la URL, y el backend hace UPDATE ... WHERE
+  // insumo_id=$1 AND local_id=$2 con COALESCE por campo (si no se manda
+  // stockActual, por ejemplo, esa columna ni se toca).
+  updateLocal: (id, localId, d) => put(`/insumos/${id}/locales/${localId}`, d),
+  // GET /insumos/contadores?local_id= → { todos, activos, inactivos, stockBajo }
+  // para ESE local (nunca global — el backend lo exige así). Se usa en la
+  // tarjeta de "Locales" para mostrar cuántos insumos tiene cada uno.
+  getContadores: (localId) => get(`/insumos/contadores?local_id=${localId}`),
 };
 
 // ── CATEGORÍAS DE INSUMOS ───────────────────────────────────────
@@ -319,7 +362,11 @@ export const comprasApi = {
   getHistorial:()         => get ('/compras/historial'),
   getById:     (id)       => get (`/compras/${id}`),
   create:      (data)     => post('/compras', data),
-  anular:      (id, mot)  => patch(`/compras/${id}/anular`, { motivo: mot }),
+  // `items` opcional: [{insumo_id, cantidad}, ...] — anula solo esos
+  // insumos/cantidades (ver comentario del backend en PATCH
+  // /compras/:id/anular). Sin `items`, anula todo lo pendiente de la
+  // compra, igual que siempre.
+  anular:      (id, mot, items) => patch(`/compras/${id}/anular`, items ? { motivo: mot, items } : { motivo: mot }),
 };
 
 // ── PEDIDOS ──────────────────────────────────────────────────
@@ -359,6 +406,9 @@ export const pedidosApi = {
   // entrega puntual".
   aceptarDomicilio:  (id) => patch(`/pedidos/${id}/aceptar-domicilio`, {}),
   rechazarDomicilio: (id) => patch(`/pedidos/${id}/rechazar-domicilio`, {}),
+  // Verificación de cobertura de domicilios EN VIVO (paso 2 del checkout de
+  // la Landing), sin crear el pedido — público, igual que create.
+  verificarCobertura: (direccion) => post('/pedidos/verificar-cobertura', { direccion }, true),
 };
 
 // ── VENTAS ───────────────────────────────────────────────────

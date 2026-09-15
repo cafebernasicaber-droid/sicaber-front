@@ -9,7 +9,6 @@ import { useAuth } from '../../../shared/contexts/AuthContext';
 import Layout from '../../../shared/components/Layout';
 import Tooltip from '../../../shared/components/Tooltip';
 import AnularButton from '../../../shared/components/AnularButton';
-import DateRangeFilter from '../../../shared/components/DateRangeFilter';
 import combosService from '../services/combosService';
 import productosService from '../../productos/services/productosService';
 import adicionesService from '../../adiciones/services/adicionesService';
@@ -438,14 +437,11 @@ export default function CombosPage() {
   const [delCombo,   setDelCombo]   = useState(null);
   const [page,       setPage]       = useState(1);
   const [success,    setSuccess]    = useState('');
-  // Filtros que faltaban por completo en este módulo: estado, rango de
-  // precio y rango de fechas de vigencia. Antes solo se podía buscar por
-  // nombre.
+  // Filtros que faltaban por completo en este módulo: estado y rango de
+  // precio. Antes solo se podía buscar por nombre.
   const [estadoFiltro, setEstadoFiltro] = useState('Todos');
   const [precioMin,    setPrecioMin]    = useState('');
   const [precioMax,    setPrecioMax]    = useState('');
-  const [fechaDesde,   setFechaDesde]   = useState('');
-  const [fechaHasta,   setFechaHasta]   = useState('');
 
   const showOk = msg => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000); };
   const refresh = () => { combosService.getAll().then(d => setCombos(Array.isArray(d) ? d : [])).catch(()=>{}); };
@@ -466,13 +462,8 @@ export default function CombosPage() {
   if (estadoFiltro !== 'Todos') shown = shown.filter(c => (c.estado || 'Activo') === estadoFiltro);
   if (precioMin !== '') shown = shown.filter(c => (Number(c.precio) || 0) >= Number(precioMin));
   if (precioMax !== '') shown = shown.filter(c => (Number(c.precio) || 0) <= Number(precioMax));
-  // Rango de vigencia: se compara contra fecha_inicio/fecha_fin (soloFecha
-  // ya recorta el timestamp que devuelve Postgres a YYYY-MM-DD, el mismo
-  // formato del <input type="date">).
-  if (fechaDesde) shown = shown.filter(c => { const d = soloFecha(c.fechaInicio || c.fecha_inicio); return d && d >= fechaDesde; });
-  if (fechaHasta) shown = shown.filter(c => { const d = soloFecha(c.fechaFin    || c.fecha_fin);    return d && d <= fechaHasta; });
 
-  const hayFiltros = !!(q || estadoFiltro !== 'Todos' || precioMin !== '' || precioMax !== '' || fechaDesde || fechaHasta);
+  const hayFiltros = !!(q || estadoFiltro !== 'Todos' || precioMin !== '' || precioMax !== '');
   const paginated = shown.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   return (
@@ -537,14 +528,9 @@ export default function CombosPage() {
               onChange={e => { setPrecioMax(e.target.value); setPage(1); }}
               style={{ width: 105, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 12.5, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
           </div>
-          <DateRangeFilter
-            desde={fechaDesde} hasta={fechaHasta} size="sm"
-            title="Filtrar combos por vigencia"
-            onChange={({ desde, hasta }) => { setFechaDesde(desde); setFechaHasta(hasta); setPage(1); }}
-          />
           {hayFiltros && (
             <button className="btn-limpiar-filtros" title="Limpiar filtros"
-              onClick={() => { setQuery(''); setEstadoFiltro('Todos'); setPrecioMin(''); setPrecioMax(''); setFechaDesde(''); setFechaHasta(''); setPage(1); }}>
+              onClick={() => { setQuery(''); setEstadoFiltro('Todos'); setPrecioMin(''); setPrecioMax(''); setPage(1); }}>
               ✕ Limpiar filtros
             </button>
           )}

@@ -206,6 +206,89 @@ function ModalRegistrar({ ventaPrefill, onClose, onSave }) {
 // recibía como prop (solo llegaban `dev` y `accion`). Al abrir el modal de
 // aprobar/rechazar, React tronaba con "venta is not defined" y el modal no
 // se podía usar. Ahora recibe `venta` como prop, resuelta por el padre.
+// Ítem 7 — "Ver detalle": producto(s) devuelto(s), motivo, fecha, estado y
+// el pedido/venta de origen, todo en un solo modal de solo lectura.
+function ModalVerDevolucion({ dev, venta, onClose }) {
+  const eCfg = EST_CFG[dev.estado] || {};
+  const vCfg = venta ? (venta.estado === 'vendido'
+    ? { bg:'#E8F5E9', color:'#2E7D32', label:'Vendida' }
+    : { bg:'#FFEBEE', color:'#C62828', label:'Devuelta' }) : null;
+  const productos = Array.isArray(dev.productos_devueltos) ? dev.productos_devueltos : [];
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{maxWidth:520,textAlign:'left'}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{marginBottom:4}}>Devolución #{getDevId(dev)}</h3>
+        <p style={{fontSize:13,color:'var(--text-muted)',marginBottom:16}}>
+          Venta #{venta?.id_venta ?? dev.pedido_id} · {venta?.cliente || 'Cliente no disponible'}
+        </p>
+
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
+          <span style={{background:eCfg.bg,color:eCfg.color,padding:'4px 10px',borderRadius:100,fontSize:12,fontWeight:700}}>
+            {eCfg.ico} Devolución {eCfg.label}
+          </span>
+          {vCfg && (
+            <span style={{background:vCfg.bg,color:vCfg.color,padding:'4px 10px',borderRadius:100,fontSize:12,fontWeight:700}}>
+              Venta {vCfg.label}
+            </span>
+          )}
+          <span className="badge-cat">{dev.tipo === 'total' ? 'Devolución total' : 'Devolución parcial'}</span>
+        </div>
+
+        <div style={{background:'var(--bg-surface-2)',borderRadius:10,padding:'12px 16px',border:'1px solid var(--border)',marginBottom:14}}>
+          {[
+            ['Fecha',   `${fmtFecha(dev.fecha)} · ${fmtHora(dev.fecha)}`],
+            ['Pedido de origen', `#${dev.pedido_id}`],
+            ['Monto devuelto', fmt(dev.monto)],
+          ].map(([label, val]) => (
+            <div key={label} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13}}>
+              <span style={{color:'var(--text-secondary)',fontWeight:600}}>{label}</span>
+              <span style={{color:'var(--text-primary)',fontWeight:600}}>{val}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8}}>
+            Producto{productos.length !== 1 ? 's' : ''} devuelto{productos.length !== 1 ? 's' : ''}
+          </div>
+          {productos.length === 0 ? (
+            <p style={{fontSize:13,color:'var(--text-muted)',margin:0}}>Sin detalle de productos para esta devolución.</p>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {productos.map((p, i) => (
+                <div key={p.id || i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--bg-surface-2)',borderRadius:8,border:'1px solid var(--border)',fontSize:13}}>
+                  <span style={{fontWeight:600,color:'var(--text-primary)'}}>
+                    {p.nombre || p}
+                    {p.cantidad > 1 && (
+                      <span style={{marginLeft:6,background:'#2E7D32',color:'white',padding:'1px 5px',borderRadius:4,fontSize:10,fontWeight:700}}>x{p.cantidad}</span>
+                    )}
+                  </span>
+                  {p.precio != null && <span style={{fontWeight:700,color:'var(--text-secondary)'}}>{fmt((p.precio||0) * (p.cantidad||1))}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{marginBottom: dev.estado === 'rechazada' ? 10 : 0}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Motivo</div>
+          <p style={{fontSize:13,color:'var(--text-primary)',margin:0,whiteSpace:'pre-wrap'}}>{dev.motivo || '—'}</p>
+        </div>
+        {dev.estado === 'rechazada' && (
+          <div>
+            <div style={{fontSize:11,fontWeight:700,color:'#C62828',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Motivo del rechazo</div>
+            <p style={{fontSize:13,color:'var(--text-primary)',margin:0,whiteSpace:'pre-wrap'}}>{dev.motivo_rechazo || '—'}</p>
+          </div>
+        )}
+
+        <div className="modal-actions" style={{justifyContent:'flex-end',marginTop:20}}>
+          <button className="btn-cancel" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalConfirm({ dev, venta, accion, onClose, onConfirm }) {
   const esAprobar = accion === 'aprobar';
   // El backend exige un motivo de al menos 10 caracteres para rechazar
@@ -266,21 +349,12 @@ export default function DevolucionesPage() {
   const [localSel, setLocalSel] = useState(user?.sede && user.sede !== 'Ambos' ? user.sede : 'todos');
   const [devs, setDevs] = useState([]);
   const [ventas, setVentas] = useState([]);
-  useEffect(() => {
-    devolucionesService.getAll()
-      .then(d => setDevs(Array.isArray(d) ? d : []))
-      .catch(() => setDevs([]));
-  }, []);
-  useEffect(() => {
-    ventasService.getAll()
-      .then(d => setVentas(Array.isArray(d) ? d : []))
-      .catch(() => setVentas([]));
-  }, []);
 
   const [query, setQuery]       = useState('');
   const [filtro, setFiltro]     = useState('todos');
   const [modal, setModal]       = useState(null); // null | 'new'
   const [confirm, setConfirm]   = useState(null); // { dev, accion }
+  const [verDetalle, setVerDetalle] = useState(null); // dev seleccionada para "Ver detalle"
   const [prefill, setPrefill]   = useState(null);
   const [success, setSuccess]   = useState('');
   // Los errores tenían que mostrarse con showOk (toast verde de éxito) porque
@@ -298,11 +372,21 @@ export default function DevolucionesPage() {
     }
   }, []);
 
+  // Antes esto solo refrescaba `devs` — al aprobar/rechazar una devolución
+  // el backend SÍ actualiza ventas.estado (ver PATCH /devoluciones/:id/estado
+  // en el backend), pero la columna "Estado venta" de esta tabla leía el
+  // `ventas` que se cargó UNA sola vez al montar la página, así que seguía
+  // mostrando "Vendida" hasta recargar (F5) aunque el backend ya hubiera
+  // marcado la venta como "devuelto". Ahora `refresh()` trae los dos.
   const refresh = () => {
     devolucionesService.getAll()
       .then(d => setDevs(Array.isArray(d) ? d : []))
       .catch(() => setDevs([]));
+    ventasService.getAll()
+      .then(d => setVentas(Array.isArray(d) ? d : []))
+      .catch(() => setVentas([]));
   };
+  useEffect(() => { refresh(); }, []);
   const showOk  = msg => { setSuccess(msg); setErrorMsg(''); setTimeout(() => setSuccess(''), 3000); };
   const showErr = msg => { setErrorMsg(msg); setSuccess(''); setTimeout(() => setErrorMsg(''), 4500); };
   const stats = {
@@ -364,6 +448,12 @@ export default function DevolucionesPage() {
       <div className="insumos-root">
         {success && <div className="toast toast-success">✓ {success}</div>}
         {errorMsg && <div className="toast toast-error">⚠ {errorMsg}</div>}
+        {verDetalle && (
+          <ModalVerDevolucion
+            dev={verDetalle}
+            venta={ventas.find(v => v.id_pedido === verDetalle.pedido_id)}
+            onClose={() => setVerDetalle(null)}/>
+        )}
         {confirm && (
           <ModalConfirm
             dev={confirm.dev}
@@ -454,6 +544,13 @@ export default function DevolucionesPage() {
                         <td>{vCfg ? <span style={{background:vCfg.bg,color:vCfg.color,padding:'4px 10px',borderRadius:100,fontSize:12,fontWeight:700}}>{vCfg.label}</span> : '—'}</td>
                         <td>
                           <div className="actions-group">
+                            {hasPermiso('devoluciones', 'ver') && (
+                              <Tooltip label="Ver detalle">
+                                <button onClick={() => setVerDetalle(d)} className="btn-ver">
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                              </Tooltip>
+                            )}
                             {canAprobar && hasPermiso('devoluciones', 'gestionar') && (
                               <Tooltip label="Aprobar">
                                 <button onClick={() => setConfirm({dev:d, accion:'aprobar'})}

@@ -30,19 +30,26 @@ import './PedidoBuilder.css';
 const fmt = n =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n || 0);
 
-const METODOS_PAGO = [
-  { id: 'efectivo', label: 'Efectivo' },
+// Ronda 23 item 2 — "Efectivo" solo aplica a domicilio (el backend
+// rechaza con 400 la combinación tipo='local' + pago='efectivo'); acá se
+// arma la lista según el tipo de entrega elegido, igual que en Landing.
+const metodosPagoPara = (tipoEntrega) => [
+  ...(tipoEntrega === 'domicilio' ? [{ id: 'efectivo', label: 'Efectivo' }] : []),
   { id: 'nequi', label: 'Nequi' },
   { id: 'transferencia', label: 'Llave Bancolombia' },
 ];
 
 // ── Selector de cliente (escribir / buscar registrado / mesa) ──
-function ClienteSelector({ value, onChange }) {
+function ClienteSelector({ value, onChange, onModoChange, onSeleccionado }) {
   const [todosClientes, setTodosClientes] = useState([]);
   useEffect(() => {
     clientesService.getAll().then(d => setTodosClientes(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
   const [modo, setModo]         = useState('libre');
+  // El padre necesita saber en qué pestaña está el cajero para dar un
+  // mensaje de error específico ("Escribe el nombre" vs "Elige una mesa")
+  // en vez de un genérico que no dice qué hacer.
+  const cambiarModo = m => { setModo(m); onChange(''); setQuery(''); onModoChange?.(m); onSeleccionado?.(false); };
   const [query, setQuery]       = useState('');
   const [showDrop, setShowDrop] = useState(false);
   const MESAS = ['Mesa 1','Mesa 2','Mesa 3','Mesa 4','Mesa 5','Mesa 6','Mesa 7','Mesa 8','Mesa 9','Mesa 10'];
@@ -52,20 +59,20 @@ function ClienteSelector({ value, onChange }) {
     const q = query.toLowerCase();
     return lista.filter(c => (c.nombre||'').toLowerCase().includes(q)||(c.telefono||'').includes(q)||(c.correo||'').toLowerCase().includes(q)).slice(0, 8);
   }, [todosClientes, query]);
-  const seleccionarCliente = c => { onChange(c.nombre); setQuery(c.nombre); setShowDrop(false); };
+  const seleccionarCliente = c => { onChange(c.nombre); setQuery(c.nombre); setShowDrop(false); onSeleccionado?.(true); };
   const copiar = async t => { try { await navigator.clipboard.writeText(t); } catch {} };
   return (
     <div className="cj-cliente-selector">
       <div className="cj-cliente-tabs">
-        <button className={`cj-cliente-tab ${modo==='libre'?'active':''}`} onClick={() => { setModo('libre'); onChange(''); setQuery(''); }} type="button">
+        <button className={`cj-cliente-tab ${modo==='libre'?'active':''}`} onClick={() => cambiarModo('libre')} type="button">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           Escribir
         </button>
-        <button className={`cj-cliente-tab ${modo==='buscar'?'active':''}`} onClick={() => { setModo('buscar'); onChange(''); setQuery(''); }} type="button">
+        <button className={`cj-cliente-tab ${modo==='buscar'?'active':''}`} onClick={() => cambiarModo('buscar')} type="button">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
           Cliente registrado
         </button>
-        <button className={`cj-cliente-tab ${modo==='mesa'?'active':''}`} onClick={() => { setModo('mesa'); onChange(''); setQuery(''); }} type="button">
+        <button className={`cj-cliente-tab ${modo==='mesa'?'active':''}`} onClick={() => cambiarModo('mesa')} type="button">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
           Mesa
         </button>
@@ -79,8 +86,8 @@ function ClienteSelector({ value, onChange }) {
       {modo === 'buscar' && (
         <div className="cj-cliente-search-wrap">
           <div className="cj-cliente-input-wrap">
-            <input value={query} onChange={e => { setQuery(e.target.value); onChange(e.target.value); setShowDrop(true); }} onFocus={() => setShowDrop(true)} placeholder="Buscar por nombre, teléfono o correo..." className="cj-cliente-input cj-cliente-input--search"/>
-            {query && <button className="cj-cliente-copy" type="button" onClick={() => { setQuery(''); onChange(''); }}>✕</button>}
+            <input value={query} onChange={e => { setQuery(e.target.value); onChange(''); onSeleccionado?.(false); setShowDrop(true); }} onFocus={() => setShowDrop(true)} placeholder="Buscar por nombre, teléfono o correo..." className="cj-cliente-input cj-cliente-input--search"/>
+            {query && <button className="cj-cliente-copy" type="button" onClick={() => { setQuery(''); onChange(''); onSeleccionado?.(false); }}>✕</button>}
           </div>
           {showDrop && (
             <div className="cj-cliente-drop">
@@ -108,7 +115,7 @@ function ClienteSelector({ value, onChange }) {
         <div className="cj-mesa-wrap">
           <div className="cj-mesa-chips">
             {MESAS.map(m => (
-              <button key={m} type="button" className={`cj-mesa-chip ${value===m?'active':''}`} onClick={() => onChange(value===m?'':m)}>
+              <button key={m} type="button" className={`cj-mesa-chip ${value===m?'active':''}`} onClick={() => { const nuevo = value===m?'':m; onChange(nuevo); onSeleccionado?.(!!nuevo); }}>
                 {m}{value===m&&' ✓'}
               </button>
             ))}
@@ -153,7 +160,17 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
 
   // ── Campos extra del modo admin ──
   const [tipoEntrega, setTipoEntrega] = useState('local');
-  const [metodoPago, setMetodoPago]   = useState('efectivo');
+  // Por defecto 'nequi': con tipoEntrega inicial 'local', 'efectivo' ni
+  // siquiera es una opción válida todavía (ver metodosPagoPara).
+  const [metodoPago, setMetodoPago]   = useState('nequi');
+  const metodosPago = useMemo(() => metodosPagoPara(tipoEntrega), [tipoEntrega]);
+  // Si el admin ya había elegido "Efectivo" para domicilio y vuelve a
+  // "En el local", esa opción deja de existir — se limpia para no dejar
+  // seleccionado un método que ya no aparece en la lista.
+  useEffect(() => {
+    if (tipoEntrega !== 'domicilio' && metodoPago === 'efectivo') setMetodoPago('nequi');
+    // eslint-disable-next-line
+  }, [tipoEntrega]);
   const [sedeSel, setSedeSel]         = useState('');   // nombre del local
   const [localIdSel, setLocalIdSel]   = useState('');   // id del local
   const [barista, setBarista]         = useState('');
@@ -193,8 +210,25 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
 
   const elegirLocal = (l) => { setSedeSel(l.nombre); setLocalIdSel(String(l.id)); };
 
+  const [clienteModo, setClienteModo] = useState('libre');
+  // Solo aplica al modo "Cliente registrado": escribir en el buscador no
+  // basta, hay que elegir a alguien de la lista.
+  const [clienteElegido, setClienteElegido] = useState(false);
+  const clienteValido = clienteModo === 'buscar' ? clienteElegido && !!cliente.trim() : !!cliente.trim();
+
   const handleCrear = () => {
     if (carrito.length === 0) { showToast('Agrega al menos un producto'); return; }
+    // Cliente/Mesa pasa a ser OBLIGATORIO: un pedido sin identificar a
+    // quién va dirigido termina en "Cliente mostrador" y el cajero no
+    // sabe a quién entregarle. El mensaje se adapta a la pestaña activa.
+    if (!clienteValido) {
+      showToast(
+        clienteModo === 'mesa'   ? 'Elige la mesa del pedido'
+        : clienteModo === 'buscar' ? 'Selecciona un cliente de la lista'
+        : 'Escribe el nombre del cliente'
+      );
+      return;
+    }
     if (isAdmin) {
       if (!sedeSel)      { showToast('Selecciona el local del pedido'); return; }
       if (!barista)      { showToast('Selecciona quién atiende el pedido'); return; }
@@ -210,7 +244,7 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
     }));
     const nuevoPedido = isAdmin
       ? {
-          cliente: cliente.trim() || 'Cliente mostrador',
+          cliente: cliente.trim(),
           clienteId: null,
           productos: productosPayload, total,
           notas: notas.trim() || null,
@@ -225,7 +259,7 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
           direccionAlternativa: tipoEntrega === 'domicilio' ? (direccion.trim() || null) : null,
         }
       : {
-          cliente: cliente.trim() || 'Cliente mostrador',
+          cliente: cliente.trim(),
           productos: productosPayload, total,
           notas: notas.trim() || null,
           estado: 'pendiente', origen: 'cajero', hora, tipo: 'mostrador',
@@ -323,8 +357,8 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
         <div className="cj-cart__head"><h3>{isAdmin ? 'Nuevo pedido' : 'Carrito'}</h3><span className="cj-cart__count">{carrito.reduce((s,i)=>s+i.cantidad,0)} ítem{carrito.length!==1?'s':''}</span></div>
 
         <div className="cj-cart__field">
-          <label>Cliente / Mesa <span style={{color:'var(--cj-text-3)',fontWeight:400}}>(opcional)</span></label>
-          <ClienteSelector value={cliente} onChange={setCliente}/>
+          <label>Cliente / Mesa <span style={{color:'#E53935',fontWeight:700}}>*</span></label>
+          <ClienteSelector value={cliente} onChange={setCliente} onModoChange={setClienteModo} onSeleccionado={setClienteElegido}/>
         </div>
 
         {isAdmin && (
@@ -343,7 +377,7 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
             <div className="cj-cart__field">
               <label>Método de pago</label>
               <select className="cj-input" value={metodoPago} onChange={e => setMetodoPago(e.target.value)}>
-                {METODOS_PAGO.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                {metodosPago.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </div>
 
@@ -435,7 +469,7 @@ export default function PedidoBuilder({ mode = 'cajero', onCreated, showToast, o
 
         <div className="cj-cart__foot">
           {carrito.length > 0 && <div className="cj-cart__total-row"><span>Total</span><strong>{fmt(total)}</strong></div>}
-          <button className="cj-btn cj-btn--primary cj-btn--full" onClick={handleCrear} disabled={carrito.length===0||saving}>
+          <button className="cj-btn cj-btn--primary cj-btn--full" onClick={handleCrear} disabled={carrito.length===0||!clienteValido||saving}>
             {saving ? 'Creando pedido...' : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg> Crear pedido · {fmt(total)}</>}
           </button>
           {carrito.length > 0 && <button className="cj-btn cj-btn--ghost cj-btn--full" onClick={() => setCarrito([])}>Limpiar carrito</button>}

@@ -12,6 +12,7 @@ import SearchSelect from '../../../shared/components/SearchSelect';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import './CompraForm.css';
 import { LIMITES, contador, enElTope } from '../../../shared/utils/limitesTexto';
+import { estadoStockDe, insumoEnLocal, STOCK_OK, STOCK_AGOTADO, STOCK_BAJO_MINIMO } from '../../../shared/constants/insumoTipos';
 
 const EMPTY_ITEM = {
   insumo: '', insumoId: '', unidad: '',
@@ -73,12 +74,15 @@ const subtotalItem = (it) =>
 // aparte. Modo mini-presentación (opcional, solo Caja/Paquete/Bolsa): agrega
 // un nivel más de multiplicación cuando el usuario no conoce el contenido
 // total, solo sus partes.
+// Redondeado a 2 decimales para cortar el ruido de coma flotante de JS
+// (ej. 3 * 0.1 = 0.30000000000000004) en el resumen "Se sumarán X al stock".
+const redondearCantidad = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const stockRealItem = (it) => {
   const cantidadPresentaciones = Number(it.presentacionCantidad || 0);
   if (it.presentacionMultiNivel) {
-    return cantidadPresentaciones * Number(it.presentacionUnidadesInternas || 0) * Number(it.presentacionContenidoUnidadInterna || 0);
+    return redondearCantidad(cantidadPresentaciones * Number(it.presentacionUnidadesInternas || 0) * Number(it.presentacionContenidoUnidadInterna || 0));
   }
-  return cantidadPresentaciones * Number(it.presentacionContenido || 0);
+  return redondearCantidad(cantidadPresentaciones * Number(it.presentacionContenido || 0));
 };
 
 const cuantosCuantas = (tipo, unidad) => {
@@ -172,7 +176,6 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   // de este catálogo.
   const { tipos: tiposPresentacionCatalogo } = useTiposPresentacion();
   const tiposPresentacionActivos = tiposPresentacionCatalogo.filter(t => t.estado === 'Activo').map(t => t.nombre);
-  const TIPOS_PRESENTACION = ['Unitario', ...tiposPresentacionActivos];
   const [todosInsumos, setTodosInsumos] = useState([]);
   useEffect(() => {
     insumosService.getAll()
@@ -185,11 +188,13 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   // elegido (el insumo ya no tiene relación con proveedor).
   const insumosFiltrados = todosInsumos;
 
-  // El comprobante es obligatorio salvo que todos los ítems sean de tipo
-  // "Unitario" (comportamiento heredado del extinto modo "Directo") — si
-  // hay al menos un ítem con Caja/Paquete/Bolsa, o sin tipo elegido aún,
-  // el comprobante se exige igual que siempre.
-  const comprobanteEsObligatorio = form.items.some(it => it.presentacionTipo !== 'Unitario');
+  // El comprobante de compra es SIEMPRE opcional (nunca lo exigió el
+  // backend: comprobante_url no tiene NOT NULL ni ninguna validación que
+  // lo requiera — esta obligatoriedad era puramente del formulario). Se
+  // deja la constante (en vez de borrar todo lo que la usa) para no tener
+  // que tocar el resto del flujo de validación/confirmación del OCR más
+  // abajo, que sigue aplicando igual CUANDO sí se adjunta un comprobante.
+  const comprobanteEsObligatorio = false;
 
   const esItemValido = (it) => {
     if (!it.insumo.trim()) return false;
@@ -290,6 +295,11 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   // ── batch 7 item 5 — panel IZQUIERDO: se configura UN insumo (itemDraft)
   //    y con "Agregar" se pasa a la lista del panel derecho (form.items). ──
   const [itemDraft, setItemDraft] = useState({ ...EMPTY_ITEM });
+  // Ver el comentario largo en RegistrarCompraPage.jsx (mismo patrón): no
+  // se puede derivar el modo del toggle solo de presentacionTipo === ''
+  // porque ese valor representa dos cosas distintas (ningún modo elegido
+  // todavía, o "por presentación" elegido pero sin tipo concreto aún).
+  const [modoCompra, setModoCompra] = useState(null);
   const [editingIdx, setEditingIdx] = useState(null);
   const [draftError, setDraftError] = useState('');
 
@@ -301,6 +311,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       insumoId: insumo ? insumo.id : '',
       unidad: insumo ? (insumo.unidadMedida || '') : '',
     });
+    setModoCompra(null);
     setDraftError('');
   };
 
@@ -338,7 +349,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
   const limpiarDraftCero = (field) =>
     setItemDraft(prev => Number(prev[field]) === 0 ? { ...prev, [field]: '' } : prev);
 
-  const limpiarDraft = () => { setItemDraft({ ...EMPTY_ITEM }); setEditingIdx(null); setDraftError(''); };
+  const limpiarDraft = () => { setItemDraft({ ...EMPTY_ITEM }); setModoCompra(null); setEditingIdx(null); setDraftError(''); };
 
   const agregarItemDraft = () => {
     if (!itemDraft.insumo) { setDraftError('Elige el insumo.'); return; }
@@ -356,7 +367,12 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
     limpiarDraft();
   };
 
-  const editarItem = (idx) => { setItemDraft({ ...form.items[idx] }); setEditingIdx(idx); setDraftError(''); };
+  const editarItem = (idx) => {
+    setItemDraft({ ...form.items[idx] });
+    setModoCompra(form.items[idx].presentacionTipo === 'Unitario' ? 'unitaria' : 'presentacion');
+    setEditingIdx(idx);
+    setDraftError('');
+  };
   const quitarItem = (idx) => {
     setForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
     if (editingIdx === idx) limpiarDraft();
@@ -500,7 +516,7 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
       contenidoPorPresentacion = Number(it.presentacionContenido) || 0;
     }
 
-    const cantidadReal = cantidadPresentaciones * contenidoPorPresentacion;
+    const cantidadReal = redondearCantidad(cantidadPresentaciones * contenidoPorPresentacion);
     const precioUnitarioEfectivo = cantidadReal > 0
       ? (precioPresentacion * cantidadPresentaciones) / cantidadReal
       : 0;
@@ -733,95 +749,139 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
               const esUnitario = itemDraft.presentacionTipo === 'Unitario';
               const contenidoEsEntero = itemDraft.unidad === 'unidad';
               const insumoSel = todosInsumos.find(i => i.nombre === itemDraft.insumo);
-              const stockBajo = insumoSel && Number(insumoSel.stockActual) <= Number(insumoSel.stockMinimo);
+              // ronda 22 / A — la alerta es POR LOCAL: refleja el stock del
+              // insumo en el local al que ENTRA esta compra (form.localId),
+              // no el consolidado. 3 niveles distintos (agotado / bajo
+              // mínimo / stock bajo), mismo contrato que Insumos.
+              const insumoEnLocalSel = insumoSel ? insumoEnLocal(insumoSel, form.localId) : null;
+              const estStock = insumoEnLocalSel ? estadoStockDe(insumoEnLocalSel) : STOCK_OK;
+              const alertaStock = estStock !== STOCK_OK;
+              const critico = estStock === STOCK_AGOTADO || estStock === STOCK_BAJO_MINIMO;
+              const etiquetaStock = estStock === STOCK_AGOTADO ? 'Agotado'
+                : estStock === STOCK_BAJO_MINIMO ? 'Bajo el mínimo' : 'Stock bajo';
               return (
               <>
-                {stockBajo && (
-                  <div className="item-stock-bajo-alert">
+                {alertaStock && (
+                  <div className={`item-stock-bajo-alert${critico ? ' item-stock-bajo-alert--critico' : ''}`}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{flexShrink:0}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                    <span>Stock bajo de "{insumoSel.nombre}": quedan {insumoSel.stockActual} {insumoSel.unidadMedida} (mínimo {insumoSel.stockMinimo}).</span>
+                    <span><strong>{etiquetaStock}</strong> de "{insumoSel.nombre}"{form.localNombre ? ` en ${form.localNombre}` : ''}: {insumoEnLocalSel.stockActual} {insumoSel.unidadMedida} (mínimo {insumoEnLocalSel.stockMinimo}).</span>
                   </div>
                 )}
                 <div className="item-presentacion-panel">
-                  <div className="fg">
-                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <span>Tipo de presentación</span>
-                      {onManagePresentaciones && (
-                        <button type="button" onClick={onManagePresentaciones}
-                          style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
-                          Gestionar tipos
-                        </button>
-                      )}
-                    </label>
-                    <select value={itemDraft.presentacionTipo} onChange={e => handleDraftPresentacion('presentacionTipo', e.target.value)}>
-                      <option value="">-- Seleccionar --</option>
-                      {TIPOS_PRESENTACION.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                  <div className="fg" style={{ gridColumn: '1 / -1' }}>
+                    <label>Modo de compra</label>
+                    <div className="compra-modo-toggle" role="tablist" aria-label="Modo de compra">
+                      <button type="button" role="tab" aria-selected={modoCompra === 'unitaria'}
+                        className={`compra-modo-toggle__btn ${modoCompra === 'unitaria' ? 'is-active' : ''}`}
+                        onClick={() => { setModoCompra('unitaria'); handleDraftPresentacion('presentacionTipo', 'Unitario'); }}>
+                        Compra unitaria (directa)
+                      </button>
+                      <button type="button" role="tab" aria-selected={modoCompra === 'presentacion'}
+                        className={`compra-modo-toggle__btn ${modoCompra === 'presentacion' ? 'is-active' : ''}`}
+                        onClick={() => { setModoCompra('presentacion'); handleDraftPresentacion('presentacionTipo', ''); }}>
+                        Por presentación
+                      </button>
+                    </div>
+                    {modoCompra && (
+                      <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                        {modoCompra === 'unitaria'
+                          ? 'Compraste el insumo directo, sin caja/paquete/bolsa que lo agrupe.'
+                          : 'El insumo vino agrupado en una presentación (caja, paquete, bolsa...).'}
+                      </span>
+                    )}
                   </div>
 
-                  {!esUnitario && (
+                  {modoCompra === 'presentacion' && (
                     <div className="fg">
-                      <label>{itemDraft.presentacionTipo ? `Cantidad de ${pluralPresentacion(itemDraft.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
-                      <input type="number" step="1"
-                        placeholder={preguntaCantidadPresentacion(itemDraft.presentacionTipo)}
-                        value={itemDraft.presentacionCantidad}
-                        onChange={e => handleDraftPresentacion('presentacionCantidad', e.target.value)}
-                        onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span>Tipo de presentación</span>
+                        {onManagePresentaciones && (
+                          <button type="button" onClick={onManagePresentaciones}
+                            style={{ background: 'none', border: 'none', color: 'var(--color-green,#4CAF50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+                            Gestionar tipos
+                          </button>
+                        )}
+                      </label>
+                      <select value={itemDraft.presentacionTipo} onChange={e => handleDraftPresentacion('presentacionTipo', e.target.value)}>
+                        <option value="">-- Seleccionar --</option>
+                        {tiposPresentacionActivos.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
                     </div>
                   )}
 
-                  {!esUnitario && itemDraft.presentacionMultiNivel ? (
+                  {/* Antes estos campos ya se mostraban con solo NO ser
+                      "Unitario" (`!esUnitario`), lo que los dejaba visibles
+                      incluso sin haber elegido todavía un tipo concreto en
+                      el desplegable de arriba. Ahora esperan a que el modo
+                      esté resuelto (Unitario, o un tipo de presentación ya
+                      elegido) antes de aparecer. */}
+                  {itemDraft.presentacionTipo !== '' && (
                     <>
+                      {!esUnitario && (
+                        <div className="fg">
+                          <label>{itemDraft.presentacionTipo ? `Cantidad de ${pluralPresentacion(itemDraft.presentacionTipo)}` : 'Cantidad de presentaciones'}</label>
+                          <input type="number" step="1"
+                            placeholder={preguntaCantidadPresentacion(itemDraft.presentacionTipo)}
+                            value={itemDraft.presentacionCantidad}
+                            onChange={e => handleDraftPresentacion('presentacionCantidad', e.target.value)}
+                            onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                        </div>
+                      )}
+
+                      {!esUnitario && itemDraft.presentacionMultiNivel ? (
+                        <>
+                          <div className="fg">
+                            <label>{`¿Cuántas unidades trae cada ${(itemDraft.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
+                            <input type="number" step="1" placeholder="Ej: 10"
+                              value={itemDraft.presentacionUnidadesInternas}
+                              onChange={e => handleDraftPresentacion('presentacionUnidadesInternas', e.target.value)}
+                              onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                          </div>
+                          <div className="fg">
+                            <label>{`¿Cuánto contiene cada unidad interna${itemDraft.unidad ? ` (${itemDraft.unidad})` : ''}?`}</label>
+                            <input type="number" step={contenidoEsEntero ? '1' : '0.01'}
+                              placeholder={contenidoEsEntero ? 'Ej: 1' : 'Ej: 5'}
+                              value={itemDraft.presentacionContenidoUnidadInterna}
+                              onChange={e => handleDraftPresentacion('presentacionContenidoUnidadInterna', e.target.value)}
+                              onBlur={() => limpiarDraftCero('presentacionContenidoUnidadInterna')}
+                              onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="fg">
+                          <label>{esUnitario ? 'Cantidad recibida' : preguntaContenidoPresentacion(itemDraft.unidad, itemDraft.presentacionTipo)}</label>
+                          <input type="number" step={contenidoEsEntero ? '1' : '0.01'}
+                            placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
+                            value={itemDraft.presentacionContenido}
+                            onChange={e => handleDraftPresentacion('presentacionContenido', e.target.value)}
+                            onBlur={() => limpiarDraftCero('presentacionContenido')}
+                            onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
+                        </div>
+                      )}
+
                       <div className="fg">
-                        <label>{`¿Cuántas unidades trae cada ${(itemDraft.presentacionTipo || 'presentación').toLowerCase()}?`}</label>
-                        <input type="number" step="1" placeholder="Ej: 10"
-                          value={itemDraft.presentacionUnidadesInternas}
-                          onChange={e => handleDraftPresentacion('presentacionUnidadesInternas', e.target.value)}
+                        <label>Precio por {(itemDraft.presentacionTipo || 'presentación').toLowerCase()}</label>
+                        <input type="number" step="1" placeholder="Ej: 10000 (mín. $1.000)"
+                          title="Escribe el precio en pesos, sin puntos ni comas."
+                          value={itemDraft.presentacionPrecio}
+                          onChange={e => handleDraftPresentacion('presentacionPrecio', e.target.value)}
                           onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
                       </div>
-                      <div className="fg">
-                        <label>{`¿Cuánto contiene cada unidad interna${itemDraft.unidad ? ` (${itemDraft.unidad})` : ''}?`}</label>
-                        <input type="number" step={contenidoEsEntero ? '1' : '0.01'}
-                          placeholder={contenidoEsEntero ? 'Ej: 1' : 'Ej: 5'}
-                          value={itemDraft.presentacionContenidoUnidadInterna}
-                          onChange={e => handleDraftPresentacion('presentacionContenidoUnidadInterna', e.target.value)}
-                          onBlur={() => limpiarDraftCero('presentacionContenidoUnidadInterna')}
-                          onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
-                      </div>
+
+                      {!esUnitario && (
+                        <div className="fg" style={{ gridColumn: '1 / -1' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                            <input type="checkbox" checked={!!itemDraft.presentacionMultiNivel} onChange={handleDraftToggleMulti}/>
+                            No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
+                          </label>
+                        </div>
+                      )}
+                      {stockRealItem(itemDraft) > 0 && (
+                        <div className="item-presentacion-info">
+                          ℹ Se sumarán <strong>{stockRealItem(itemDraft)} {itemDraft.unidad}</strong> al stock — informativo, no se usa para el valor de la compra.
+                        </div>
+                      )}
                     </>
-                  ) : (
-                    <div className="fg">
-                      <label>{esUnitario ? 'Cantidad recibida' : preguntaContenidoPresentacion(itemDraft.unidad, itemDraft.presentacionTipo)}</label>
-                      <input type="number" step={contenidoEsEntero ? '1' : '0.01'}
-                        placeholder={contenidoEsEntero ? 'Ej: 25' : 'Ej: 5.5'}
-                        value={itemDraft.presentacionContenido}
-                        onChange={e => handleDraftPresentacion('presentacionContenido', e.target.value)}
-                        onBlur={() => limpiarDraftCero('presentacionContenido')}
-                        onKeyDown={e => { if (contenidoEsEntero && ['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
-                    </div>
-                  )}
-
-                  <div className="fg">
-                    <label>Precio por {(itemDraft.presentacionTipo || 'presentación').toLowerCase()}</label>
-                    <input type="number" step="1" placeholder="Ej: 10000 (mín. $1.000)"
-                      title="Escribe el precio en pesos, sin puntos ni comas."
-                      value={itemDraft.presentacionPrecio}
-                      onChange={e => handleDraftPresentacion('presentacionPrecio', e.target.value)}
-                      onKeyDown={e => { if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); }}/>
-                  </div>
-
-                  {!esUnitario && (
-                    <div className="fg" style={{ gridColumn: '1 / -1' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                        <input type="checkbox" checked={!!itemDraft.presentacionMultiNivel} onChange={handleDraftToggleMulti}/>
-                        No conozco el contenido total, pero sé cuántas unidades trae y cuánto contiene cada una
-                      </label>
-                    </div>
-                  )}
-                  {stockRealItem(itemDraft) > 0 && (
-                    <div className="item-presentacion-info">
-                      ℹ Se sumarán <strong>{stockRealItem(itemDraft)} {itemDraft.unidad}</strong> al stock — informativo, no se usa para el valor de la compra.
-                    </div>
                   )}
                 </div>
               </>
@@ -930,10 +990,12 @@ const CompraForm = ({ onSubmit, onCancel, serverError, onManagePresentaciones })
         </div>
       </div>
 
+      {/* Punto 1 — mismo cambio que RegistrarCompraPage.jsx: el comprobante
+          nunca fue obligatorio en el backend, se corrige el label. */}
       <div ref={comprobanteRef} className={`fg fg-full ${errors.comprobante ? 'fg-error' : ''}`} style={{ marginTop: 4 }}>
-        <label>Comprobante de compra <span className="req">*</span></label>
+        <label>Comprobante de compra <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>(opcional)</span></label>
         <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
-          Sube una foto o captura clara del comprobante (JPG, JPEG o PNG). El sistema lee el total automáticamente y lo compara con el total de esta compra ({formatCOP(totalFinal)}) — es solo informativo, no impide guardar.
+          Sube una foto o captura clara del comprobante (JPG, JPEG o PNG) si tienes una a mano. El sistema lee el total automáticamente y lo compara con el total de esta compra ({formatCOP(totalFinal)}) — es solo informativo, no impide guardar.
         </p>
 
         <div

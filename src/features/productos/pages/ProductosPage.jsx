@@ -346,12 +346,6 @@ export default function ProductosPage() {
   }, []);
   const [query,     setQuery]     = useState('');
   const [catFilter, setCatFilter] = useState('Todas');
-  // Filtro por precio (columna "Precio" ya visible en la tabla/tarjeta) —
-  // en vez de un rango mín/máx, el usuario escribe el inicio del precio
-  // (ej. "3" o "15") y se arma el rango de miles automáticamente (misma
-  // regla que ya aplica el Backend en el endpoint público /productos:
-  // "3" → $3.000-$3.999, "15" → $15.000-$15.999).
-  const [busquedaPrecio, setBusquedaPrecio] = useState('');
   // Filtro "solo con descuento activo" — reusa descuentoVigente (misma
   // columna "Descuento" ya visible en la tabla/tarjeta), así que un
   // descuento programado a futuro o ya vencido no cuenta como activo.
@@ -375,25 +369,33 @@ export default function ProductosPage() {
   const showOk  = msg => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000); };
 
   const cats       = ['Todas', ...new Set(productos.map(p => p.categoria).filter(Boolean))];
-  // El buscador ahora cubre también la descripción y el id, además de
-  // nombre y categoría.
+  // El buscador cubre nombre, categoría, descripción e id. Si lo escrito son
+  // solo dígitos, también busca por COINCIDENCIA DE TEXTO en el precio (ej.
+  // "5" encuentra $5.000, $15.000, $5.500 — cualquier precio cuyo texto
+  // CONTENGA "5", no solo los que empiezan por 5.000): misma regla que ya
+  // usa el backend en el endpoint público /productos (FLOOR(precio)::text
+  // LIKE '%texto%', ver textoBusquedaPrecio en sicaber-back/routes/index.js).
+  // Antes esto vivía en un segundo input aparte; ahora un solo campo cubre
+  // ambos casos, y un producto puede coincidir por cualquiera de los dos.
   const q          = query.trim().toLowerCase();
+  const qDigitos   = query.trim();
+  const esSoloDigitos = qDigitos !== '' && /^\d+$/.test(qDigitos);
   let shown        = q
-    ? productos.filter(p =>
-        (p.nombre      || '').toLowerCase().includes(q) ||
-        (p.categoria   || '').toLowerCase().includes(q) ||
-        (p.descripcion || '').toLowerCase().includes(q) ||
-        String(p.id).includes(q))
+    ? productos.filter(p => {
+        const coincideTexto =
+          (p.nombre      || '').toLowerCase().includes(q) ||
+          (p.categoria   || '').toLowerCase().includes(q) ||
+          (p.descripcion || '').toLowerCase().includes(q) ||
+          String(p.id).includes(q);
+        if (coincideTexto) return true;
+        if (esSoloDigitos) {
+          return String(Math.floor(Number(p.precio) || 0)).includes(qDigitos);
+        }
+        return false;
+      })
     : productos;
   if (catFilter !== 'Todas') shown = shown.filter(p => p.categoria === catFilter);
   if (estadoFiltro !== 'Todos') shown = shown.filter(p => (p.estado || 'Activo') === estadoFiltro);
-  // "3" -> 3000-3999, "15" -> 15000-15999: el número escrito se toma como
-  // el precio sin sus últimos 3 dígitos y se arma el rango completo.
-  const digitosPrecio = busquedaPrecio.trim();
-  if (digitosPrecio !== '' && /^\d+$/.test(digitosPrecio)) {
-    const base = Number(digitosPrecio) * 1000;
-    shown = shown.filter(p => Number(p.precio) >= base && Number(p.precio) <= base + 999);
-  }
   if (soloDescuento) shown = shown.filter(p => descuentoVigente(p) !== null);
   const sorted     = [...shown].sort((a, b) => Number(b.id) - Number(a.id));
   const totalPages = Math.ceil(sorted.length / PER_PAGE);
@@ -484,7 +486,8 @@ export default function ProductosPage() {
                   <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
               </span>
-              <input className="search-input" placeholder="Buscar por nombre, categoría o descripción..."
+              <input className="search-input" placeholder="Buscar por nombre, categoría, descripción o precio (ej. 5, 15)..."
+                title="También puedes escribir parte del precio: 5 encuentra $5.000, $15.000, $5.500 — cualquier precio que contenga ese texto"
                 value={query} onChange={e => { setQuery(e.target.value); setPage(1); }}/>
               {query && <button className="search-clear" onClick={() => { setQuery(''); setPage(1); }}>✕</button>}
             </div>
@@ -501,22 +504,13 @@ export default function ProductosPage() {
             <option value="Activo">Activos</option>
             <option value="Inactivo">Inactivos</option>
           </select>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="text" inputMode="numeric" placeholder="Buscar por inicio del precio (ej. 3, 15)" value={busquedaPrecio}
-              onChange={e => { setBusquedaPrecio(e.target.value.replace(/[^\d]/g, '')); setPage(1); }}
-              title="Escribe el inicio del precio: 3 muestra $3.000-$3.999, 15 muestra $15.000-$15.999"
-              style={{ width: 210, padding: '9px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-input)', color: 'var(--text-primary)', outline: 'none' }}/>
-            {busquedaPrecio !== '' && (
-              <button className="search-clear" onClick={() => { setBusquedaPrecio(''); setPage(1); }}>✕</button>
-            )}
-          </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             <input type="checkbox" checked={soloDescuento} onChange={e => { setSoloDescuento(e.target.checked); setPage(1); }}/>
             Solo con descuento activo
           </label>
-          {(query || catFilter !== 'Todas' || estadoFiltro !== 'Todos' || busquedaPrecio !== '' || soloDescuento) && (
+          {(query || catFilter !== 'Todas' || estadoFiltro !== 'Todos' || soloDescuento) && (
             <button className="btn-limpiar-filtros" title="Limpiar filtros"
-              onClick={() => { setQuery(''); setCatFilter('Todas'); setEstadoFiltro('Todos'); setBusquedaPrecio(''); setSoloDescuento(false); setPage(1); }}>
+              onClick={() => { setQuery(''); setCatFilter('Todas'); setEstadoFiltro('Todos'); setSoloDescuento(false); setPage(1); }}>
               ✕ Limpiar filtros
             </button>
           )}

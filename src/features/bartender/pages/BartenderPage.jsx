@@ -7,43 +7,65 @@
 //  (pendiente, en_preparacion) para que el bartender los prepare.
 // ─────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import { useTheme } from '../../../shared/contexts/ThemeContext';
 import pedidosService from '../../pedidos/services/pedidosService';
 import fichasTecnicasService from '../../fichasTecnicas/services/fichasTecnicasService';
 import insumosService from '../../insumos/services/insumosService';
+import { ESTADO_PEDIDO_CFG, configEstadoPedido, normalizarEstadoPedido, etiquetaEstadoPedido } from '../../../shared/utils/pedidoEstados';
 import './BartenderPage.css';
 
 // ── Utilidades ───────────────────────────────────────────────
 const fmt = n =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n || 0);
 
+// Ronda 22 / C1 — mismos nombres/colores por estado que Cajero, Admin y
+// Cliente. 'en_preparacion'/'listo' son valores LEGADOS que el backend ya
+// no acepta (ESTADOS_PEDIDO_VALIDOS): se mapean a 'en_proceso'/'en_camino'.
 const STATUS_CFG = {
-  pendiente:      { label: 'Pendiente',      color: '#FFB300', bg: '#FFF8E1' },
-  en_preparacion: { label: 'En preparación', color: '#42A5F5', bg: '#E3F2FD' },
-  en_proceso:     { label: 'En proceso',     color: '#42A5F5', bg: '#E3F2FD' },
-  listo:          { label: 'Listo ✓',        color: '#4CAF50', bg: '#E8F5E9' },
+  ...ESTADO_PEDIDO_CFG,
+  en_preparacion: ESTADO_PEDIDO_CFG.en_proceso,
+  listo:          ESTADO_PEDIDO_CFG.en_camino,
 };
 
 const FILTERS = [
-  { key: 'all',            label: 'Todos'          },
-  { key: 'pendiente',      label: 'Pendiente'      },
-  { key: 'en_preparacion', label: 'En preparación' },
+  { key: 'all',        label: 'Todos'      },
+  { key: 'pendiente',  label: 'Pendiente'  },
+  { key: 'en_proceso', label: 'En proceso' },
 ];
 
 const PAGE_SIZE = 6;
 
 // ── Tarjeta de pedido del bartender ─────────────────────────
 function BartenderCard({ order, onStart, onReady, onDetail, onTomar }) {
-  const cfg      = STATUS_CFG[order.estado] || STATUS_CFG.pendiente;
-  const isPending = order.estado === 'pendiente';
-  const isPrep    = order.estado === 'en_preparacion' || order.estado === 'en_proceso';
+  const estadoNorm = normalizarEstadoPedido(order.estado);
+  const cfg      = configEstadoPedido(order.estado, order.tipo);
+  const isPending = estadoNorm === 'pendiente';
+  const isPrep    = estadoNorm === 'en_proceso';
   const productos = order.productos || order.items || [];
   // Un pedido sin "sede" es uno de cliente que todavía no ha sido tomado
   // por ningún local (ver PATCH /pedidos/:id/tomar en el backend).
   const sinAsignar = !order.sede;
+  // Punto 2 del pedido del usuario: "al marcar Listo, no debe poder
+  // cambiarle el estado otra vez". La tarjeta YA desaparece sola en el
+  // siguiente refresh (el padre filtra a pendiente/en_proceso — ver
+  // `refresh`), pero entre el clic y que ese refresh termine (llamada a la
+  // API de por medio) el botón seguía activo: un doble clic accidental
+  // podía disparar el mismo cambio de estado dos veces. `enviando` bloquea
+  // el botón apenas se hace clic, antes de esperar la respuesta.
+  const [enviando, setEnviando] = useState(false);
+  // `montada`: evita el warning de React por hacer setState sobre un
+  // componente ya desmontado — pasa cuando la petición SÍ tiene éxito (el
+  // pedido sale del filtro del padre y esta tarjeta desaparece antes de
+  // que la promesa termine de resolver).
+  const montada = useRef(true);
+  useEffect(() => () => { montada.current = false; }, []);
+  const disparar = (fn, id) => {
+    setEnviando(true);
+    Promise.resolve(fn(id)).finally(() => { if (montada.current) setEnviando(false); });
+  };
 
   return (
     <div className={`bt-card ${isPrep ? 'bt-card--prep' : ''}`}>
@@ -64,6 +86,11 @@ function BartenderCard({ order, onStart, onReady, onDetail, onTomar }) {
               {cfg.label}
             </span>
           )}
+          {/* Punto 2 del pedido del usuario: se quita el badge de estado del
+              PAGO ("Pago pendiente"/"Pago aprobado") — el bartender no
+              cobra ni verifica pagos, solo prepara; esa información es del
+              cajero/admin y acá solo agregaba ruido visual sin ninguna
+              acción asociada. */}
           {isPending && !sinAsignar && <div className="bt-card__urgency">⏳ Esperando</div>}
           {isPrep    && <div className="bt-card__urgency bt-card__urgency--blue">🔄 Preparando</div>}
         </div>
@@ -114,7 +141,7 @@ function BartenderCard({ order, onStart, onReady, onDetail, onTomar }) {
         </button>
 
         {isPending && sinAsignar && (
-          <button className="bt-btn bt-btn--amber" onClick={() => onTomar(order.id)}>
+          <button className="bt-btn bt-btn--amber" disabled={enviando} onClick={() => disparar(onTomar, order.id)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 6L9 17l-5-5"/>
             </svg>
@@ -123,7 +150,7 @@ function BartenderCard({ order, onStart, onReady, onDetail, onTomar }) {
         )}
 
         {isPending && !sinAsignar && (
-          <button className="bt-btn bt-btn--amber" onClick={() => onStart(order.id)}>
+          <button className="bt-btn bt-btn--amber" disabled={enviando} onClick={() => disparar(onStart, order.id)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polygon points="5 3 19 12 5 21 5 3"/>
             </svg>
@@ -132,11 +159,20 @@ function BartenderCard({ order, onStart, onReady, onDetail, onTomar }) {
         )}
 
         {isPrep && (
-          <button className="bt-btn bt-btn--green" onClick={() => onReady(order.id)}>
+          // Punto 2 — el botón usa el MISMO nombre que el cliente y el
+          // administrador ya ven para el estado resultante (en_camino):
+          // "Listo para recoger" para tipo='local', "En camino" para
+          // domicilio (ver etiquetaEstadoPedido en pedidoEstados.js) — antes
+          // decía siempre "Listo", sin importar el tipo de entrega, y no
+          // coincidía con la etiqueta que el pedido termina mostrando.
+          // `disabled={enviando}` evita el doble clic que dejaría el mismo
+          // pedido intentando cambiar de estado dos veces mientras la
+          // primera petición todavía no responde.
+          <button className="bt-btn bt-btn--green" disabled={enviando} onClick={() => disparar(onReady, order.id)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            Listo
+            {enviando ? 'Marcando…' : etiquetaEstadoPedido('en_camino', order.tipo)}
           </button>
         )}
       </div>
@@ -413,11 +449,10 @@ export default function BartenderPage() {
       .then(all => {
         const lista = Array.isArray(all) ? all : [];
         // Bartender solo ve pedidos activos (no pagados, no cancelados, no entregados)
-        const activos = lista.filter(o =>
-          o.estado === 'pendiente' ||
-          o.estado === 'en_preparacion' ||
-          o.estado === 'en_proceso'
-        );
+        const activos = lista.filter(o => {
+          const e = normalizarEstadoPedido(o.estado);
+          return e === 'pendiente' || e === 'en_proceso';
+        });
         setOrders(activos);
       })
       .catch(() => setOrders([]));
@@ -429,28 +464,34 @@ export default function BartenderPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  const filtered = filter === 'all'
-    ? orders
-    : orders.filter(o => o.estado === filter || (filter === 'en_preparacion' && o.estado === 'en_proceso'));
+  const estN = o => normalizarEstadoPedido(o.estado);
+  const filtered = filter === 'all' ? orders : orders.filter(o => estN(o) === filter);
 
   const sorted     = [...filtered].sort((a, b) => Number(b.id) - Number(a.id));
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pageItems  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const counts = {
-    pendiente:      orders.filter(o => o.estado === 'pendiente').length,
-    en_preparacion: orders.filter(o => o.estado === 'en_preparacion' || o.estado === 'en_proceso').length,
+    pendiente:  orders.filter(o => estN(o) === 'pendiente').length,
+    en_proceso: orders.filter(o => estN(o) === 'en_proceso').length,
   };
 
+  // C3 — el bartender avanza el pedido con los valores REALES del backend:
+  // 'en_proceso' (empezar a preparar) y 'en_camino' (listo / en camino).
+  // Estos 3 handlers ahora RETORNAN la promesa (antes no) para que
+  // BartenderCard pueda esperar a que termine y reactivar su botón si la
+  // petición falla (ver `enviando`/`disparar` en BartenderCard) — si tiene
+  // éxito, la tarjeta ya desapareció con el refresh y no hace falta
+  // reactivar nada.
   const handleStart = useCallback((id) => {
-    pedidosService.cambiarEstado(id, 'en_preparacion')
+    return pedidosService.cambiarEstado(id, 'en_proceso')
       .then(() => { refresh(); showToast('¡Preparación iniciada!'); })
       .catch((err) => showToast(err.message || 'No se pudo actualizar el pedido.'));
   }, [refresh]);
 
   const handleReady = useCallback((id) => {
-    pedidosService.cambiarEstado(id, 'listo')
-      .then(() => { refresh(); showToast('✓ Pedido marcado como listo'); })
+    return pedidosService.cambiarEstado(id, 'en_camino')
+      .then(() => { refresh(); showToast('✓ Pedido marcado como listo para recoger'); })
       .catch((err) => showToast(err.message || 'No se pudo actualizar el pedido.'));
   }, [refresh]);
 
@@ -459,7 +500,7 @@ export default function BartenderPage() {
   // otro local ya lo tomó primero (409), el pedido debe desaparecer de
   // aquí igual, mostrando el mensaje de error tal cual lo manda el backend.
   const handleTomar = useCallback((id) => {
-    pedidosService.tomar(id)
+    return pedidosService.tomar(id)
       .then(() => { refresh(); showToast('✓ Pedido tomado para tu local'); })
       .catch((err) => { refresh(); showToast(err.message || 'No se pudo tomar el pedido.'); });
   }, [refresh]);
@@ -506,7 +547,7 @@ export default function BartenderPage() {
             <div className="bt-sidebar__stat">
               <span className="bt-sidebar__stat-dot" style={{ background: '#42A5F5' }}/>
               <span>Preparando</span>
-              <strong>{counts.en_preparacion}</strong>
+              <strong>{counts.en_proceso}</strong>
             </div>
             <div className="bt-sidebar__stat">
               <span className="bt-sidebar__stat-dot" style={{ background: '#4CAF50' }}/>
@@ -523,8 +564,11 @@ export default function BartenderPage() {
             <div className="bt-sidebar__info-row">
               <span>🔵</span> En prep. = estás trabajando
             </div>
+            {/* Punto 2 — mismo nombre que usa el botón de acción y el estado
+                resultante ("Listo para recoger"), en vez de un "Listo"
+                suelto que no coincidía con ninguna otra pantalla. */}
             <div className="bt-sidebar__info-row">
-              <span>🟢</span> Listo = cajero puede cobrar
+              <span>🟢</span> Listo para recoger = sale de tu cola
             </div>
           </div>
         </nav>

@@ -17,13 +17,12 @@ import React, { useState } from 'react';
 import pedidosService from '../services/pedidosService';
 import notificacionesService from '../../notificaciones/services/notificacionesService';
 import { ESTADO_CONFIG } from '../data/datos';
-import { mensajeErrorEstadoPedido } from '../../../shared/utils/pedidoEstados';
+import { mensajeErrorEstadoPedido, etiquetaMetodoPago } from '../../../shared/utils/pedidoEstados';
 import Tooltip from '../../../shared/components/Tooltip';
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import ModalDetallePedido from './ModalDetallePedido';
 
 const fmt = n => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(n || 0);
-const METODOS_PAGO_LABEL = { nequi: 'Nequi', transferencia: 'Llave Bancolombia', efectivo: 'Efectivo en caja' };
 
 export default function PagosPendientesPanel({ pedidos, onChanged, showOk, showErr }) {
   const { hasPermiso } = useAuth();
@@ -134,7 +133,7 @@ export default function PagosPendientesPanel({ pedidos, onChanged, showOk, showE
                   <tr key={p.id}>
                     <td className="td-id">#{p.id}</td>
                     <td className="td-nombre">{p.cliente || p.mesa || '—'}</td>
-                    <td>{METODOS_PAGO_LABEL[p.pago] || p.pago || '—'}</td>
+                    <td>{etiquetaMetodoPago(p.pago)}</td>
                     <td style={{ fontWeight: 700, color: '#2E7D32', fontSize: 13 }}>{fmt(p.total)}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fecha}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{hora}</td>

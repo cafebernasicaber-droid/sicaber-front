@@ -28,7 +28,20 @@ const useCompras = () => {
       return { error: err.message };
     }
   }, [refresh]);
-  const anular = useCallback(async (id, motivo) => { const r = await comprasService.anular(id, motivo); refresh(); return r; }, [refresh]);
+  // Igual patrón que create(): api.js lanza (throw) si el backend rechaza
+  // la anulación (ej. un insumo ya anulado del todo, o una cantidad mayor a
+  // la pendiente) — se captura acá para que ComprasPage pueda mostrar el
+  // error real con un simple `if (r?.error)`, sin que un `await` suelto sin
+  // try/catch deje la promesa rechazada sin manejar.
+  const anular = useCallback(async (id, motivo, items) => {
+    try {
+      const r = await comprasService.anular(id, motivo, items);
+      refresh();
+      return r;
+    } catch (err) {
+      return { error: err.message };
+    }
+  }, [refresh]);
   const getById = useCallback((id) => comprasService.getById(id), []);
   const getHistorial = useCallback(() => comprasService.getHistorial(), []);
 

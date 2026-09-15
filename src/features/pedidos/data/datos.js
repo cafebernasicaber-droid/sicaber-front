@@ -51,19 +51,22 @@ export const PEDIDOS_INIT = [
   },
 ];
 
+// Ronda 22 / C1 — un solo nombre por estado en TODAS las vistas: esta
+// tabla ahora se DERIVA de `pedidoEstados.js` (fuente única compartida con
+// Cajero y con la vista del cliente), en vez de mantener etiquetas propias
+// que se fueron separando ("En Proceso" vs "En proceso", etc.). Para la
+// etiqueta que depende del tipo de entrega ('en_camino' → "En camino" /
+// "Listo para recoger") usa `configEstadoPedido(estado, tipo)`.
+import { ESTADO_PEDIDO_CFG } from '../../../shared/utils/pedidoEstados';
+
+// Solo los estados del PEDIDO (no los de la venta: 'pagado'/'devuelto'),
+// con las mismas etiquetas/colores que Cajero y Cliente.
 export const ESTADO_CONFIG = {
-  pendiente_verificacion: { label: 'Verificar pago', color: '#AD1457', bg: '#FCE4EC' },
-  pendiente:  { label: 'Pendiente',  color: '#F57F17', bg: '#FFF8E1' },
-  en_proceso: { label: 'En Proceso', color: '#1565C0', bg: '#E3F2FD' },
-  listo:      { label: 'Listo',      color: '#2E7D32', bg: '#E8F5E9' },
-  // Solo aplica a pedidos a domicilio: el pedido ya salió del local rumbo
-  // al cliente. Es un paso intermedio entre "Listo" y "Entregado".
-  en_camino:  { label: 'En camino',  color: '#00838F', bg: '#E0F7FA' },
-  entregado:  { label: 'Entregado',  color: '#388E3C', bg: '#F1F8E9' },
-  cancelado:  { label: 'Cancelado',  color: '#B71C1C', bg: '#FFEBEE' },
-  // La vista/tab "En Stop" se eliminó del todo: un pedido anulado queda
-  // anulado (sin vuelta atrás vía dropdown de estado, solo por el flujo
-  // dedicado de Anular con motivo). El valor interno sigue siendo
-  // 'anulado' (no se toca la lógica ni la BD); solo cambia la etiqueta.
-  anulado:    { label: 'Anulado',    color: '#757575', bg: '#EEEEEE' },
+  pendiente_verificacion: ESTADO_PEDIDO_CFG.pendiente_verificacion,
+  pendiente:  ESTADO_PEDIDO_CFG.pendiente,
+  en_proceso: ESTADO_PEDIDO_CFG.en_proceso,
+  en_camino:  ESTADO_PEDIDO_CFG.en_camino,
+  entregado:  ESTADO_PEDIDO_CFG.entregado,
+  cancelado:  ESTADO_PEDIDO_CFG.cancelado,
+  anulado:    ESTADO_PEDIDO_CFG.anulado,
 };

@@ -18,6 +18,15 @@ const formatDate = (iso) => {
   return new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso));
 };
 
+// Ver el mismo comentario en ComprasPage.jsx: c.fecha es una columna DATE
+// pura pero llega como datetime UTC (ej. "2026-09-09T05:00:00.000Z") — se
+// formatea SOLO como fecha, tomando el día calendario tal cual se guardó.
+const formatFechaCompra = (raw) => {
+  if (!raw) return '—';
+  const soloFecha = String(raw).substring(0, 10);
+  return new Intl.DateTimeFormat('es-CO', { dateStyle: 'long' }).format(new Date(`${soloFecha}T00:00:00`));
+};
+
 // ── Modal Ver Compra ──────────────────────────────────────────────────────────
 function ModalVerCompra({ compra, onClose }) {
   const esAnulada = compra.estado === 'anulada';
@@ -71,12 +80,19 @@ function ModalVerCompra({ compra, onClose }) {
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.6px',marginBottom:12 }}>Información general</div>
               {[
                 ['Proveedor',  formatoTitulo(compra.proveedorNombre)],
-                ['Fecha',      compra.fecha],
+                ['Fecha',      formatFechaCompra(compra.fecha)],
                 ...(descuento > 0 && totalBruto != null ? [['Subtotal', formatCOP(totalBruto)]] : []),
                 ['Total',      <span style={{ fontWeight:800,color:'#FFCC80' }}>{formatCOP(compra.total)}</span>],
                 ['Descuento',  descuento > 0
                   ? <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP((totalBruto ?? compra.total) - compra.total)})</span>
                   : <span style={{ color:'var(--text-muted)' }}>Sin descuento</span>],
+                // Punto 1 — mismo criterio que ComprasPage.jsx: el
+                // comprobante es opcional, se indica claramente de un
+                // vistazo en vez de que la sección de abajo desaparezca sin
+                // explicación cuando no hay.
+                ['Comprobante', (compra.tieneComprobante ?? !!comprobanteUrl)
+                  ? <span style={{ color:'#4CAF50', fontWeight:700 }}>✓ Con comprobante</span>
+                  : <span style={{ color:'var(--text-muted)' }}>— Sin comprobante</span>],
                 ['Estado',     esAnulada ? 'Anulada' : 'Completada'],
                 ['Registrado', formatDate(compra.fechaCreacion)],
               ].map(([label, val]) => (
@@ -374,7 +390,7 @@ const HistorialComprasPage = () => {
                     return (
                       <tr key={c.id}>
                         <td className="td-nombre">{formatoTitulo(c.proveedorNombre)}</td>
-                        <td>{c.fecha}</td>
+                        <td>{formatFechaCompra(c.fecha)}</td>
                         <td>
                           <div className="items-nombres">
                             {(c.items || []).slice(0,3).map((it, i) => (

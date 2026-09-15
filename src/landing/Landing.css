@@ -358,8 +358,18 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 .lx-modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(8px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px; animation: fadeIn .2s ease; }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 .lx-modal { background: var(--lx-surface); border-radius: 16px; padding: 36px 32px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; position: relative; animation: modalIn .3s cubic-bezier(.25,.46,.45,.94) both; box-shadow: 0 32px 80px rgba(0,0,0,.3); }
-.lx-modal--register { max-width: 600px; }
-@media(min-height:820px){ .lx-modal--register { max-height: none; overflow-y: visible; } }
+/* El registro ya no pide Comuna/Dirección (se piden recién al hacer un
+   pedido a domicilio) y el checklist de contraseña se movió a ancho
+   completo (ver Landing.jsx) — con eso y este padding/gap más ajustados,
+   el formulario cabe sin scroll interno en la inmensa mayoría de
+   pantallas. El límite en 700px de alto queda como red de seguridad para
+   ventanas realmente chicas (ahí sí conviene un scroll a que el contenido
+   se salga del viewport). */
+.lx-modal--register { max-width: 600px; padding: 26px 30px; }
+.lx-modal--register .lx-form { gap: 10px; }
+.lx-modal--register .lx-modal__brand,
+.lx-modal--register .lx-modal__tabs { margin-bottom: 14px; }
+@media(min-height:700px){ .lx-modal--register { max-height: none; overflow-y: visible; } }
 @keyframes modalIn { from { opacity:0; transform:scale(.96) translateY(16px); } to { opacity:1; transform:scale(1) translateY(0); } }
 .lx-modal__x { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.6); transition: all .2s; }
 .lx-modal__x:hover { background: rgba(255,255,255,.15); color: white; }
@@ -377,7 +387,7 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
    el alcance del domicilio. */
 .lx-reg-cobertura {
   display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 14px; border-radius: 10px;
+  padding: 9px 12px; border-radius: 10px;
   background: rgba(129,199,132,.10);
   border: 1px solid rgba(129,199,132,.32);
   color: var(--lx-green);

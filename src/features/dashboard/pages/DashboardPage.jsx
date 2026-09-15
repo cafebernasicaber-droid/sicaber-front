@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../../../shared/components/Layout';
+import { descargarExcel } from '../../../shared/utils/excelExport';
 import clientesService from '../../clientes/services/clientesService';
 import proveedoresService from '../../proveedores/services/proveedoresService';
 import comprasService from '../../compras/services/comprasService';
@@ -16,10 +17,25 @@ import devolucionesService from '../../devoluciones/services/devolucionesService
 import { useAuth } from '../../../shared/contexts/AuthContext';
 import LocalFiltro from '../../../shared/components/LocalFiltro';
 import DateRangeFilter from '../../../shared/components/DateRangeFilter';
+// Bug real corregido: este Dashboard tenía su PROPIA tabla de labels/colores
+// de estado, separada de la fuente única que ya usan PedidosPage/CajeroPage/
+// BartenderPage (pedidoEstados.js) — y la suya seguía usando el nombre
+// legado 'listo', que el backend ya no guarda NUNCA (el estado real es
+// 'en_camino', ver pedidos_estado_check). Resultado: cualquier pedido
+// "Listo para recoger"/"En camino" no caía en ningún bucket del donut (se
+// perdía del conteo) y en la lista de "Pedidos recientes" se mostraba con
+// el badge gris de "estado desconocido" y el texto crudo "en_camino".
+import { configEstadoPedido } from '../../../shared/utils/pedidoEstados';
 import '../../insumos/pages/InsumosPage.css';
 import './DashboardPage.css';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
+
+// Nombre del negocio para el encabezado del reporte Excel exportado.
+const EMPRESA = 'Café Don Berna';
+// dd-mm-aaaa, para el nombre del archivo — más legible que el ISO (aaaa-mm-dd)
+// en un nombre de archivo pensado para que alguien lo lea, no lo ordene.
+const ddmmaaaa = (iso) => { const [y, m, d] = iso.split('-'); return `${d}-${m}-${y}`; };
 
 const toISODate = d => {
   const z = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -177,6 +193,7 @@ export default function DashboardPage() {
   // (Administrador/Superadministrador); el resto queda fijo en su local.
   // Igual criterio que ya usan CajeroPage/BartenderPage para pedidos.
   const [localSel, setLocalSel] = useState(user?.sede && user.sede !== 'Ambos' ? user.sede : 'todos');
+  const [exportando, setExportando] = useState(false);
 
   // ── Estado para todos los datos async ───────────────────────────────────
   const [clientes,    setClientes]    = useState([]);
@@ -220,6 +237,12 @@ export default function DashboardPage() {
   const pedidosF      = localSel === 'todos' ? pedidos      : pedidos.filter(p => p.sede === localSel);
   const ventas_       = localSel === 'todos' ? ventas       : ventas.filter(v => v.sede === localSel);
   const devolucionesF = localSel === 'todos' ? devoluciones : devoluciones.filter(d => d.sede === localSel);
+  // Antes "Compras" era la única lista de la página que NO respetaba el
+  // filtro de local — ni la tarjeta "Compras pendientes" en pantalla ni la
+  // hoja de Compras del Excel exportado (ver comentario en
+  // exportarResumenExcel). `sede`/`local_nombre`: mismos campos que ya usa
+  // el resto del código de compras.
+  const comprasF      = localSel === 'todos' ? compras      : compras.filter(c => (c.sede || c.local_nombre) === localSel);
   const pedStats = {
     pendiente: pedidosF.filter(p => p.estado === 'pendiente').length,
     ventas: pedidosF
@@ -243,7 +266,7 @@ export default function DashboardPage() {
   // Derived data
   // item 11 — la lista/alerta de "Insumos con stock bajo" se quitó del
   // Dashboard: esa información vive en Insumos (filtro "Ver solo stock bajo").
-  const comprasPend      = compras.filter(c => c.estado === 'Pendiente');
+  const comprasPend      = comprasF.filter(c => c.estado === 'Pendiente');
   const empleadosActivos = empleados.filter(e => e.estado === 'Activo').length;
   const pedidosPendLanding   = pedidosF.filter(p => p.origen === 'landing' && p.estado === 'pendiente').length;
   const pedidosDomicilio     = pedidosF.filter(p => p.tipo === 'domicilio' && (p.estado === 'pendiente' || p.estado === 'en_proceso')).length;
@@ -293,7 +316,10 @@ export default function DashboardPage() {
     { label:'Verificar pago', value: pedidosF.filter(p=>p.estado==='pendiente_verificacion').length, color:'#AD1457' },
     { label:'Pendiente',      value: pedidosF.filter(p=>p.estado==='pendiente').length,              color:'#FF9800' },
     { label:'En proceso',     value: pedidosF.filter(p=>p.estado==='en_proceso').length,             color:'#2196F3' },
-    { label:'Listo',          value: pedidosF.filter(p=>p.estado==='listo').length,                  color:'#9C27B0' },
+    // 'en_camino' es el estado real (ver comentario del import de arriba):
+    // agrupa domicilio ("En camino") y recoger ("Listo para recoger") bajo
+    // una sola etiqueta neutra porque este donut mezcla ambos tipos.
+    { label:'Listo/En camino',value: pedidosF.filter(p=>p.estado==='en_camino').length,              color:'#9C27B0' },
     { label:'Entregado',      value: pedidosF.filter(p=>p.estado==='entregado').length,              color:'#4CAF50' },
     { label:'Cancelado',      value: pedidosF.filter(p=>p.estado==='cancelado').length,              color:'#EF5350' },
   ];
@@ -309,16 +335,341 @@ export default function DashboardPage() {
 
   const recentClientes = [...clientes].sort((a,b) => b.id - a.id).slice(0,5);
 
-  const exportarResumenPDF = () => {
-    const w = window.open('', '_blank');
-    if (!w) return;
+  // Diseño del PDF: mismo criterio visual que el dashboard en pantalla
+  // (tarjetas de resumen, grid de indicadores a color, tabla de ventas con
+  // total, y las dos distribuciones —ventas/pedidos— como barras de
+  // colores en vez de donuts, que no se replican bien en HTML impreso).
+  // ── Exportación a Excel ────────────────────────────────────────────────
+  // Antes esto abría una ventana con HTML y llamaba a window.print() para
+  // que el navegador lo guardara como PDF. Un PDF se mira; una hoja de
+  // cálculo se trabaja: se filtra, se suma, se pega en otro informe. Por
+  // eso el reporte pasó a Excel, y de paso se amplió — el PDF cabía en una
+  // página y mostraba solo los agregados; acá va también el detalle fila
+  // por fila de ventas, pedidos, devoluciones, compras y catálogo.
+  //
+  // El libro se genera con ExcelJS (ver shared/utils/excelExport.js) —
+  // .xlsx real, con el nombre del negocio, colores de marca sutiles en los
+  // encabezados y ancho de columna según el contenido. `descargarExcel`
+  // es async (ExcelJS se importa recién acá, de forma diferida) — de ahí
+  // el estado `exportando`, para no dejar que un segundo clic dispare una
+  // segunda descarga mientras la primera todavía se está armando.
+  const exportarResumenExcel = async () => {
+    if (exportando) return;
+    setExportando(true);
+    try {
+    const fechaLarga = iso => new Date(iso + 'T00:00:00')
+      .toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
+    const fechaCorta = valor => {
+      if (!valor) return '—';
+      const d = new Date(valor);
+      return isNaN(d) ? String(valor).slice(0, 10)
+        : d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+    const horaDe = valor => {
+      if (!valor) return '';
+      const d = new Date(valor);
+      return isNaN(d) ? '' : d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    };
+    const diaSemana = iso => new Date(iso + 'T00:00:00')
+      .toLocaleDateString('es-CO', { weekday: 'long' });
+
     const rangoLabel = rango.desde === rango.hasta
-      ? new Date(rango.desde+'T00:00:00').toLocaleDateString('es-CO',{day:'numeric',month:'long',year:'numeric'})
-      : `${new Date(rango.desde+'T00:00:00').toLocaleDateString('es-CO',{day:'numeric',month:'short',year:'numeric'})} — ${new Date(rango.hasta+'T00:00:00').toLocaleDateString('es-CO',{day:'numeric',month:'short',year:'numeric'})}`;
-    const filasDias  = ventasPorDia.map(d => `<tr><td>${d.label}</td><td style="text-align:right;">${fmt(d.value)}</td></tr>`).join('');
-    const filasStats = statCards.map(s  => `<tr><td>${s.label}</td><td style="text-align:right;font-weight:700;">${s.value}</td></tr>`).join('');
-    w.document.write(`<html><head><title>Resumen Dashboard</title><style>body{font-family:Arial,sans-serif;color:#222;padding:32px;max-width:640px;margin:0 auto;}h1{font-size:22px;color:#2E7D32;}table{width:100%;border-collapse:collapse;}td{padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}</style></head><body><h1>☕ Café Don Berna — Resumen del Dashboard</h1><p>Periodo: ${rangoLabel} · Generado: ${new Date().toLocaleString('es-CO')}</p><h2>Indicadores</h2><table>${filasStats}</table><h2>Ventas por día</h2><table>${filasDias}</table></body></html>`);
-    w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+      ? fechaLarga(rango.desde)
+      : `${fechaLarga(rango.desde)} al ${fechaLarga(rango.hasta)}`;
+    const localLabel = localSel === 'todos' ? 'Todos los locales' : localSel;
+    const promedioDiario = ventasPorDia.length ? totalVentasPeriodo / ventasPorDia.length : 0;
+    const ticketPromedio = cantidadVentasPeriodo ? totalVentasPeriodo / cantidadVentasPeriodo : 0;
+    const generado = new Date().toLocaleString('es-CO',
+      { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const subtitulos = [
+      `Periodo: ${rangoLabel}`,
+      `Local: ${localLabel}`,
+      `Generado: ${generado}`,
+    ];
+
+    // ── Hoja 1 · Resumen ────────────────────────────────────────────────
+    const hojaResumen = {
+      nombre: 'Resumen',
+      empresa: EMPRESA,
+      titulo: 'Reporte de Ventas y Pedidos',
+      subtitulos,
+      datos: [
+        ['##', 'VENTAS DEL PERIODO'],
+        ['Total facturado', totalVentasPeriodo, 'moneda'],
+        ['Número de ventas', cantidadVentasPeriodo, 'numero'],
+        ['Ticket promedio', Math.round(ticketPromedio), 'moneda'],
+        ['Promedio diario', Math.round(promedioDiario), 'moneda'],
+        ['Días en el rango', ventasPorDia.length, 'numero'],
+        ['Mejor día', mejorDia ? `${diaSemana(mejorDia.fecha)}, ${fechaCorta(mejorDia.fecha + 'T00:00:00')}` : 'Sin ventas en el rango'],
+        ['Venta del mejor día', mejorDia ? mejorDia.value : 0, 'moneda'],
+        ['---'],
+        // "Estado de ventas/pedidos" — mismo criterio que sus tarjetas en
+        // pantalla ("Distribución actual" / "Todos los pedidos"): son el
+        // estado ACTUAL de la operación, no un corte del periodo elegido
+        // arriba. Se aclara acá para que el Excel no contradiga su propio
+        // encabezado "Periodo: …".
+        ['##', 'ESTADO DE VENTAS (actual, no solo del periodo)'],
+        ...ventasDonut.map(d => [d.label, d.value, 'numero']),
+        ['Total de ventas registradas', ventasStats.total || 0, 'numero'],
+        ['---'],
+        ['##', 'ESTADO DE PEDIDOS (actual, no solo del periodo)'],
+        ...pedidosDonut.map(d => [d.label, d.value, 'numero']),
+        ['Total de pedidos', pedidosF.length, 'numero'],
+        ['---'],
+        ['##', 'INDICADORES GENERALES'],
+        ...statCards.map(c => [c.label, c.value, 'numero']),
+        ['Empleados activos', empleadosActivos, 'numero'],
+        ['Compras pendientes', comprasPend.length, 'numero'],
+        ['Pedidos a domicilio en curso', pedidosDomicilio, 'numero'],
+        ['Pedidos por verificar pago', pedidosPorVerificar, 'numero'],
+        ['Pedidos del cliente pendientes', pedidosPendLanding, 'numero'],
+      ],
+      nota: 'Documento informativo generado por SICABER. No constituye comprobante fiscal.',
+    };
+
+    // ── Hoja 2 · Ventas por día ─────────────────────────────────────────
+    const ventasDelDia = f => ventasEnRango.filter(v => (v.fecha || v.created_at || '').slice(0, 10) === f);
+    const hojaPorDia = {
+      nombre: 'Ventas por dia',
+      empresa: EMPRESA,
+      titulo: 'Ventas por día',
+      subtitulos,
+      columnas: [
+        { titulo: 'Fecha',           tipo: 'texto'   },
+        { titulo: 'Día',             tipo: 'texto'   },
+        { titulo: 'N.º de ventas',   tipo: 'numero'  },
+        { titulo: 'Total del día',   tipo: 'moneda'  },
+        { titulo: 'Ticket promedio', tipo: 'moneda'  },
+        { titulo: '% del periodo',   tipo: 'decimal' },
+      ],
+      filas: ventasPorDia.map(d => {
+        const delDia = ventasDelDia(d.fecha);
+        return [
+          fechaCorta(d.fecha + 'T00:00:00'),
+          diaSemana(d.fecha),
+          delDia.length,
+          d.value,
+          delDia.length ? Math.round(d.value / delDia.length) : 0,
+          totalVentasPeriodo ? (d.value * 100) / totalVentasPeriodo : 0,
+        ];
+      }),
+      totales: ['TOTAL', '', cantidadVentasPeriodo, totalVentasPeriodo, '', ''],
+    };
+
+    // ── Hoja 3 · Detalle de ventas ──────────────────────────────────────
+    const hojaVentas = {
+      nombre: 'Detalle de ventas',
+      empresa: EMPRESA,
+      titulo: 'Detalle de ventas del periodo',
+      subtitulos,
+      columnas: [
+        { titulo: 'Venta',  tipo: 'texto'  },
+        { titulo: 'Pedido', tipo: 'texto'  },
+        { titulo: 'Fecha',  tipo: 'texto'  },
+        { titulo: 'Hora',   tipo: 'texto'  },
+        { titulo: 'Local',  tipo: 'texto'  },
+        { titulo: 'Estado', tipo: 'texto'  },
+        { titulo: 'Total',  tipo: 'moneda' },
+      ],
+      filas: [...ventasEnRango]
+        .sort((a, b) => String(b.fecha || b.created_at || '').localeCompare(String(a.fecha || a.created_at || '')))
+        .map(v => [
+          `#${v.id}`,
+          v.pedido_id ? `#${v.pedido_id}` : '—',
+          fechaCorta(v.fecha || v.created_at),
+          horaDe(v.fecha || v.created_at),
+          v.sede || '—',
+          v.estado || '—',
+          Number(v.total) || 0,
+        ]),
+      totales: ['', '', '', '', '', 'TOTAL', totalVentasPeriodo],
+      nota: ventasEnRango.length ? '' : 'No hubo ventas en el rango seleccionado.',
+    };
+
+    // ── Hoja 4 · Pedidos ────────────────────────────────────────────────
+    const pedidosEnRango = pedidosF.filter(p =>
+      enRango(p.created_at || p.fechaCreacion, rango.desde, rango.hasta));
+    const resumirItems = p => {
+      const items = p.items || p.productos || [];
+      if (!Array.isArray(items) || !items.length) return '—';
+      return items.map(i => `${i.cantidad || 1}x ${i.nombre || i.producto || '?'}`).join(', ');
+    };
+    const hojaPedidos = {
+      nombre: 'Pedidos',
+      empresa: EMPRESA,
+      titulo: 'Pedidos del periodo',
+      subtitulos,
+      columnas: [
+        { titulo: 'Pedido',    tipo: 'texto'  },
+        { titulo: 'Fecha',     tipo: 'texto'  },
+        { titulo: 'Hora',      tipo: 'texto'  },
+        { titulo: 'Cliente',   tipo: 'texto'  },
+        { titulo: 'Tipo',      tipo: 'texto'  },
+        { titulo: 'Local',     tipo: 'texto'  },
+        { titulo: 'Origen',    tipo: 'texto'  },
+        { titulo: 'Estado',    tipo: 'texto'  },
+        { titulo: 'Productos', tipo: 'texto'  },
+        { titulo: 'Total',     tipo: 'moneda' },
+      ],
+      filas: [...pedidosEnRango]
+        .sort((a, b) => (b.id || 0) - (a.id || 0))
+        .map(p => [
+          `#${p.id}`,
+          fechaCorta(p.created_at || p.fechaCreacion),
+          p.hora || horaDe(p.created_at || p.fechaCreacion),
+          p.cliente || '—',
+          p.tipo || '—',
+          p.sede || '—',
+          p.origen || '—',
+          p.estado || '—',
+          resumirItems(p),
+          Number(p.total) || 0,
+        ]),
+      totales: ['', '', '', '', '', '', '', '', 'TOTAL', pedidosEnRango.reduce((s, p) => s + (Number(p.total) || 0), 0)],
+      nota: pedidosEnRango.length ? '' : 'No hubo pedidos en el rango seleccionado.',
+    };
+
+    // ── Hoja 5 · Devoluciones ───────────────────────────────────────────
+    // Antes esta hoja no respetaba el rango de fechas del Dashboard (solo
+    // el local) — exportaba TODAS las devoluciones históricas de ese local
+    // sin importar el periodo elegido. Se corrige para que "Periodo" en el
+    // encabezado sea cierto también acá.
+    const devolucionesEnRango = devolucionesF.filter(d =>
+      enRango(d.fecha || d.created_at, rango.desde, rango.hasta));
+    const hojaDevoluciones = {
+      nombre: 'Devoluciones',
+      empresa: EMPRESA,
+      titulo: 'Devoluciones del periodo',
+      subtitulos,
+      columnas: [
+        { titulo: 'Devolución', tipo: 'texto'  },
+        { titulo: 'Venta',      tipo: 'texto'  },
+        { titulo: 'Fecha',      tipo: 'texto'  },
+        { titulo: 'Local',      tipo: 'texto'  },
+        { titulo: 'Estado',     tipo: 'texto'  },
+        { titulo: 'Motivo',     tipo: 'texto'  },
+        { titulo: 'Monto',      tipo: 'moneda' },
+      ],
+      filas: devolucionesEnRango.map(d => [
+        `#${d.id}`,
+        d.venta_id ? `#${d.venta_id}` : '—',
+        fechaCorta(d.fecha || d.created_at),
+        d.sede || '—',
+        d.estado || '—',
+        d.motivo || '—',
+        Number(d.monto || d.total) || 0,
+      ]),
+      totales: ['', '', '', '', '', 'TOTAL', devolucionesEnRango.reduce((s, d) => s + (Number(d.monto || d.total) || 0), 0)],
+      nota: devolucionesEnRango.length ? '' : 'No hubo devoluciones en el rango seleccionado.',
+    };
+
+    // ── Hoja 6 · Compras ────────────────────────────────────────────────
+    // Antes esta hoja exportaba TODAS las compras registradas, de
+    // cualquier fecha y cualquier local (comprasF ya filtra por local, a
+    // nivel de página) — el rango de fechas es lo que faltaba acá.
+    const comprasEnRango = comprasF.filter(c => enRango(c.fecha || c.created_at, rango.desde, rango.hasta));
+    const hojaCompras = {
+      nombre: 'Compras',
+      empresa: EMPRESA,
+      titulo: 'Compras del periodo',
+      subtitulos,
+      columnas: [
+        { titulo: 'Compra',    tipo: 'texto'  },
+        { titulo: 'Fecha',     tipo: 'texto'  },
+        { titulo: 'Proveedor', tipo: 'texto'  },
+        { titulo: 'Local',     tipo: 'texto'  },
+        { titulo: 'Estado',    tipo: 'texto'  },
+        { titulo: 'Total',     tipo: 'moneda' },
+      ],
+      filas: comprasEnRango.map(c => [
+        `#${c.id}`,
+        fechaCorta(c.fecha || c.created_at),
+        c.proveedor || c.proveedor_nombre || '—',
+        c.sede || c.local_nombre || '—',
+        c.estado || '—',
+        Number(c.total) || 0,
+      ]),
+      totales: ['', '', '', '', 'TOTAL', comprasEnRango.reduce((s, c) => s + (Number(c.total) || 0), 0)],
+      nota: comprasEnRango.length ? '' : 'No hubo compras en el rango seleccionado.',
+    };
+
+    // ── Hoja 7 · Productos más vendidos ─────────────────────────────────
+    const rankingProductos = (() => {
+      const acumulado = new Map();
+      pedidosEnRango.forEach(p => {
+        const items = p.items || p.productos || [];
+        if (!Array.isArray(items)) return;
+        items.forEach(i => {
+          const nombre = i.nombre || i.producto || 'Sin nombre';
+          const cantidad = Number(i.cantidad) || 1;
+          // Mismo criterio que ya usa el historial del cliente en Landing.jsx
+          // para el subtotal de una línea: `precioTotal`/`precio` es el
+          // precio POR UNIDAD (con toppings/adiciones ya incluidos si los
+          // tiene), no el total de la línea — hay que multiplicarlo por
+          // `cantidad` acá también.
+          const monto = Number(i.precioTotal ?? i.precio ?? 0) * cantidad;
+          const acc = acumulado.get(nombre) || { cantidad: 0, total: 0 };
+          acc.cantidad += cantidad;
+          acc.total += monto;
+          acumulado.set(nombre, acc);
+        });
+      });
+      return [...acumulado.entries()]
+        .map(([nombre, v]) => ({ nombre, ...v }))
+        .sort((a, b) => b.cantidad - a.cantidad);
+    })();
+    const hojaProductosVendidos = {
+      nombre: 'Productos mas vendidos',
+      empresa: EMPRESA,
+      titulo: 'Productos más vendidos del periodo',
+      subtitulos,
+      columnas: [
+        { titulo: 'Producto',        tipo: 'texto'  },
+        { titulo: 'Unidades vendidas', tipo: 'numero' },
+        { titulo: 'Ingresos generados', tipo: 'moneda' },
+      ],
+      filas: rankingProductos.map(p => [p.nombre, p.cantidad, Math.round(p.total)]),
+      totales: ['TOTAL', rankingProductos.reduce((s, p) => s + p.cantidad, 0), Math.round(rankingProductos.reduce((s, p) => s + p.total, 0))],
+      nota: rankingProductos.length ? '' : 'No hubo productos vendidos en el rango seleccionado.',
+    };
+
+    // ── Hoja 8 · Catálogo ───────────────────────────────────────────────
+    // Sin filtro de fecha/local a propósito: es el catálogo VIGENTE del
+    // menú (precio actual), no una foto histórica del periodo elegido.
+    const hojaProductos = {
+      nombre: 'Catalogo',
+      empresa: EMPRESA,
+      titulo: 'Catálogo de productos',
+      subtitulos: [`Generado: ${generado}`],
+      columnas: [
+        { titulo: 'Producto',  tipo: 'texto'  },
+        { titulo: 'Categoría', tipo: 'texto'  },
+        { titulo: 'Estado',    tipo: 'texto'  },
+        { titulo: 'Precio',    tipo: 'moneda' },
+      ],
+      filas: [...productos]
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || '')))
+        .map(p => [
+          p.nombre || '—',
+          p.categoria || p.categoria_nombre || '—',
+          p.estado || '—',
+          Number(p.precio) || 0,
+        ]),
+    };
+
+    // "Reporte_SICABER_dd-mm-aaaa_a_dd-mm-aaaa[_Local]" — el rango real
+    // exportado, no un nombre genérico que se pisaría entre descargas.
+    const sufijoLocal = localSel === 'todos' ? '' : '_' + String(localSel).replace(/[^A-Za-z0-9]+/g, '-');
+    const nombreArchivo = `Reporte_SICABER_${ddmmaaaa(rango.desde)}_a_${ddmmaaaa(rango.hasta)}${sufijoLocal}`;
+
+    await descargarExcel(nombreArchivo, [
+      hojaResumen, hojaPorDia, hojaVentas, hojaPedidos,
+      hojaDevoluciones, hojaCompras, hojaProductosVendidos, hojaProductos,
+    ]);
+    } finally {
+      setExportando(false);
+    }
   };
 
   return (
@@ -344,10 +695,10 @@ export default function DashboardPage() {
               />
             </div>
             <LocalFiltro value={localSel} onChange={setLocalSel} sedeUsuario={user?.sede} style={{marginLeft:8}}/>
-            <button onClick={exportarResumenPDF}
-              style={{display:'flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:8,border:'1.5px solid #4CAF50',background:'#4CAF50',color:'white',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+            <button onClick={exportarResumenExcel} disabled={exportando}
+              style={{display:'flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:8,border:'1.5px solid #4CAF50',background:'#4CAF50',color:'white',fontSize:12,fontWeight:700,cursor:exportando?'default':'pointer',opacity:exportando?0.7:1}}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              Exportar PDF
+              {exportando ? 'Generando...' : 'Exportar Excel'}
             </button>
           </div>
         </div>
@@ -387,7 +738,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── ALERTS ── */}
-        {(comprasPend.length>0||pedStats.pendiente>0||pedidosPendLanding>0||pedidosPorVerificar>0||devStats.pendiente>0||pedidosDomicilio>0) && (
+        {(comprasPend.length>0||pedStats.pendiente>0||pedidosPendLanding>0||pedidosPorVerificar>0||devStats.pendiente>0) && (
           <div className="dash-alerts">
             {pedidosPorVerificar>0 && (
               <div className="dash-alert dash-alert--magenta" onClick={()=>navigate('/pedidos')}>
@@ -401,12 +752,10 @@ export default function DashboardPage() {
                 <div><strong>{pedidosPendLanding} pedido{pedidosPendLanding>1?'s':''} desde la landing</strong><p>Clientes esperando confirmación de domicilio</p></div>
               </div>
             )}
-            {pedidosDomicilio>0 && (
-              <div className="dash-alert dash-alert--green" onClick={()=>navigate('/pedidos')} style={{borderLeft:'4px solid #FF6F00'}}>
-                <Icon d={ICONS.alert_truck} size={18} sw={2}/>
-                <div><strong>🛵 {pedidosDomicilio} pedido{pedidosDomicilio>1?'s':''} a domicilio activo{pedidosDomicilio>1?'s':''}</strong><p>Pedidos en camino o pendientes de despacho</p></div>
-              </div>
-            )}
+            {/* La tarjeta "N pedidos a domicilio activos" se quitó: duplicaba
+                la campanita de domicilios (DomiciliosBell, en el header del
+                Layout) que ya cumple ese aviso. `pedidosDomicilio` se
+                conserva para el resumen exportable de más arriba. */}
             {devStats.pendiente>0 && (
               <div className="dash-alert dash-alert--warn" onClick={()=>navigate('/devoluciones')}>
                 <Icon d={ICONS.alert_back} size={18} sw={2}/>
@@ -483,9 +832,13 @@ export default function DashboardPage() {
             {pedidosF.length===0
               ? <div className="dash-empty">No hay pedidos registrados.</div>
               : <div className="dash-list">{[...pedidosF].sort((a,b)=>String(b.id).localeCompare(String(a.id))).slice(0,5).map(p=>{
-                const cfg={pendiente_verificacion:{c:'#AD1457',bg:'#FCE4EC'},pendiente:{c:'#F57F17',bg:'#FFF8E1'},en_proceso:{c:'#1565C0',bg:'rgba(25,118,210,0.12)'},listo:{c:'#2E7D32',bg:'#E8F5E9'},entregado:{c:'#388E3C',bg:'#F1F8E9'},cancelado:{c:'#B71C1C',bg:'#FFEBEE'}};
-                const labels={pendiente_verificacion:'Verificar pago',pendiente:'Pendiente',en_proceso:'En proceso',listo:'Listo',entregado:'Entregado',cancelado:'Cancelado'};
-                const c = cfg[p.estado]||{c:'#888',bg:'#F5F5F5'};
+                // Antes esta tarjeta tenía su propia tabla de labels/colores
+                // (sin 'en_camino' — ver el comentario junto al import de
+                // configEstadoPedido). Ahora lee de la MISMA fuente que ya
+                // usan PedidosPage/CajeroPage/BartenderPage, con la etiqueta
+                // correcta según el tipo de entrega de ESTE pedido puntual
+                // ("Listo para recoger" vs "En camino").
+                const cfg = configEstadoPedido(p.estado, p.tipo);
                 return (
                   <div className="dash-list__item" key={p.id}>
                     <div className="dash-list__avatar" style={{background:'#F3E5F5',color:'#7B1FA2'}}>
@@ -495,7 +848,7 @@ export default function DashboardPage() {
                       <div className="dash-list__name">#{p.id} — {p.cliente || p.mesa || '—'}</div>
                       <div className="dash-list__email">{fmt(p.total)}</div>
                     </div>
-                    <span className="dash-list__badge" style={{background:c.bg,color:c.c}}>{labels[p.estado]||p.estado}</span>
+                    <span className="dash-list__badge" style={{background:cfg.bg,color:cfg.color}}>{cfg.label}</span>
                   </div>
                 );
               })}</div>

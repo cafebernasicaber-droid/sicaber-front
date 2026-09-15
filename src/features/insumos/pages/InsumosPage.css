@@ -70,8 +70,8 @@
 
 /* ── CARD TABLE CONTAINER ────────────────────────────────────── */
 .insumos-card {
-  background: var(--bg-surface); border-radius: 14px;
-  box-shadow: 0 1px 6px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+  background: var(--bg-surface); border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.05);
   overflow: hidden; border: 1px solid rgba(0,0,0,.06); min-height: 200px;
 }
 
@@ -110,11 +110,11 @@
 .insumos-table { width: 100%; border-collapse: collapse; }
 .insumos-table thead tr { background: var(--bg-surface); border-bottom: 2px solid #F0F0F0; }
 .insumos-table th {
-  padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 700;
-  color: var(--text-secondary); letter-spacing: 1px; text-transform: uppercase; white-space: nowrap;
+  padding: 13px 16px; text-align: left; font-size: 11px; font-weight: 700;
+  color: var(--text-secondary); letter-spacing: .6px; text-transform: uppercase; white-space: nowrap;
 }
-.insumos-table tbody tr { border-bottom: 1px solid #F5F5F5; transition: background .12s; }
-.insumos-table tbody tr:hover { background: rgba(76,175,80,.04); }
+.insumos-table tbody tr { border-bottom: 1px solid #F5F5F5; transition: background .15s; }
+.insumos-table tbody tr:hover { background: rgba(76,175,80,.05); }
 .insumos-table tbody tr:last-child { border-bottom: none; }
 .insumos-table td { padding: 13px 16px; font-size: 14px; color: var(--text-primary); vertical-align: middle; }
 .td-id { font-size: 12px; color: #AAAAAA; font-weight: 600; font-family: monospace; }
@@ -131,7 +131,11 @@
 .ins-table-scroll { overflow-x: hidden; }
 .insumos-table--fixed { table-layout: fixed; width: 100%; }
 .insumos-table--fixed th,
-.insumos-table--fixed td { padding: 12px 12px; overflow: hidden; }
+.insumos-table--fixed td { padding: 13px 14px; overflow: hidden; }
+/* la celda Nombre no puede recortar overflow: si no, el tooltip del
+   aviso de stock (⚠️/🚨) queda cortado. El truncado del texto largo lo
+   sigue haciendo .td-trunc con su propio overflow:hidden. */
+.insumos-table--fixed td.td-nombre { overflow: visible; }
 .insumos-table--fixed .td-trunc {
   display: inline-block; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
@@ -170,6 +174,48 @@
   color: #FFA726;
   border: 1px solid rgba(255,167,38,0.5);
 }
+/* ── ALERTAS DE STOCK (badge de estado, ícono de aviso en la tabla, y
+   la caja de alerta del modal "Ver insumo") ─────────────────────
+   Antes cada una armaba su color con un style={{}} inline a partir de
+   ESTADO_STOCK_META (fg/bg/bd) en el JSX — mismo componente, misma
+   condición de render, solo se le puso className para poder pulear el
+   estilo desde acá. 3 estados: agotado / bajo-minimo (ambos críticos,
+   tono rojo) / agotandose (aviso temprano, tono ámbar). Nombres con
+   prefijo "insumo-" a propósito: el resto de las clases de este archivo
+   (.insumos-card, .badge-cat…) se repiten tal cual en otros módulos del
+   panel, así que evitamos esos nombres para no arrastrar cambios ahí. */
+.insumo-badge-estado {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; border-radius: 20px; font-size: 11px; line-height: 1.6;
+}
+.insumo-badge-estado--agotado     { font-weight: 800; background: rgba(198,40,40,.14);  color: #C62828; border: 1px solid #EF9A9A; }
+.insumo-badge-estado--bajo-minimo { font-weight: 800; background: rgba(216,67,21,.15);  color: #D84315; border: 1px solid #FF8A65; }
+.insumo-badge-estado--agotandose  { font-weight: 700; background: rgba(245,127,23,.13); color: #F57F17; border: 1px solid #FFD54F; }
+.insumo-badge-estado--ok          { font-weight: 700; background: rgba(76,175,80,.14);  color: #2E7D32; border: 1px solid rgba(76,175,80,.45); }
+
+.insumo-aviso-icon {
+  cursor: help; margin-right: 6px; font-size: 14px; line-height: 1; display: inline-block;
+}
+.insumo-aviso-icon--critico { color: #C62828; }
+.insumo-aviso-icon--warning { color: #F9A825; }
+
+.insumo-alert-stock {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  border-radius: 10px; margin-bottom: 14px; font-size: 13px; line-height: 1.5;
+}
+.insumo-alert-stock--agotado {
+  background: rgba(198,40,40,.14); border: 1px solid #EF9A9A;
+  border-left: 4px solid #C62828; color: #C62828; font-weight: 600;
+}
+.insumo-alert-stock--bajo-minimo {
+  background: rgba(216,67,21,.15); border: 1px solid #FF8A65;
+  border-left: 4px solid #D84315; color: #D84315; font-weight: 600;
+}
+.insumo-alert-stock--agotandose {
+  background: rgba(245,127,23,.13); border: 1px solid #FFD54F;
+  border-left: 4px solid #F57F17; color: #F57F17; font-weight: 500;
+}
+
 /* ── TOGGLE SWITCH ───────────────────────────────────────────── */
 .toggle-btn { position: relative; width: 42px; height: 24px; border-radius: 12px; border: none; cursor: pointer; transition: background .25s; flex-shrink: 0; }
 .toggle-on { background: #4CAF50; }

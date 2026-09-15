@@ -1,9 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import useCompras from '../hooks/useCompras';
 import localesService from '../../../shared/services/localesService';
-import useTiposPresentacion from '../hooks/useTiposPresentacion';
-import CompraForm from '../components/CompraForm';
 import { filtrarBusqueda } from '../../../shared/utils/busqueda';
 import './ComprasPage.css';
 import Layout from '../../../shared/components/Layout';
@@ -21,9 +19,22 @@ const formatDate = (iso) => {
   return new Intl.DateTimeFormat('es-CO', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso));
 };
 
+// c.fecha es una columna DATE pura (sin hora) pero pg/node la serializa como
+// datetime UTC (ej. "2026-09-09T05:00:00.000Z"), así que antes se mostraba
+// tal cual, cruda — este helper la formatea en es-CO SOLO como fecha (sin
+// hora) y usando el día calendario tal como se guardó, sin dejar que el
+// huso horario del navegador la corra un día (mismo truco que ya usa
+// ProductosPage.jsx: tomar solo "YYYY-MM-DD" y parsear a medianoche local).
+const formatFechaCompra = (raw) => {
+  if (!raw) return '—';
+  const soloFecha = String(raw).substring(0, 10);
+  return new Intl.DateTimeFormat('es-CO', { dateStyle: 'long' }).format(new Date(`${soloFecha}T00:00:00`));
+};
+
 // ── Modal Ver Compra ──────────────────────────────────────────────────────────
 function ModalVerCompra({ compra, onClose, onAnular }) {
   const esAnulada = compra.estado === 'anulada';
+  const esParcial = compra.estado === 'anulada_parcial';
   const [zoomComprobante, setZoomComprobante] = useState(false);
   const [insumosExpandidos, setInsumosExpandidos] = useState(false);
   const LIMITE_INSUMOS_VISIBLES = 5;
@@ -51,7 +62,9 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                 <span className="badge-cat">{formatoTitulo(compra.proveedorNombre)}</span>
                 {esAnulada
                   ? <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(183,28,28,.25)',color:'#EF9A9A',border:'1px solid rgba(239,83,80,.3)' }}>Anulada</span>
-                  : <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(46,125,50,.2)',color:'#81C784',border:'1px solid rgba(129,199,132,.3)' }}>Registrada</span>
+                  : esParcial
+                    ? <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(201,162,39,.22)',color:'#C9A227',border:'1px solid rgba(201,162,39,.35)' }}>Anulada parcialmente</span>
+                    : <span style={{ padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,background:'rgba(46,125,50,.2)',color:'#81C784',border:'1px solid rgba(129,199,132,.3)' }}>Registrada</span>
                 }
               </div>
             </div>
@@ -69,13 +82,21 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
               {[
                 ['ID', <span style={{ fontFamily:'monospace',fontSize:12,color:'#81C784',background:'rgba(76,175,80,.12)',padding:'2px 8px',borderRadius:6 }}>{compra.id}</span>],
                 ['Proveedor',    formatoTitulo(compra.proveedorNombre)],
-                ['Fecha',        compra.fecha],
+                ['Fecha',        formatFechaCompra(compra.fecha)],
                 ...(descuento > 0 && totalBruto != null ? [['Subtotal', formatCOP(totalBruto)]] : []),
                 ['Total',        <span className="modal-monto">{formatCOP(compra.total)}</span>],
                 ['Descuento',    descuento > 0
                   ? <span style={{ color:'#C9A227', fontWeight:700 }}>{descuento}% (-{formatCOP((totalBruto ?? compra.total) - compra.total)})</span>
                   : <span style={{ color:'var(--text-secondary)' }}>Sin descuento</span>],
-                ['Estado',       esAnulada ? 'Anulada' : 'Registrada'],
+                // Punto 1 — el comprobante es opcional (nunca lo exigió el
+                // backend); antes, sin él, la sección de abajo simplemente
+                // desaparecía y no quedaba claro si "no hay comprobante" o
+                // si algo falló al cargar. `tieneComprobante` lo dice de
+                // un vistazo, aquí mismo en el resumen — ver COMPRA_COLS.
+                ['Comprobante',  (compra.tieneComprobante ?? !!comprobanteUrl)
+                  ? <span style={{ color:'#4CAF50', fontWeight:700 }}>✓ Con comprobante</span>
+                  : <span style={{ color:'var(--text-secondary)' }}>— Sin comprobante</span>],
+                ['Estado',       esAnulada ? 'Anulada' : esParcial ? 'Anulada parcialmente' : 'Registrada'],
                 ['Registrado',   formatDate(compra.fechaCreacion)],
               ].map(([label, val]) => (
                 <div key={label} style={{ display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13 }}>
@@ -88,7 +109,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
               <div style={{ fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'0.6px',marginBottom:12 }}>Resumen</div>
               {[
                 ['Cantidad de ítems', compra.items?.length || 0],
-                ...(esAnulada ? [
+                ...(esAnulada || esParcial ? [
                   ['Fecha anulación', formatDate(compra.fechaAnulacion)],
                   ['Motivo',          compra.motivoAnulacion || '—'],
                 ] : []),
@@ -119,7 +140,9 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(insumosExpandidos ? compra.items : compra.items.slice(0, LIMITE_INSUMOS_VISIBLES)).map((item, idx) => (
+                  {(insumosExpandidos ? compra.items : compra.items.slice(0, LIMITE_INSUMOS_VISIBLES)).map((item, idx) => {
+                    const anulado = Number(item.cantidad_anulada) || 0;
+                    return (
                     <tr key={idx} style={{ borderBottom:'1px solid var(--border)' }}>
                       <td style={{ padding:'7px 8px' }}>
                         <div style={{ fontWeight:600,color:'var(--text-primary)' }}>{formatoTitulo(item.insumo)}</div>
@@ -132,12 +155,18 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
                                 : `${item.presentacion.cantidad} ${item.presentacion.tipo}(s) × ${item.presentacion.contenidoPorPresentacion} ${item.unidad}`}
                           </div>
                         )}
+                        {anulado > 0 && (
+                          <div style={{ fontSize:11,color:'#C9A227',marginTop:2,fontWeight:600 }}>
+                            ⓘ {anulado} {item.unidad} anulado{anulado !== 1 ? 's' : ''}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding:'7px 8px',color:'var(--text-secondary)' }}>{item.unidad || '—'}</td>
                       <td style={{ padding:'7px 8px',color:'var(--text-primary)' }}>{item.cantidad}</td>
                       <td style={{ padding:'7px 8px' }} className="modal-monto">{formatCOP(item.cantidad * item.precioUnitario)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {!insumosExpandidos && compra.items.length > LIMITE_INSUMOS_VISIBLES && (
                     <tr>
                       <td colSpan="4" style={{ padding:'10px 8px', textAlign:'center' }}>
@@ -223,7 +252,7 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
           <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
             <button className="btn-cancel" onClick={onClose}>Cerrar</button>
             {!esAnulada && (
-              <AnularButton size={14} className="" label="Anular" onClick={onAnular}
+              <AnularButton size={14} className="" label="Anular" onClick={onAnular} variant="anular"
                 style={{ padding:10,background:'linear-gradient(135deg,#E53935,#B71C1C)',border:'none',borderRadius:10,color:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}/>
             )}
           </div>
@@ -233,179 +262,24 @@ function ModalVerCompra({ compra, onClose, onAnular }) {
   );
 }
 
-// ── Modal: Gestionar tipos de presentación ─────────────────────────────────
-function ModalTiposPresentacion({ onClose }) {
-  const { tipos, create, update, toggleEstado } = useTiposPresentacion();
-  const [nombre, setNombre] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [editId, setEditId] = useState(null);
-  const [editNombre, setEditNombre] = useState('');
-  const [editLoading, setEditLoading] = useState(false);
-  const [toggleLoadingId, setToggleLoadingId] = useState(null);
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!nombre.trim()) { setError('El nombre del tipo de presentación es obligatorio.'); return; }
-    setLoading(true);
-    try {
-      const r = await create({ nombre: nombre.trim() });
-      if (r?.error) { setError(r.error); return; }
-      setNombre('');
-    } catch (err) {
-      setError(err.message || 'No se pudo crear el tipo de presentación.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const startEdit = (t) => { setError(''); setEditId(t.id); setEditNombre(t.nombre); };
-  const cancelEdit = () => { setEditId(null); setEditNombre(''); };
-
-  const saveEdit = async (t) => {
-    setError('');
-    if (!editNombre.trim()) { setError('El nombre del tipo de presentación es obligatorio.'); return; }
-    if (editNombre.trim() === t.nombre) { cancelEdit(); return; }
-    setEditLoading(true);
-    try {
-      const r = await update(t.id, { nombre: editNombre.trim() });
-      if (r?.error) { setError(r.error); return; }
-      cancelEdit();
-    } catch (err) {
-      setError(err.message || 'No se pudo guardar el cambio.');
-    } finally {
-      setEditLoading(false);
-    }
-  };
-
-  // Desactivar/activar: no borra nada. Un tipo de presentación no queda
-  // "pegado" a ninguna compra ya registrada (esa conserva el nombre del
-  // tipo en su propio registro) — solo deja de aparecer como opción para
-  // compras futuras. Sin bloqueo por compras históricas asociadas, a
-  // diferencia de proveedores o categorías de insumo.
-  const handleToggleEstado = async (t) => {
-    setError('');
-    setToggleLoadingId(t.id);
-    try {
-      const r = await toggleEstado(t.id);
-      if (r?.error) setError(r.error);
-    } catch (err) {
-      setError(err.message || 'No se pudo cambiar el estado del tipo de presentación.');
-    } finally {
-      setToggleLoadingId(null);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="modal-scroll-suave" style={{
-        background: 'var(--bg-surface)', borderRadius: 18, width: '100%', maxWidth: 480,
-        maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', overflowX: 'hidden', boxShadow: 'var(--shadow-lg)', animation: 'popIn .22s ease',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-primary)' }}>Gestionar tipos de presentación</div>
-          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-          </button>
-        </div>
-
-        <div style={{ padding: '20px 24px' }}>
-          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
-            "Unitario" es una opción fija del sistema y no aparece aquí — no se puede editar, desactivar ni eliminar.
-          </p>
-          {error && (
-            <div style={{ background: 'rgba(229,57,53,0.12)', color: '#EF5350', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
-              ⚠ {error}
-            </div>
-          )}
-
-          <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-            <input
-              type="text" value={nombre} onChange={e => setNombre(e.target.value)}
-              placeholder="Nuevo tipo (ej: Botella, Galón)"
-              style={{ flex: 1, padding: '9px 12px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-            />
-            <button type="submit" disabled={loading} className="btn-add" style={{ padding: '0 16px' }}>
-              {loading ? 'Creando...' : '+ Crear'}
-            </button>
-          </form>
-
-          {tipos.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
-              Aún no hay tipos de presentación registrados.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {tipos.map(t => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-surface-3)', border: '1px solid var(--border)' }}>
-                  {editId === t.id ? (
-                    <>
-                      <input
-                        type="text" autoFocus value={editNombre} onChange={e => setEditNombre(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(t); if (e.key === 'Escape') cancelEdit(); }}
-                        style={{ flex: 1, marginRight: 10, padding: '6px 10px', border: '1.5px solid var(--border-input)', borderRadius: 8, fontSize: 13, background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
-                      />
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <button onClick={() => saveEdit(t)} disabled={editLoading} title="Guardar"
-                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(76,175,80,0.15)', color: '#4CAF50', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
-                        </button>
-                        <button onClick={cancelEdit} title="Cancelar"
-                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: t.estado === 'Activo' ? 'var(--text-primary)' : 'var(--text-muted)' }}>{t.nombre}</span>
-                        <span style={{ padding:'2px 8px',borderRadius:20,fontSize:10.5,fontWeight:700,background:t.estado==='Activo'?'rgba(76,175,80,.15)':'rgba(158,158,158,.18)',color:t.estado==='Activo'?'#4CAF50':'#9E9E9E' }}>
-                          {t.estado === 'Activo' ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <button
-                          onClick={() => handleToggleEstado(t)}
-                          disabled={toggleLoadingId === t.id}
-                          title={t.estado === 'Activo' ? 'Desactivar tipo' : 'Activar tipo'}
-                          className={`toggle-btn ${t.estado === 'Activo' ? 'toggle-on' : 'toggle-off'}`}
-                          style={{ opacity: toggleLoadingId === t.id ? 0.5 : 1 }}>
-                          <span className="toggle-thumb"/>
-                        </button>
-                        <button onClick={() => startEdit(t)} title="Editar nombre"
-                          style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--bg-hover)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <button type="button" className="btn-cancel" onClick={onClose}>Cerrar</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Página principal ──────────────────────────────────────────────────────────
 const ComprasPage = () => {
   const navigate = useNavigate();
-  const { compras, anular, create, refresh } = useCompras();
+  const location = useLocation();
+  const { compras, anular } = useCompras();
   const [query, setQuery]               = useState('');
   const [filtered, setFiltered]         = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showTiposModal, setShowTiposModal] = useState(false);
   const [verTarget, setVerTarget]       = useState(null);
   const [anularTarget, setAnularTarget] = useState(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState('');
   const [motivoError, setMotivoError]   = useState('');
+  // Ítem 2 — anulación parcial: 'total' anula todo lo pendiente (como
+  // siempre), 'parcial' deja elegir insumo por insumo con checkboxes.
+  // itemsSeleccionados: { [índice en anularTarget.items]: { checked, cantidad } }.
+  const [modoAnulacion, setModoAnulacion] = useState('total');
+  const [itemsSeleccionados, setItemsSeleccionados] = useState({});
+  const [itemsError, setItemsError]     = useState('');
   const [successMsg, setSuccessMsg]     = useState('');
   const [errorMsg, setErrorMsg]         = useState('');
   const searchRef = useRef();
@@ -452,42 +326,80 @@ const ComprasPage = () => {
   };
   const clearSearch = () => { setQuery(''); setFiltered(null); searchRef.current?.focus(); };
 
-  // Antes esto no esperaba (await) ni capturaba nada: create(data) es
-  // async y api.js lanza (throw) cuando el backend rechaza la compra (ej.
-  // stock/validación), pero como no había ni await ni try/catch, el modal
-  // se cerraba y mostraba "¡Compra registrada correctamente!" igual —
-  // aunque la compra jamás se hubiera guardado.
-  const handleAddSubmit = async (data) => {
-    try {
-      const r = await create(data);
-      if (r?.error) { showError(r.error); return; }
-      setShowAddModal(false);
-      showSuccess('¡Compra registrada correctamente! El stock fue actualizado.');
-    } catch (err) {
-      showError(err.message || 'No se pudo registrar la compra.');
+  // La creación de la compra ahora vive en su propia página
+  // (RegistrarCompraPage, ruta /compras/registrar): al volver de ahí con
+  // éxito llega un state.successMsg en la navegación, que se muestra acá
+  // igual que cualquier otro toast de esta página. Se limpia el state con
+  // replace para que un refresh (F5) no vuelva a mostrar el mismo mensaje.
+  useEffect(() => {
+    if (location.state?.successMsg) {
+      showSuccess(location.state.successMsg);
+      navigate(location.pathname, { replace: true, state: {} });
     }
-  };
+    // eslint-disable-next-line
+  }, [location.state]);
 
   const openAnular = (c) => {
     setVerTarget(null); // cerrar modal ver si está abierto
     setAnularTarget(c);
     setMotivoAnulacion('');
     setMotivoError('');
+    setModoAnulacion('total');
+    setItemsSeleccionados({});
+    setItemsError('');
   };
 
-  const handleAnular = () => {
+  // Cuánto le queda pendiente de anular a cada línea de la compra (lo
+  // comprado menos lo ya anulado en anulaciones parciales previas) — solo
+  // se ofrecen para elegir las líneas con algo pendiente > 0.
+  const itemsPendientes = (anularTarget?.items || [])
+    .map((item, idx) => ({ item, idx, pendiente: Number(item.cantidad) - (Number(item.cantidad_anulada) || 0) }))
+    .filter(x => x.pendiente > 1e-9);
+
+  const toggleItemAnular = (idx, pendiente) => {
+    setItemsError('');
+    setItemsSeleccionados(prev => {
+      const actual = prev[idx];
+      if (actual?.checked) {
+        const { [idx]: _omit, ...resto } = prev;
+        return resto;
+      }
+      return { ...prev, [idx]: { checked: true, cantidad: pendiente } };
+    });
+  };
+  const cambiarCantidadItemAnular = (idx, cantidad) => {
+    setItemsSeleccionados(prev => ({ ...prev, [idx]: { checked: true, cantidad } }));
+  };
+
+  const handleAnular = async () => {
     if (!anularTarget) return;
     if (!motivoAnulacion.trim()) { setMotivoError('El motivo es obligatorio para anular.'); return; }
-    const ok = anular(anularTarget.id, motivoAnulacion.trim());
-    if (ok) {
-      if (query.trim()) setFiltered(buscarCompras(query));
-      else setFiltered(null);
-      showSuccess(`Compra #${anularTarget.id} anulada. El stock fue revertido.`);
-    } else {
-      showError(`No se pudo anular la compra #${anularTarget.id}.`);
+
+    let items = null;
+    if (modoAnulacion === 'parcial') {
+      items = Object.entries(itemsSeleccionados)
+        .filter(([, sel]) => sel.checked && Number(sel.cantidad) > 0)
+        .map(([idx, sel]) => ({ insumo_id: anularTarget.items[idx].insumo_id, cantidad: Number(sel.cantidad) }));
+      if (items.length === 0) { setItemsError('Selecciona al menos un insumo para anular.'); return; }
     }
+
+    const r = await anular(anularTarget.id, motivoAnulacion.trim(), items);
+    if (r && r.error) {
+      showError(r.error);
+      return; // deja el modal abierto para corregir y reintentar
+    }
+    if (query.trim()) setFiltered(buscarCompras(query));
+    else setFiltered(null);
+    const quedoParcial = r?.estado === 'anulada_parcial';
+    showSuccess(
+      quedoParcial
+        ? `Compra #${anularTarget.id} anulada parcialmente. El stock de los insumos seleccionados fue revertido.`
+        : `Compra #${anularTarget.id} anulada. El stock fue revertido.`
+    );
     setAnularTarget(null);
     setMotivoAnulacion('');
+    setModoAnulacion('total');
+    setItemsSeleccionados({});
   };
 
   const showSuccess = (msg) => { setSuccessMsg(msg); setErrorMsg('');  setTimeout(() => setSuccessMsg(''), 3500); };
@@ -537,6 +449,49 @@ const ComprasPage = () => {
               <h3>Anular compra</h3>
               <p>El stock de los insumos será <strong>revertido</strong> al anular esta compra.</p>
               <div className="modal-detail">Compra #{anularTarget.id} — {anularTarget.proveedorNombre}</div>
+
+              {/* Ítem 2 — elegir entre anular TODA la compra o solo algunos
+                  insumos puntuales (checkboxes). Solo tiene sentido ofrecer
+                  la opción parcial si hay más de un insumo con algo
+                  pendiente — con uno solo, "parcial" y "total" son lo mismo. */}
+              {itemsPendientes.length > 1 && (
+                <div style={{ marginTop:14, display:'flex', gap:16, fontSize:13 }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', fontWeight:600 }}>
+                    <input type="radio" checked={modoAnulacion === 'total'}
+                      onChange={() => { setModoAnulacion('total'); setItemsError(''); }}/>
+                    Anular toda la compra
+                  </label>
+                  <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', fontWeight:600 }}>
+                    <input type="radio" checked={modoAnulacion === 'parcial'}
+                      onChange={() => { setModoAnulacion('parcial'); setItemsError(''); }}/>
+                    Anular solo algunos insumos
+                  </label>
+                </div>
+              )}
+
+              {modoAnulacion === 'parcial' && itemsPendientes.length > 1 && (
+                <div style={{ marginTop:10, maxHeight:220, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8, padding:'4px 10px' }}>
+                  {itemsPendientes.map(({ item, idx, pendiente }) => {
+                    const sel = itemsSeleccionados[idx];
+                    return (
+                      <div key={idx} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderBottom:'1px solid var(--border)' }}>
+                        <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleItemAnular(idx, pendiente)}/>
+                        <span style={{ flex:1, fontSize:13 }}>
+                          {formatoTitulo(item.insumo)}
+                          <span style={{ color:'var(--text-muted)', fontSize:11.5 }}> — {pendiente} {item.unidad} pendiente{pendiente !== 1 ? 's' : ''}</span>
+                        </span>
+                        <input type="number" min="0.01" max={pendiente} step="any"
+                          disabled={!sel?.checked}
+                          value={sel?.cantidad ?? pendiente}
+                          onChange={e => cambiarCantidadItemAnular(idx, e.target.value)}
+                          style={{ width:80, padding:'4px 6px', borderRadius:6, border:'1px solid var(--border-input)', fontSize:12.5 }}/>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {itemsError && <div style={{ color:'#E53935',fontSize:12,marginTop:6 }}>{itemsError}</div>}
+
               <div style={{ marginTop:12 }}>
                 <label style={{ fontWeight:600,fontSize:13,display:'block',marginBottom:6 }}>
                   Motivo de anulación <span style={{ color:'#E53935' }}>*</span>
@@ -557,7 +512,9 @@ const ComprasPage = () => {
               </div>
               <div className="modal-actions">
                 <button className="btn-cancel" onClick={() => setAnularTarget(null)}>Cancelar</button>
-                <button className="btn-confirm-danger" onClick={handleAnular}>Anular compra</button>
+                <button className="btn-confirm-danger" onClick={handleAnular}>
+                  {modoAnulacion === 'parcial' && itemsPendientes.length > 1 ? 'Anular seleccionados' : 'Anular compra'}
+                </button>
               </div>
             </div>
           </div>
@@ -592,7 +549,7 @@ const ComprasPage = () => {
                 </svg>
                 Historial
               </button>
-              <button className="btn-add" onClick={() => setShowAddModal(true)}>
+              <button className="btn-add" onClick={() => navigate('/compras/registrar')}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
@@ -653,7 +610,7 @@ const ComprasPage = () => {
                   </div>
                   <h3>No hay compras activas</h3>
                   <p>Las compras de los últimos 30 días aparecerán aquí. Las más antiguas van al historial.</p>
-                  <button className="btn-add-first" onClick={() => setShowAddModal(true)}>
+                  <button className="btn-add-first" onClick={() => navigate('/compras/registrar')}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                     </svg>
@@ -683,7 +640,7 @@ const ComprasPage = () => {
                   {displayed.map(c => (
                     <tr key={c.id}>
                       <td className="td-nombre">{formatoTitulo(c.proveedorNombre)}</td>
-                      <td>{c.fecha}</td>
+                      <td>{formatFechaCompra(c.fecha)}</td>
                       <td>
                         <div className="items-nombres">
                           {c.items && c.items.length > 0
@@ -704,9 +661,15 @@ const ComprasPage = () => {
                       </td>
                       <td className="td-total">{formatCOP(c.total)}</td>
                       <td>
-                        <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(58,158,66,0.15)',color:'var(--color-green)',border:'1px solid #A5D6A7' }}>
-                          Registrada
-                        </span>
+                        {c.estado === 'anulada_parcial' ? (
+                          <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(201,162,39,.18)',color:'#C9A227',border:'1px solid rgba(201,162,39,.35)' }}>
+                            Anulada parcialmente
+                          </span>
+                        ) : (
+                          <span style={{ padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:'rgba(58,158,66,0.15)',color:'var(--color-green)',border:'1px solid #A5D6A7' }}>
+                            Registrada
+                          </span>
+                        )}
                       </td>
                       <td>
                         <div className="actions-group">
@@ -715,7 +678,7 @@ const ComprasPage = () => {
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             </button>
                           </Tooltip>
-                          <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Anular" onClick={() => openAnular(c)}/>
+                          <AnularButton size={14} className="btn-accion btn-accion-eliminar" label="Anular" onClick={() => openAnular(c)} variant="anular"/>
                         </div>
                       </td>
                     </tr>
@@ -726,39 +689,6 @@ const ComprasPage = () => {
           )}
         </div>
         </div>
-
-        {/* Modal Registrar Compra */}
-        {showAddModal && (
-          <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
-            <div className="modal-compra-box" onClick={e => e.stopPropagation()}>
-              <div className="modal-compra-header">
-                <div className="modal-compra-titulo">
-                  <div className="modal-compra-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <h3>Registrar Compra</h3>
-                    <p>El stock se actualiza automáticamente al registrar</p>
-                  </div>
-                </div>
-                <button className="modal-compra-close" onClick={() => setShowAddModal(false)}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-              <div className="modal-compra-body">
-                <CompraForm onSubmit={handleAddSubmit} onCancel={() => setShowAddModal(false)} onManagePresentaciones={() => setShowTiposModal(true)} />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showTiposModal && (
-          <ModalTiposPresentacion onClose={() => setShowTiposModal(false)} />
-        )}
       </div>
     </Layout>
   );

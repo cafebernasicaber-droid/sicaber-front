@@ -48,29 +48,30 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
   // batch 3 item 3 — stock por local
   //  · CREATE: "Stock actual" arranca en 0; el enlace "¿Ya hay cantidad
   //    existente?" revela cantidad + a qué local corresponde (el resto en 0).
-  //  · EDIT: una fila por local con su stock actual y su stock mínimo.
+  //  · EDIT: ver `localEdicion` más abajo — Cambio 1 lo reemplazó por un
+  //    único local (el activo), no una fila por cada uno.
   const [stockInicialAbierto, setStockInicialAbierto] = useState(false);
-  const [stockInicial, setStockInicial] = useState({ cantidad: '', localId: '' });
-  const [localesStock, setLocalesStock] = useState([]);
-  const setLocalRow = (idx, key, val) =>
-    setLocalesStock(prev => prev.map((r, i) => (i === idx ? { ...r, [key]: val } : r)));
-  // batch 4 item 7 — en qué locales EXISTE el insumo (independiente del stock).
-  //  · CREATE: "Todos los locales" por defecto, o elegir específicos.
-  //  · EDIT: casillas por local, editable.
-  const [todosLocales, setTodosLocales] = useState(true);
-  const [localesActivos, setLocalesActivos] = useState([]); // ids (string)
-  const toggleLocalActivo = (id) => {
-    setTodosLocales(false);
-    setLocalesActivos(prev => {
-      const s = String(id);
-      const next = prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s];
-      // Al cambiar los locales marcados también se recalcula el local del
-      // stock inicial (es derivado): limpia su error para que no quede uno
-      // viejo diciendo "elige local" cuando ya quedó resuelto.
-      setErrors(e => ({ ...e, localesActivos: '', stockInicial: '' }));
-      return next;
-    });
-  };
+  const [stockInicial, setStockInicial] = useState({ cantidad: '' });
+  // batch 10 — CREAR: un insumo se registra para UN SOLO local de partida.
+  // Ya no hay "Todos los locales" ni multi-select al crear. Ese mismo
+  // local recibe el stock inicial (si lo hay).
+  const [localCreacion, setLocalCreacion] = useState('');
+  // Cambio 1 (edición por local) — ANTES este formulario editaba los 4
+  // locales a la vez desde cualquier pestaña (casillas "dónde está activo"
+  // + una tabla de stock con una fila por local): estando en Villa Liliam
+  // se podía, sin querer, cambiar el mínimo o desactivar el insumo en 3
+  // Esquinas. `localEdicion` es el ÚNICO estado editable ahora: los datos
+  // (activo/stock actual/stock mínimo) de ESE local — el que ya está
+  // "quemado" por la pestaña activa del listado (`localActivoId`), igual
+  // que ya pasaba al CREAR. Los otros locales ni se leen ni se muestran.
+  const [localEdicion, setLocalEdicion] = useState({ activo: true, stockActual: '0', stockMinimo: '' });
+  // Local de partida por defecto = la pestaña de local activa en el listado.
+  useEffect(() => {
+    if (isEditing) return;
+    if (localActivoId != null && localActivoId !== '' && localActivoId !== 'todos') {
+      setLocalCreacion(String(localActivoId));
+    }
+  }, [localActivoId, isEditing]);
   // Qué campos ya tocó el usuario (onChange en selects/checkbox, onBlur en
   // texto) — solo esos muestran el check de válido; el mensaje de error, en
   // cambio, se muestra apenas exista (incluido al enviar, para campos que
@@ -112,69 +113,31 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     }
   }, [initialData, isEditing]);
 
-  // Grid de stock por local al editar: una fila por local ACTIVO, prefilada
-  // desde el desglose insumo_local (0 / stock mínimo base si el insumo no
-  // tiene fila en ese local). Se reconstruye si `locales` llega después.
+  // batch 10 — al CREAR, la cantidad inicial entra al único local de
+  // partida (`localCreacion`): ya no hay un segundo selector "¿a qué
+  // local va la cantidad?" porque no hay ambigüedad posible.
+  const nombreLocalCreacion =
+    (locales.find(l => String(l.id) === String(localCreacion)) || {}).nombre || '';
+
+  // Cambio 1 — al EDITAR, se lee SOLO la fila del desglose que corresponde
+  // a `localActivoId` (la pestaña de local activa en el listado — la misma
+  // fuente que ya usaba CREAR más arriba). Antes esto construía una fila
+  // por CADA local de `locales`; ahora ni siquiera se recorre esa lista.
+  // Todo insumo tiene fila en insumo_local para todos los locales desde
+  // que se crea (backend: siembra al crear + backfill al arrancar), así
+  // que no hacía falta un valor por defecto "sin fila" distinto de 0.
+  const nombreLocalEdicion =
+    (locales.find(l => String(l.id) === String(localActivoId)) || {}).nombre || '';
   useEffect(() => {
-    if (!isEditing || !initialData) return;
+    if (!isEditing || !initialData || localActivoId == null || localActivoId === '') return;
     const desg = initialData.desglose || desglosePorLocal(initialData);
-    const minBase = initialData.stockMinimo != null && initialData.stockMinimo !== '' ? String(initialData.stockMinimo) : '0';
-    setLocalesStock((locales || []).map(l => {
-      const d = desg.find(x => String(x.localId) === String(l.id));
-      return {
-        localId: String(l.id),
-        localNombre: l.nombre,
-        stockActual: d ? String(d.stockActual) : '0',
-        stockMinimo: d && d.stockMinimo != null ? String(d.stockMinimo) : minBase,
-      };
-    }));
-  }, [locales, initialData, isEditing]);
-
-  // batch 9.6 item 1 — locales candidatos para la CANTIDAD INICIAL: son
-  // exactamente los marcados en "¿En qué locales existe este insumo?"
-  // (o todos los activos si se eligió "Todos los locales"). Nunca se
-  // ofrece un local donde el insumo no va a existir.
-  const localesInicialElegibles = (todosLocales
-    ? locales
-    : locales.filter(l => localesActivos.includes(String(l.id))));
-  const idsInicialElegibles = localesInicialElegibles.map(l => String(l.id));
-
-  // batch 9.9 — el local del stock inicial es un VALOR DERIVADO, no un
-  // efecto que escribe en el estado con un render de retraso (esa carrera
-  // era la causa del 400: la UI mostraba "Entra a X" pero el payload
-  // viajaba sin local):
-  //  · 1 candidato  → ES ese local, sin alternativa posible.
-  //  · varios       → el que el usuario eligió en el <select>, si sigue
-  //                   siendo candidato; si no, ninguno.
-  //  · 0 candidatos → ninguno.
-  // `stockInicial.localId` solo guarda la elección MANUAL del usuario
-  // cuando hay varios candidatos. Todo lo demás (texto, validación,
-  // payload) usa SIEMPRE `localInicialEfectivo`.
-  const localInicialEfectivo =
-    idsInicialElegibles.length === 1
-      ? idsInicialElegibles[0]
-      : (idsInicialElegibles.includes(String(stockInicial.localId))
-          ? String(stockInicial.localId)
-          : (idsInicialElegibles.includes(String(localActivoId)) ? String(localActivoId) : ''));
-
-  // batch 4 item 7 — locales donde el insumo está activo (edición).
-  useEffect(() => {
-    if (!isEditing || !initialData) return;
-    const explicit =
-      initialData.localesActivos || initialData.locales_activos ||
-      initialData.localesIds || initialData.locales_ids || null;
-    let ids;
-    if (Array.isArray(explicit) && explicit.length) {
-      ids = explicit.map(x => String(x.id ?? x));
-    } else {
-      // fallback: locales que tienen fila en el desglose
-      const desg = initialData.desglose || desglosePorLocal(initialData);
-      ids = desg.map(d => String(d.localId));
-      if (!ids.length) ids = (locales || []).map(l => String(l.id)); // sin datos → todos
-    }
-    setLocalesActivos(ids);
-    setTodosLocales(locales.length > 0 && ids.length === locales.length);
-  }, [initialData, isEditing, locales]);
+    const fila = desg.find(d => String(d.localId) === String(localActivoId));
+    setLocalEdicion({
+      activo: fila ? fila.activo !== false : true,
+      stockActual: fila ? String(fila.stockActual) : '0',
+      stockMinimo: fila && fila.stockMinimo != null ? String(fila.stockMinimo) : '0',
+    });
+  }, [initialData, isEditing, localActivoId]);
 
   // Solo unidades de medida reales del insumo. "Caja", "paquete", "bolsa" y
   // "docena" NO son unidades de medida — son presentaciones de compra (cómo
@@ -204,34 +167,37 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
     if (!f.unidadMedida)       errs.unidadMedida = 'Selecciona una unidad de medida';
     // batch 7 item 2 — el proveedor ya no forma parte del insumo.
     // batch 8 item 3 — el tipo de uso (topping/adición) ya no vive aquí.
-    // batch 4 item 7 — en qué locales existe el insumo
+    // batch 10 — al CREAR: un solo local de partida, obligatorio.
+    // Cambio 1 — al EDITAR ya no se "elige" ningún local (antes había que
+    // marcar al menos uno de la lista completa): el local viene fijo de la
+    // pestaña activa del listado. Si por lo que sea no llega ninguno
+    // (imposible hoy con la navegación normal — confirmado con el usuario
+    // que esto es solo una salvaguarda), se bloquea el guardado en vez de
+    // adivinar a qué local aplicar los cambios.
     if ((locales || []).length > 0) {
-      const elegidos = todosLocales ? locales.map(l => String(l.id)) : localesActivos;
-      if (elegidos.length === 0) errs.localesActivos = 'Elige al menos un local (o "Todos los locales")';
+      if (!isEditing) {
+        if (!localCreacion) errs.localCreacion = 'Elige el local donde se registra este insumo';
+      } else if (localActivoId == null || localActivoId === '') {
+        errs.localActivo = 'Elige un local en la pestaña superior antes de editar este insumo.';
+      }
     }
     // batch 3 item 3 — stock por local
     if (!isEditing) {
       const eMin = errorCantidad(f.stockMinimo, f.unidadMedida, { min: 1 });
       if (eMin) errs.stockMinimo = eMin === 'Requerido' ? 'El stock mínimo es obligatorio' : eMin.replace('Debe ser 1 o mayor', 'El stock mínimo debe ser 1 o mayor');
-      // Solo se valida el stock inicial si el panel está abierto Y hay una
-      // cantidad escrita. Panel abierto sin cantidad = "no hay stock
-      // inicial": no se pide local ni se manda nada (item 2).
+      // Stock inicial: solo se valida el FORMATO de la cantidad si el
+      // panel está abierto y hay algo escrito. El local ya no se pide
+      // aparte: es el local de partida elegido arriba.
       const cantEscrita = stockInicialAbierto && String(stockInicial.cantidad).trim() !== '';
       if (cantEscrita) {
         const eC = errorCantidad(stockInicial.cantidad, f.unidadMedida, { min: 0, obligatorio: false });
-        if (eC) {
-          errs.stockInicial = eC;
-        } else if (Number(stockInicial.cantidad) > 0) {
-          if (idsInicialElegibles.length === 0) errs.stockInicial = 'Marca primero en qué locales existe el insumo';
-          else if (!localInicialEfectivo) errs.stockInicial = 'Elige a qué local corresponde esa cantidad';
-        }
+        if (eC) errs.stockInicial = eC;
       }
-    } else {
-      const filaMala = localesStock.some(r =>
-        errorCantidad(r.stockActual, f.unidadMedida, { min: 0 }) ||
-        errorCantidad(r.stockMinimo, f.unidadMedida, { min: 0 })
-      );
-      if (filaMala) errs.localesStock = 'Corrige los valores de stock por local';
+    } else if (localActivoId != null && localActivoId !== '') {
+      // Cambio 1 — un solo campo que validar (el mínimo del local actual),
+      // no una lista de filas.
+      const eMinLocal = errorCantidad(localEdicion.stockMinimo, f.unidadMedida, { min: 0 });
+      if (eMinLocal) errs.localEdicion = eMinLocal;
     }
     return errs;
   };
@@ -293,7 +259,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
   };
   const cerrarStockInicial = () => {
     setStockInicialAbierto(false);
-    setStockInicial({ cantidad: '', localId: '' });
+    setStockInicial({ cantidad: '' });
     setErrors(prev => ({ ...prev, stockInicial: '' }));
     // Si la observación quedó exactamente con el texto autocompletado
     // (nunca lo editaron), se limpia al cancelar.
@@ -317,11 +283,16 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
       return;
     }
     // El payload se arma en una función PURA (construirPayloadInsumo):
-    // así el body no depende de ninguna carrera de useEffect. El local
-    // del stock inicial va SIEMPRE con el valor derivado ya resuelto.
+    // así el body no depende de ninguna carrera de useEffect. Al CREAR,
+    // `localCreacion` es el único local de partida (va tanto en
+    // localesSeleccionados como en local_id).
     const payload = construirPayloadInsumo({
-      form, isEditing, locales, todosLocales, localesActivos,
-      stockInicialAbierto, stockInicial, localInicialEfectivo, localesStock,
+      form, isEditing, locales,
+      localCreacionId: localCreacion,
+      stockInicial: { cantidad: stockInicialAbierto ? stockInicial.cantidad : '' },
+      // Cambio 1 — un solo local (el activo), no las 3 props de
+      // multi-local que este formulario mandaba antes.
+      localActivoId, localEdicion,
     });
 
     // Deja el payload EXACTO en consola para poder compararlo con lo que
@@ -378,6 +349,26 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
         </div>
       )}
 
+      {/* Cambio 1 (edición de insumos por local) — el usuario pidió
+          explícitamente que quedara claro qué cambia dónde: nombre,
+          categoría y unidad de medida son del CATÁLOGO (un solo insumo,
+          válido en los 4 locales — la unidad en particular no puede variar
+          porque la ficha técnica que lo usa es igual de global), mientras
+          que el stock y la disponibilidad (más abajo) son solo de un
+          local. Un aviso arriba de todo, antes de que el usuario toque
+          nada, en vez de 3 notas sueltas junto a cada campo. */}
+      {isEditing && (
+        <div className="insumo-alert insumo-alert--info insumo-alert--tight" style={{ marginBottom: 14 }}>
+          <span className="insumo-alert__icon">ℹ</span>
+          <span>
+            <strong>Nombre, categoría y unidad de medida</strong> son del insumo completo — cambian en <strong>todos los locales</strong> a la vez.{' '}
+            <strong>Stock y disponibilidad</strong> (más abajo) son solo de{' '}
+            {localActivoId != null && localActivoId !== ''
+              ? <strong>{(locales.find(l => String(l.id) === String(localActivoId)) || {}).nombre || 'este local'}</strong>
+              : 'este local'}.
+          </span>
+        </div>
+      )}
       <div className="form-grid">
         <div className={`fg ${errors.nombre ? 'fg-error' : ''}`}>
           <label>Nombre del insumo <span className="req">*</span></label>
@@ -399,14 +390,16 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             )}
           </label>
           {categoriasDisponibles.length === 0 ? (
-            <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(201,162,39,0.12)', border: '1px solid rgba(201,162,39,0.3)', borderRadius: 8, fontSize: 12, color: '#C9A227', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
+            <div className="insumo-alert insumo-alert--warning insumo-alert--tight">
+              <span className="insumo-alert__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </span>
               <span>
                 No hay categorías registradas. {onManageCategorias
-                  ? <button type="button" onClick={onManageCategorias} style={{ display:'inline', background:'none',border:'none',padding:0,margin:0,color:'#C9A227',fontWeight:700,textDecoration:'underline',cursor:'pointer',font:'inherit' }}>Crea una primero en "Gestionar categorías"</button>
+                  ? <button type="button" onClick={onManageCategorias} className="insumo-alert__link">Crea una primero en "Gestionar categorías"</button>
                   : 'Crea una primero en "Gestionar categorías" antes de registrar un insumo.'}
               </span>
             </div>
@@ -430,14 +423,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
           <label>Unidad de medida <span className="req">*</span></label>
           {isEditing ? (
             <>
-              <div style={{ padding: '10px 14px', background: 'var(--bg-hover, rgba(128,128,128,.08))', border: '1px solid var(--border-input)', borderRadius: 8, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+              <div className="insumo-locked-box">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                   <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                 </svg>
                 {form.unidadMedida || '—'}
               </div>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+              <span className="insumo-locked-hint">
                 La unidad de medida no se puede cambiar después de crear el insumo.
               </span>
             </>
@@ -447,9 +440,10 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                 <option value="">-- Seleccionar --</option>
                 {unidades.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                Elige con cuidado: una vez registrado el insumo, esta unidad queda fija y no se podrá cambiar.
-              </span>
+              <div className="insumo-alert insumo-alert--warning insumo-alert--tight">
+                <span className="insumo-alert__icon">⚠</span>
+                <span>Elige con cuidado: una vez registrado el insumo, esta unidad queda fija y no se podrá cambiar.</span>
+              </div>
             </>
           )}
           {errors.unidadMedida
@@ -502,44 +496,63 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
 
         {/* batch 7 item 2 — el campo Proveedor se eliminó del insumo. */}
 
-        {/* batch 4 item 7 — en qué locales EXISTE el insumo (no es el stock). */}
-        {locales.length > 0 && (
-          <div className={`fg fg-full ${errors.localesActivos ? 'fg-error' : ''}`}>
-            <label>{isEditing ? 'Locales donde está activo el insumo' : '¿En qué locales existe este insumo?'} <span className="req">*</span></label>
-            {!isEditing && (
-              <div style={{ display:'flex', gap:8, marginTop:4, marginBottom:8, flexWrap:'wrap' }}>
-                <button type="button" onClick={() => { setTodosLocales(true); setLocalesActivos(locales.map(l => String(l.id))); setErrors(e => ({ ...e, localesActivos:'', stockInicial:'' })); }}
-                  style={{ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${todosLocales ? '#4CAF50' : 'var(--border-input)'}`, background: todosLocales ? 'rgba(76,175,80,0.12)' : 'transparent', color: todosLocales ? '#2E7D32' : 'var(--text-secondary)', fontWeight:700, fontSize:12.5, cursor:'pointer' }}>
-                  Todos los locales
-                </button>
-                <button type="button" onClick={() => { setTodosLocales(false); setErrors(e => ({ ...e, stockInicial:'' })); }}
-                  style={{ padding:'7px 14px', borderRadius:20, border:`1.5px solid ${!todosLocales ? '#4CAF50' : 'var(--border-input)'}`, background: !todosLocales ? 'rgba(76,175,80,0.12)' : 'transparent', color: !todosLocales ? '#2E7D32' : 'var(--text-secondary)', fontWeight:700, fontSize:12.5, cursor:'pointer' }}>
-                  Locales específicos
-                </button>
-              </div>
-            )}
-            {(isEditing || !todosLocales) && (
-              // batch 6 item 4 — grilla (no una sola fila): se acomoda en
-              // columnas cuando hay muchos locales, sin desbordar.
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:8, marginTop:4 }}>
-                {locales.map(l => {
-                  const checked = todosLocales || localesActivos.includes(String(l.id));
-                  return (
-                    <label key={l.id} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 12px', borderRadius:10, cursor:'pointer', minWidth:0, border:`1.5px solid ${checked ? '#4CAF50' : 'var(--border-input)'}`, background: checked ? 'rgba(76,175,80,0.10)' : 'var(--bg-surface)' }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleLocalActivo(l.id)}
-                        style={{ width:15, height:15, flexShrink:0, accentColor:'#4CAF50', cursor:'pointer' }}/>
-                      <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.nombre}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+        {/* batch 10 — CREAR: un insumo se registra para UN SOLO local de
+            partida. Selector simple, obligatorio; ese local recibe el
+            stock inicial (sin un segundo selector). */}
+        {locales.length > 0 && !isEditing && (
+          <div className={`fg fg-full ${errors.localCreacion ? 'fg-error' : ''}`}>
+            <label>Local donde se registra el insumo <span className="req">*</span></label>
+            <SearchSelect
+              value={localCreacion}
+              options={locales.map(l => ({ value: String(l.id), label: l.nombre }))}
+              onChange={(id) => {
+                setLocalCreacion(String(id));
+                setTouched(t => ({ ...t, localCreacion: true }));
+                setErrors(e => ({ ...e, localCreacion: '' }));
+              }}
+              placeholder="Buscar local…"
+              emptyMessage="No hay locales activos."
+              hasError={!!errors.localCreacion}
+            />
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
-              {isEditing
-                ? <>Marca en qué locales sigue disponible el insumo. El stock real se ajusta desde <strong>Registrar Compra</strong>.</>
-                : <>Elige en qué locales existe este insumo. El stock real entra después desde <strong>Registrar Compra</strong>, según el local que elijas allí.</>}
+              El insumo queda registrado en este local. El stock real entra después desde <strong>Registrar Compra</strong>. Podrás activarlo en otros locales cuando lo edites.
             </span>
-            {errors.localesActivos && <span className="err-msg">{errors.localesActivos}</span>}
+            {errors.localCreacion
+              ? <span className="err-msg">{errors.localCreacion}</span>
+              : touched.localCreacion && localCreacion && <span className="ok-msg">✓ Válido</span>}
+          </div>
+        )}
+
+        {/* Cambio 1 (edición de insumos por local) — ANTES esta sección era
+            una fila de casillas con los 4 locales a la vez: estando en
+            Villa Liliam se podía desmarcar/marcar 3 Esquinas sin querer, y
+            además ese payload nunca llegaba a guardarse (PUT /insumos/:id
+            nunca lo procesó — bug real, no una mejora cosmética). Ahora
+            solo se MUESTRA el local actual (fijo, viene de la pestaña
+            activa del listado — `localActivoId` — igual que ya pasaba al
+            crear): no hay nada que elegir ni que desmarcar por error. */}
+        {locales.length > 0 && isEditing && (
+          <div className={`fg fg-full ${errors.localActivo ? 'fg-error' : ''}`}>
+            <label>Local que estás editando <span className="req">*</span></label>
+            {localActivoId == null || localActivoId === '' ? (
+              <div className="insumo-alert insumo-alert--warning insumo-alert--tight">
+                <span className="insumo-alert__icon">⚠</span>
+                <span>Elige un local en la pestaña de arriba del listado antes de editar este insumo.</span>
+              </div>
+            ) : (
+              <>
+                <div className="insumo-locked-box">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 21h18M5 21V7l7-4 7 4v14M9 9v.01M9 12v.01M9 15v.01M15 9v.01M15 12v.01M15 15v.01"/>
+                  </svg>
+                  {nombreLocalEdicion || '—'}
+                </div>
+                <span className="insumo-locked-hint">
+                  El stock y la disponibilidad de abajo son SOLO de este local — para editar otro, cámbialo en la pestaña de arriba y vuelve a abrir "Editar". Nombre, categoría y unidad de medida (arriba) son del insumo completo y aplican a todos los locales por igual.
+                </span>
+              </>
+            )}
+            {errors.localActivo && <span className="err-msg">{errors.localActivo}</span>}
           </div>
         )}
 
@@ -552,7 +565,7 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             <div className="form-section-title" style={{ marginBottom: 0 }}>Stock</div>
             <div className="stock-block__intro">
               <span>· El <strong>stock mínimo</strong> es un único valor para el insumo — el nivel que dispara la alerta de "stock bajo".</span>
-              <span>· El <strong>stock actual</strong> es <strong>por local</strong>: la cantidad inicial entra solo al local que elijas y los demás quedan en 0.</span>
+              <span>· El <strong>stock actual</strong> es <strong>por local</strong>: la cantidad inicial entra al local de partida{nombreLocalCreacion ? <> (<strong>{nombreLocalCreacion}</strong>)</> : ''} y los demás quedan en 0.</span>
             </div>
 
             <div className="stock-cols">
@@ -595,30 +608,14 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
                       value={stockInicial.cantidad}
                       onChange={e => { setStockInicial(s => ({ ...s, cantidad: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}
                     />
-                    {/* batch 9.6 item 1 — el local del stock inicial hereda lo
-                        ya elegido en "¿En qué locales existe este insumo?":
-                         · 1 local marcado  → texto fijo (no hay alternativa)
-                         · varios marcados  → desplegable SOLO con esos
-                         · "Todos"          → todos los locales activos */}
-                    {localesInicialElegibles.length === 0 ? (
-                      <div className="stock-inicial-fijo stock-inicial-fijo--muted">
-                        Marca primero, arriba, en qué locales existe el insumo.
-                      </div>
-                    ) : localesInicialElegibles.length === 1 ? (
-                      // 1 candidato → ES ese local (localInicialEfectivo ya lo
-                      // refleja); el texto es el reflejo del valor, no un
-                      // sustituto del campo.
-                      <div className="stock-inicial-fijo">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        <span>Entra a <strong>{localesInicialElegibles[0].nombre}</strong> — es el único local marcado.</span>
-                      </div>
-                    ) : (
-                      <select value={localInicialEfectivo}
-                        onChange={e => { setStockInicial(s => ({ ...s, localId: e.target.value })); setErrors(prev => ({ ...prev, stockInicial: '' })); }}>
-                        <option value="">— ¿A qué local corresponde? —</option>
-                        {localesInicialElegibles.map(l => <option key={l.id} value={String(l.id)}>{l.nombre}</option>)}
-                      </select>
-                    )}
+                    {/* batch 10 — la cantidad inicial entra al local de
+                        partida elegido arriba; ya no hay un segundo selector. */}
+                    <div className={`stock-inicial-fijo${nombreLocalCreacion ? '' : ' stock-inicial-fijo--muted'}`}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                      <span>{nombreLocalCreacion
+                        ? <>Entra a <strong>{nombreLocalCreacion}</strong>.</>
+                        : <>Elige primero el local, arriba.</>}</span>
+                    </div>
                     <span className="stock-help">
                       Solo ese local recibe la cantidad inicial; el resto queda en 0.
                     </span>
@@ -633,46 +630,60 @@ const InsumoForm = ({ initialData, onSubmit, onCancel, isEditing, serverError, o
             </div>
           </div>
         ) : (
-          <div className={`fg fg-full ${errors.localesStock ? 'fg-error' : ''}`}>
-            <label>Stock por local</label>
-            {locales.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No hay locales activos registrados.</div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(110px,1.2fr) 1fr 1fr', gap: '6px 10px', alignItems: 'start' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Local</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Stock actual</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Stock mínimo</div>
-                {localesStock.map((row, idx) => {
-                  const eA = errorCantidad(row.stockActual, form.unidadMedida, { min: 0 });
-                  const eM = errorCantidad(row.stockMinimo, form.unidadMedida, { min: 0 });
-                  const stepAttr = permiteDecimales(form.unidadMedida) ? 'any' : '1';
-                  return (
-                    <React.Fragment key={row.localId}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', paddingTop: 9 }}>{row.localNombre}</div>
-                      <div>
-                        <input type="number" step={stepAttr} value={row.stockActual}
-                          onChange={e => setLocalRow(idx, 'stockActual', e.target.value)}
-                          style={eA ? { borderColor: '#EF5350' } : undefined}/>
-                        {eA && <div className="err-msg">{eA}</div>}
-                      </div>
-                      <div>
-                        <input type="number" step={stepAttr} value={row.stockMinimo}
-                          onChange={e => setLocalRow(idx, 'stockMinimo', e.target.value)}
-                          style={eM ? { borderColor: '#EF5350' } : undefined}/>
-                        {eM && <div className="err-msg">{eM}</div>}
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
+          // Cambio 1 — ANTES: tabla con una fila de stock actual/mínimo por
+          // CADA local (los 4 editables desde cualquier pestaña). AHORA:
+          // los mismos 2 datos, pero SOLO del local activo — mismo layout
+          // de 2 columnas (`stock-cols`) que ya usaba la pantalla de crear,
+          // para que se sienta el mismo formulario, no uno distinto.
+          <div className="stock-block">
+            <div className="form-section-title" style={{ marginBottom: 0 }}>
+              Stock {nombreLocalEdicion ? <>en <strong>{nombreLocalEdicion}</strong></> : ''}
+            </div>
+            <div className="stock-block__intro">
+              <span>· Estos datos son <strong>solo de este local</strong> — no afectan el stock ni el mínimo de los demás.</span>
+            </div>
+            <div className="stock-cols">
+              <div className="stock-col fg">
+                <label>Stock actual</label>
+                {/* Solo lectura a propósito: el stock actual NUNCA se edita
+                    a mano — cambia únicamente al registrar o anular una
+                    compra (ver CompraForm / PATCH /compras/:id/anular).
+                    Antes había un <input> acá que dejaba escribir cualquier
+                    número, pero el backend (PUT /insumos/:id) nunca lo leyó
+                    — el cambio no se guardaba, solo parecía funcionar. */}
+                <div className="insumo-locked-box">{localEdicion.stockActual} {form.unidadMedida}</div>
+                <span className="stock-help">Cambia solo al registrar o anular una compra en este local.</span>
               </div>
-            )}
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
-              El stock actual también cambia al registrar o anular compras.
-              {form.unidadMedida && (permiteDecimales(form.unidadMedida)
-                ? ` La unidad "${form.unidadMedida}" admite decimales.`
-                : ' La unidad "unidad" solo admite enteros.')}
+              <div className={`stock-col ${errors.localEdicion ? 'fg fg-error' : 'fg'}`}>
+                <label>Stock mínimo <span className="req">*</span></label>
+                <input
+                  type="number" step={permiteDecimales(form.unidadMedida) ? 'any' : '1'}
+                  value={localEdicion.stockMinimo}
+                  onChange={e => setLocalEdicion(prev => ({ ...prev, stockMinimo: e.target.value }))}
+                  placeholder={permiteDecimales(form.unidadMedida) ? 'Ej: 2.5' : '1'}
+                />
+                <span className="stock-help">
+                  Aplica solo a {nombreLocalEdicion || 'este local'}.
+                  {form.unidadMedida && !permiteDecimales(form.unidadMedida) && ' La unidad "unidad" solo admite enteros.'}
+                </span>
+                {errors.localEdicion && <span className="err-msg">{errors.localEdicion}</span>}
+              </div>
+            </div>
+            {/* "Activo en este local" — distinto del interruptor "Estado"
+                de más abajo: ESE es global (todo el catálogo del insumo);
+                ESTE decide si se OFRECE en el local actual (insumo_local.
+                activo) sin afectar a los demás. */}
+            <label style={{ display:'flex', alignItems:'center', gap:8, marginTop:12, cursor:'pointer' }}>
+              <input type="checkbox" checked={localEdicion.activo}
+                onChange={e => setLocalEdicion(prev => ({ ...prev, activo: e.target.checked }))}
+                style={{ width:15, height:15, accentColor:'#4CAF50', cursor:'pointer' }}/>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>
+                Activo en {nombreLocalEdicion || 'este local'}
+              </span>
+            </label>
+            <span className="stock-help" style={{ display:'block', marginTop:4 }}>
+              Si lo desmarcas, el insumo deja de ofrecerse en {nombreLocalEdicion || 'este local'} — no se elimina, y sigue disponible en los demás locales donde ya estaba activo.
             </span>
-            {errors.localesStock && <span className="err-msg">{errors.localesStock}</span>}
           </div>
         )}
 

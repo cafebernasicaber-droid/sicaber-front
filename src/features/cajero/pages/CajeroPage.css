@@ -128,7 +128,16 @@
 .cj-count-label  { font-size:13px; color:var(--cj-text-2); font-weight:500; }
 
 /* ── Grid de pedidos ── */
-.cj-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; margin-bottom:20px; }
+/* Antes: `repeat(auto-fill,minmax(300px,1fr))` — con `1fr` cada tarjeta se
+   estira para llenar la fila, así que una última fila incompleta (ej. 3
+   tarjetas cuando las de arriba van de 4 en 4) quedaba más ANCHA que las
+   de arriba en vez de alineada a la izquierda. Columnas fijas por
+   breakpoint: una fila incompleta deja columnas vacías en vez de estirar
+   las tarjetas que sí hay. */
+.cj-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+@media (max-width: 1400px) { .cj-grid { grid-template-columns:repeat(3,1fr); } }
+@media (max-width: 1100px) { .cj-grid { grid-template-columns:repeat(2,1fr); } }
+@media (max-width: 700px)  { .cj-grid { grid-template-columns:1fr; } }
 
 /* ── Order Card ── */
 .cj-card {
@@ -690,8 +699,8 @@
   position: absolute;
   top: calc(100% + 4px);
   left: 0; right: 0;
-  background: #1e1e1e;
-  border: 1px solid rgba(255,255,255,0.12);
+  background: var(--cj-drop-bg, #1e1e1e);
+  border: 1px solid var(--cj-drop-border, rgba(255,255,255,0.12));
   border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0,0,0,0.5);
   z-index: 200;
@@ -964,7 +973,16 @@
 .cj-count-label  { font-size:13px; color:var(--cj-text-2); font-weight:500; }
 
 /* ── Grid de pedidos ── */
-.cj-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; margin-bottom:20px; }
+/* Antes: `repeat(auto-fill,minmax(300px,1fr))` — con `1fr` cada tarjeta se
+   estira para llenar la fila, así que una última fila incompleta (ej. 3
+   tarjetas cuando las de arriba van de 4 en 4) quedaba más ANCHA que las
+   de arriba en vez de alineada a la izquierda. Columnas fijas por
+   breakpoint: una fila incompleta deja columnas vacías en vez de estirar
+   las tarjetas que sí hay. */
+.cj-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+@media (max-width: 1400px) { .cj-grid { grid-template-columns:repeat(3,1fr); } }
+@media (max-width: 1100px) { .cj-grid { grid-template-columns:repeat(2,1fr); } }
+@media (max-width: 700px)  { .cj-grid { grid-template-columns:1fr; } }
 
 /* ── Order Card ── */
 .cj-card {
@@ -1315,3 +1333,49 @@
   background: var(--cj-surface);
   padding-bottom: 6px;
 }
+
+
+/* ─────────────────────────────────────────────────────────────
+   Desplegable de clientes registrados — tema claro
+   ─────────────────────────────────────────────────────────────
+   El panel tenía el fondo #1e1e1e escrito directamente en la regla (no
+   una variable), así que en modo claro quedaba oscuro mientras el texto
+   heredaba el color oscuro del tema: los nombres de los clientes se
+   volvían ilegibles (solo se veían el avatar y el teléfono). Se
+   parametriza el fondo y se escriben aquí los valores del tema claro.
+   ───────────────────────────────────────────────────────────── */
+[data-theme="light"] .cj-cliente-drop {
+  --cj-drop-bg: #ffffff;
+  --cj-drop-border: rgba(0,0,0,0.12);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.14) !important;
+  scrollbar-color: rgba(0,0,0,0.18) transparent;
+}
+[data-theme="light"] .cj-cliente-drop__item        { border-bottom-color: rgba(0,0,0,0.06) !important; }
+[data-theme="light"] .cj-cliente-drop__item:hover  { background: rgba(76,175,80,0.10) !important; }
+[data-theme="light"] .cj-cliente-drop__item.selected { background: rgba(76,175,80,0.16) !important; }
+[data-theme="light"] .cj-cliente-drop__name        { color: #111 !important; }
+[data-theme="light"] .cj-cliente-drop__meta        { color: #666 !important; }
+[data-theme="light"] .cj-cliente-drop__empty       { color: #777 !important; }
+[data-theme="light"] .cj-cliente-drop__footer {
+  color: #555 !important;
+  border-top-color: rgba(0,0,0,0.08) !important;
+}
+[data-theme="light"] .cj-cliente-drop__footer:hover { background: rgba(0,0,0,0.04) !important; }
+
+/* Opción de estado bloqueada: "Entregado" mientras el pedido no se cobre.
+   Se muestra apagada y con el motivo, en vez de desaparecer del listado —
+   una opción ausente no le explica al cajero qué le falta hacer. */
+.cj-status-opt--locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+  position: relative;
+}
+.cj-status-opt--locked:hover { background: transparent; }
+.cj-status-lock {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #E53935;
+  white-space: nowrap;
+}
+.cj-btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }

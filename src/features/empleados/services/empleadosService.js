@@ -12,7 +12,7 @@ const conLocalId = data => {
 };
 
 const empleadosService = {
-  getAll:  ()        => empleadosApi.getAll(),
+  getAll:  (localId) => empleadosApi.getAll(localId),
   getById: (id)      => empleadosApi.getById(id),
   create:  (data)    => empleadosApi.create(conLocalId(data)),
   update:  (id, d)   => empleadosApi.update(id, conLocalId(d)),

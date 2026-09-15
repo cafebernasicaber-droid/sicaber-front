@@ -30,9 +30,32 @@ const create = useCallback(async (d) => {
   // el backend responde con error, y ModalFormInsumo.handleSubmit tampoco
   // tiene try/catch propio — esa excepción quedaba sin capturar en toda la
   // cadena y el modal de "Editar insumo" no mostraba ningún mensaje.
+  //
+  // Cambio 1 (edición de insumos por local) — `d` ahora puede traer, además
+  // de los campos GLOBALES de siempre (nombre/categoría/unidad/estado/
+  // descripción), 3 claves de UN SOLO local: `localId`/`localStockMinimo`/
+  // `localActivo` (ver construirPayloadInsumo.js). Se separan acá y van a
+  // DOS peticiones distintas: la global de siempre (PUT /insumos/:id, que
+  // nunca leyó nada de locales) y una nueva al endpoint POR LOCAL
+  // (PUT /insumos/:id/locales/:localId) — el único que de verdad guarda el
+  // stock mínimo y el estado activo de ese local, sin poder tocar ningún
+  // otro (el id del local va en la URL, no en un body que podría traer
+  // ceros para los demás).
   const update = useCallback(async (id, d) => {
+    const { localId, localStockMinimo, localActivo, ...camposGlobales } = d;
     try {
-      const r = await insumosService.update(id, d);
+      const r = await insumosService.update(id, camposGlobales);
+      if (localId != null) {
+        try {
+          await insumosService.updateLocal(id, localId, { stockMinimo: localStockMinimo, activo: localActivo });
+        } catch (errLocal) {
+          // Los campos globales SÍ se guardaron — no se pierde ese cambio,
+          // pero el usuario debe enterarse de que el stock/mínimo de este
+          // local no se actualizó, para que no piense que sí quedó.
+          refresh();
+          return { error: `Se guardaron nombre/categoría/etc., pero no el stock de este local: ${errLocal.message}` };
+        }
+      }
       refresh();
       return r;
     } catch (err) {

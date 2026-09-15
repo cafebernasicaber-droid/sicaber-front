@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import PrivateRoute from './shared/components/PrivateRoute';
 import AccesoNoAutorizado from './shared/components/AccesoNoAutorizado';
+import HomeRedirect from './shared/components/HomeRedirect';
 
 import Landing from './landing/Landing';
 import DashboardPage from './features/dashboard/pages/DashboardPage';
@@ -22,6 +23,7 @@ import InsumosPage from './features/insumos/pages/InsumosPage';
 import ProveedoresPage from './features/proveedores/pages/ProveedoresPage';
 
 import ComprasPage from './features/compras/pages/ComprasPage';
+import RegistrarCompraPage from './features/compras/pages/RegistrarCompraPage';
 import HistorialComprasPage from './features/compras/pages/HistorialComprasPage';
 
 import PedidosPage from './features/pedidos/pages/PedidosPage';
@@ -93,6 +95,7 @@ const AppRoutes = () => (
     <Route path="/proveedores"            element={<PR modulo="proveedores"><ProveedoresPage /></PR>} />
 
     <Route path="/compras"             element={<PR modulo="compras"><ComprasPage /></PR>} />
+    <Route path="/compras/registrar"   element={<PR modulo="compras"><RegistrarCompraPage /></PR>} />
     <Route path="/compras/historial"   element={<PR modulo="compras"><HistorialComprasPage /></PR>} />
 
     {/* ── Cajero ── */}
@@ -104,7 +107,12 @@ const AppRoutes = () => (
     <Route path="/verificar-cuenta"   element={<VerificarCuentaPage />} />
     <Route path="/recuperar-password" element={<RecuperarPasswordPage />} />
 
-    <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+    {/* Causa raíz del "Acceso no autorizado" en un rol recién creado sin
+        ver_dashboard: esto navegaba directo a /admin/dashboard, saltándose
+        HomeRedirect (que ya sabía mandar a cada rol a su primer módulo con
+        permiso) — ver el mismo comentario, más largo, en
+        AuthContext.login(). */}
+    <Route path="/admin" element={<HomeRedirect />} />
     <Route path="*"      element={<Navigate to="/" replace />} />
   </Routes>
 );

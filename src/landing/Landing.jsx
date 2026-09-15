@@ -10,6 +10,7 @@ import toppingsService from '../features/toppings/services/toppingsService';
 import adicionesService from '../features/adiciones/services/adicionesService';
 import pedidosService from '../features/pedidos/services/pedidosService';
 import localesService from '../shared/services/localesService';
+import metodosPagoService from '../shared/services/metodosPagoService';
 import categoriasService from '../features/categorias/services/categoriasService';
 import combosService from '../features/adiciones/services/combosService';
 import ventasService from '../features/ventas/services/ventasService';
@@ -20,6 +21,8 @@ import { validarComprobanteCliente, procesarComprobante } from '../shared/servic
 import { toppingsParaProducto } from '../shared/utils/toppings';
 import PedidoProgreso from '../shared/components/PedidoProgreso';
 import '../shared/components/PedidoProgreso.css';
+import { EstadoPedidoBadge, EstadoDevolucionBadge } from '../shared/components/EstadosPedido';
+import { pagoFueRechazado, mensajeContactoPagoRechazado, estadoPagoDe, ESTADO_PAGO_CFG, etiquetaEstadoPedido } from '../shared/utils/pedidoEstados';
 import ImageLightbox from '../shared/components/ImageLightbox';
 import '../shared/components/ImageLightbox.css';
 import './Landing.css';
@@ -187,6 +190,30 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
   // usuario haya interactuado con el campo.
   const [direccionTocada, setDireccionTocada] = useState(false);
   const direccionValida = direccionAlternativa.trim().length >= 8;
+  // Verificación de cobertura EN VIVO mientras el cliente escribe la
+  // dirección (paso 2), para avisar de una vez si queda fuera de la
+  // comuna 8/9 — en vez de dejar que llene todo el formulario y se entere
+  // recién al enviar el pedido (donde el backend igual la vuelve a validar
+  // como última barrera). estado: 'idle' | 'checking' | 'ok' | 'fuera' | 'error'.
+  const [cobertura, setCobertura] = useState({ estado: 'idle' });
+  const coberturaTimeoutRef = useRef(null);
+  useEffect(() => {
+    if (tipoEntrega !== 'domicilio' || !direccionValida) {
+      setCobertura({ estado: 'idle' });
+      return;
+    }
+    setCobertura({ estado: 'checking' });
+    if (coberturaTimeoutRef.current) clearTimeout(coberturaTimeoutRef.current);
+    coberturaTimeoutRef.current = setTimeout(async () => {
+      try {
+        const r = await pedidosService.verificarCobertura(direccionAlternativa.trim());
+        setCobertura(r.cubierto ? { estado: 'ok', sede: r.sede } : { estado: 'fuera', detalle: r.detalle });
+      } catch (e) {
+        setCobertura({ estado: 'error', mensaje: e.message });
+      }
+    }, 700);
+    return () => clearTimeout(coberturaTimeoutRef.current);
+  }, [direccionAlternativa, direccionValida, tipoEntrega]);
   // Local físico donde el cliente recogerá su pedido (GET /locales) —
   // solo aplica cuando tipoEntrega === 'local'. Se carga una sola vez al
   // abrir la pasarela, igual que el resto de catálogos de este flujo.
@@ -207,6 +234,19 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     if (locales.length === 1 && !localId) setLocalId(locales[0].id);
   }, [locales, localId]);
   const localSel = locales.find(l => String(l.id) === String(localId));
+  // Punto 3 — "Pagar al llegar al local": una opción MÁS dentro de "Elige
+  // tu método de pago" (Paso 3), solo para tipoEntrega==='local'. Al
+  // elegirla se pide el texto libre de cómo va a pagar — pero el pedido
+  // SIGUE pasando por el Paso 4/5 (comprobante) igual que con cualquier
+  // otro método: el backend exige Nequi/Transferencia con comprobante para
+  // tipo='local' sin excepción (rechaza "Efectivo" ahí, ver
+  // metodoPagoInvalido/esEfectivo) — esta opción no lo evita, solo agrega
+  // la nota (`metodo_pago_local` en el backend) para que el local sepa qué
+  // esperar. `PAGAR_LOCAL_ID` es un id de SELECCIÓN propio de esta
+  // pantalla (no es un método real de metodos_pago ni un valor de
+  // pedidos.pago) — ver pagoBackend más abajo.
+  const PAGAR_LOCAL_ID = 'pagar_local';
+  const [metodoPagoLocalTexto, setMetodoPagoLocalTexto] = useState('');
   const [metodo, setMetodo] = useState('');
   const [archivo, setArchivo] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -220,15 +260,108 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
   const [errorPedido, setErrorPedido] = useState('');
   const fileRef = useRef();
 
-  // Datos de cada método de pago. titular/num/tipoCuenta se muestran en el
-  // paso de factura para que el cliente sepa exactamente a dónde transferir.
-  // Cuando el negocio confirme sus cuentas oficiales, solo hay que editar
-  // estos valores — el resto del flujo no cambia.
+  // Métodos de pago con QR/número — ya NO son una lista fija (antes
+  // "Nequi"/"Llave Bancolombia" hardcodeados acá mismo): se administran
+  // desde Clientes → Métodos de pago (ver metodosPagoService/GET
+  // /metodos-pago, público, solo activos) y se listan tal cual los dejó el
+  // admin. "Efectivo" sigue siendo un caso especial fijo, no un método de
+  // pago más de esta tabla: no lleva QR ni comprobante, y solo se ofrece a
+  // domicilio (pagas contra entrega) — ver Ronda 23. El backend además lo
+  // rechaza con 400 si se intenta esa combinación en recogida.
+  const [metodosPago, setMetodosPago] = useState([]);
+  useEffect(() => {
+    metodosPagoService.getActivos()
+      .then(d => setMetodosPago(Array.isArray(d) ? d : []))
+      .catch(() => setMetodosPago([]));
+  }, []);
+  // `id` es el identificador de SELECCIÓN en esta pantalla (único por
+  // método, para que el toggle y el resumen apunten al correcto) — no es
+  // el valor real que espera pedidos.pago (ver pagoBackend más abajo, que
+  // sí respeta el enum 'efectivo'/'nequi'/'transferencia' que ya exige el
+  // backend). Esta tabla de metodos_pago es solo lo que se MUESTRA acá,
+  // igual que documenta el propio backend.
+  // REGLA 1 (recoger en el local): en 'local' el ÚNICO método visible debe
+  // ser "Pagar al llegar al local" — ni los métodos dinámicos (Nequi,
+  // Bancolombia QR, etc. administrados en Clientes → Métodos de pago) ni
+  // "Efectivo contraentrega" (que solo tiene sentido para domicilio, ver
+  // REGLA 2) deben mostrarse ahí. Por eso ambos bloques quedan bajo
+  // `tipoEntrega === 'domicilio'` y ya no se muestran siempre.
   const METODOS = [
-    { id:'nequi',        label:'Nequi',        titular:'Café Don Berna S.A.S.', num:'300 000 0000', tipoCuenta:null, icon:'NQ' },
-    { id:'transferencia', label:'Transferencia', titular:'Café Don Berna S.A.S.', num:'300 000 0000', tipoCuenta:'Ahorros', icon:'TR' },
-    { id:'efectivo',     label:'Efectivo en caja', titular:null, num:'Pagar al retirar', tipoCuenta:null, icon:'EF' },
+    ...(tipoEntrega === 'domicilio'
+      // Aclaración pedida al usuario (pregunta 1 del análisis): en la
+      // tabla metodos_pago hay un registro real llamado literalmente
+      // "efectivo" (dato de prueba, ya activo) que duplicaría/confundiría
+      // con la opción fija "Efectivo contraentrega" de abajo — se filtra
+      // por nombre para que no aparezcan las dos a la vez.
+      ? metodosPago
+          .filter(m => String(m.nombre || '').trim().toLowerCase() !== 'efectivo')
+          .map(m => ({
+            id: String(m.id), label: m.nombre, titular: null,
+            num: m.descripcion || null, tipoCuenta: null,
+            icon: (m.nombre || '?').replace(/[^A-Za-zÀ-ÿ]/g, '').slice(0, 2).toUpperCase() || '$$',
+            urlQr: m.urlQr || null,
+          }))
+      : []),
+    // REGLA 2 (domicilio con pago contraentrega): opción FIJA, no
+    // configurable desde Clientes → Métodos de pago (a propósito no sale
+    // de `metodosPago`, para que nadie la pueda desactivar/editar por
+    // error) — renombrada a "Efectivo contraentrega" para diferenciarla
+    // del registro "efectivo" de la base que se filtra arriba.
+    ...(tipoEntrega === 'domicilio'
+      ? [{ id:'efectivo', label:'Efectivo contraentrega', titular:null, num:'Pagas en efectivo al recibir tu pedido', tipoCuenta:null, icon:'EF', urlQr:null }]
+      : []),
+    // Punto 3 — solo para recogida en local; ver el comentario largo junto
+    // a PAGAR_LOCAL_ID sobre qué SÍ y qué NO cambia con esta opción.
+    ...(tipoEntrega === 'local'
+      // num:null a propósito — a diferencia de los demás métodos, esta
+      // opción no tiene número de cuenta ni QR (ver el Paso 3, que le pone
+      // su propio subtítulo fijo en vez de leerlo de `num`).
+      ? [{ id: PAGAR_LOCAL_ID, label: 'Pagar al llegar al local', titular: null, num: null, tipoCuenta: null, icon: '🏠', urlQr: null }]
+      : []),
   ];
+  // Único punto donde se traduce la selección visual (metodo) al valor real
+  // que el backend valida contra su CHECK — cualquier método dinámico no
+  // es distinguible por el backend más allá de "necesita comprobante", así
+  // que todos caen en 'transferencia' (mismo trato que ya recibían Nequi y
+  // Bancolombia: METODOS_CON_COMPROBANTE los trata igual a ambos).
+  //
+  // Bug real corregido: PAGAR_LOCAL_ID ("pagar al llegar al local") caía en
+  // el mismo 'transferencia' que un método con comprobante, por no tener
+  // caso propio acá — el pedido nacía en 'pendiente_verificacion' exigiendo
+  // un comprobante que nunca iba a existir (caso real: pedido #158, quedó
+  // trabado sin que el cajero pudiera aprobarlo ni el cliente tuviera nada
+  // que subir). Ahora mapea a 'efectivo' — mismo criterio real de "sin
+  // comprobante, contraentrega" que ya usa el domicilio, el backend ya lo
+  // acepta también para recoger en el local (ver esEfectivo en routes/index.js).
+  const pagoBackend = (metodo === 'efectivo' || metodo === PAGAR_LOCAL_ID) ? 'efectivo' : (metodo ? 'transferencia' : '');
+  // BUG reportado por el usuario (recoger en el local con pago al llegar
+  // mostraba "Pendiente de verificación"/"Pago en verificación"): el
+  // pedido YA se creaba bien (pagoBackend/estadoInicial de acá arriba ya
+  // mandan 'efectivo'/'pendiente' — el backend confirma que 'efectivo' es
+  // válido para tipo='local', ver esEfectivo en routes/index.js), pero la
+  // pantalla de éxito (más abajo) seguía comparando contra `metodo`
+  // directamente en vez de `pagoBackend`, y como PAGAR_LOCAL_ID ('pagar_local')
+  // nunca es literalmente 'efectivo', mostraba el badge/paso de
+  // verificación de todas formas — un pedido ya "limpio" en la base se
+  // veía como si le faltara algo por verificar. `sinVerificacion` es la
+  // única fuente de verdad para esa decisión en toda la pantalla de éxito.
+  const sinVerificacion = pagoBackend === 'efectivo';
+  // "Cuidado con" del usuario: si el cliente cambia el tipo de entrega
+  // DESPUÉS de haber elegido un método de pago, hay que limpiar esa
+  // selección porque puede dejar de ser válida (un método de domicilio no
+  // existe para recogida, y viceversa). Antes esto solo cubría 2 casos a
+  // mano (efectivo → local, pagar_local → domicilio); con REGLA 1 los
+  // métodos dinámicos (Nequi, Bancolombia QR, etc.) también aparecen o
+  // desaparecen según tipoEntrega, así que la regla se generalizó: si el
+  // método ya elegido ya no está en la lista recién recalculada, se limpia
+  // — cubre cualquier método presente o futuro, no solo los 2 fijos.
+  useEffect(() => {
+    if (metodo && !METODOS.some(m => m.id === metodo)) {
+      setMetodo('');
+      setMetodoPagoLocalTexto('');
+    }
+    // eslint-disable-next-line
+  }, [tipoEntrega, metodosPago]);
   const metodoSel = METODOS.find(m => m.id === metodo);
   const [numeroCopiado, setNumeroCopiado] = useState(false);
   const copiarNumero = async () => {
@@ -279,10 +412,14 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
       `Cliente: ${cliente?.nombre || ''}\n` +
       `Método de entrega: ${entregaTxt}\n` +
       (direccionTxt ? `Dirección: ${direccionTxt}\n` : '') +
-      `Método de pago: ${metodoSel?.label || ''}\n\n` +
-      `*Productos:*\n${lineas}\n\n` +
+      `Método de pago: ${metodoSel?.label || ''}\n` +
+      // Punto 3 — si el cliente dejó una nota de cómo pagará al recoger, va
+      // en el mismo mensaje para que el local la vea de una vez.
+      (metodo === PAGAR_LOCAL_ID && metodoPagoLocalTexto.trim() ? `Cómo pagará al recoger: ${metodoPagoLocalTexto.trim()}\n` : '') +
+      `\n*Productos:*\n${lineas}\n\n` +
       `*Total: ${fmt(total)}*\n\n` +
-      (metodo !== 'efectivo' ? 'Adjunto el pantallazo del pago. ¡Gracias!' : '¡Gracias!')
+      (metodo === PAGAR_LOCAL_ID ? 'Pagaré al llegar al local. ¡Gracias!'
+        : metodo !== 'efectivo' ? 'Adjunto el pantallazo del pago. ¡Gracias!' : '¡Gracias!')
     );
   };
 
@@ -292,39 +429,150 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     setWaSent(true);
   };
 
+  // Factura del checkout. Comparte diseño con verFacturaPedido (la del
+  // historial): mismo encabezado, misma ficha de datos y mismo blanco y
+  // negro. Antes eran dos maquetas distintas para el mismo documento.
   const imprimirFactura = () => {
     const w = window.open('', '_blank');
-    if (!w) return;
-    const filas = generarFilasFactura();
-    const filasHtml = filas.map(f =>
-      `<tr>
-        <td style="${f.esBase ? '' : 'color:#666;padding-left:18px;font-size:12px;'}">${f.desc}</td>
-        <td style="text-align:right;${f.esBase ? '' : 'color:#666;font-size:12px;'}">${f.precio > 0 ? fmt(f.precio) : f.desc.includes('gratis') ? 'Gratis' : ''}</td>
-      </tr>`
-    ).join('');
+    if (!w) { showToast('Habilita las ventanas emergentes para ver la factura'); return; }
+
+    const esc = v => String(v ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    let subtotalProductos = 0;
+    let subtotalExtras = 0;
+    const filas = [];
+    cart.forEach(i => {
+      const precioBase = (i.precio || i.price) * i.qty;
+      subtotalProductos += precioBase;
+      filas.push({ cant: i.qty, desc: i.nombre || i.name, precio: precioBase, tipo: 'base' });
+      (i.toppings || []).forEach(t => {
+        const valor = (t.precio || 0) * i.qty;
+        subtotalExtras += valor;
+        filas.push({ cant: '', desc: t.nombre, precio: valor, tipo: valor > 0 ? 'extra' : 'gratis' });
+      });
+      (i.adiciones || []).forEach(a => {
+        const valor = (a.precio || 0) * i.qty;
+        subtotalExtras += valor;
+        filas.push({ cant: '', desc: a.nombre, precio: valor, tipo: valor > 0 ? 'extra' : 'gratis' });
+      });
+    });
+
+    const filasHtml = filas.map(f => {
+      if (f.tipo === 'base') {
+        return `<tr class="linea-base">
+          <td class="col-cant">${esc(f.cant)}</td>
+          <td class="col-desc">${esc(f.desc)}</td>
+          <td class="col-val">${fmt(f.precio)}</td>
+        </tr>`;
+      }
+      const valor = f.tipo === 'gratis' ? 'incluido' : fmt(f.precio);
+      return `<tr class="linea-extra">
+        <td class="col-cant"></td>
+        <td class="col-desc"><span class="vineta">+</span>${esc(f.desc)}</td>
+        <td class="col-val">${valor}</td>
+      </tr>`;
+    }).join('');
+
+    const ahora = new Date();
+    const datos = [
+      ['Pedido',  `N.º ${numeroPedido}`],
+      ['Fecha',   `${ahora.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })} · ${ahora.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`],
+      ['Cliente', cliente?.nombre || 'Consumidor final'],
+      ['Contacto', cliente?.correo || cliente?.telefono || '—'],
+      ['Entrega', tipoEntrega === 'domicilio' ? 'A domicilio' : `Recogida en local${localSel ? ` · ${localSel.nombre}` : ''}`],
+      ['Método de pago', metodoSel?.label || '—'],
+    ];
+    if (tipoEntrega === 'domicilio' && direccionAlternativa.trim()) {
+      datos.push(['Dirección', direccionAlternativa.trim()]);
+    }
+    if (metodoSel?.num) datos.push(['Cuenta destino', metodoSel.num]);
+
+    const datosHtml = datos.map(([k, v]) => `
+      <div class="dato">
+        <div class="dato__k">${esc(k)}</div>
+        <div class="dato__v">${esc(v)}</div>
+      </div>`).join('');
+
     w.document.write(`
-      <html><head><title>Factura ${numeroPedido}</title>
+      <html><head><meta charset="utf-8"><title>Factura — Pedido ${numeroPedido}</title>
       <style>
-        body{font-family:Arial,sans-serif;color:#222;padding:32px;max-width:480px;margin:0 auto;}
-        h1{font-size:20px;margin-bottom:4px;color:#2E7D32;}
-        .muted{color:#777;font-size:12px;margin-bottom:18px;}
-        table{width:100%;border-collapse:collapse;margin-bottom:18px;}
-        td{padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
-        tr:last-child td{border-bottom:none;}
-        .subtitulo{font-size:11px;font-weight:700;text-transform:uppercase;color:#999;letter-spacing:1px;padding:10px 0 4px;}
-        .total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:bold;border-top:2px solid #2E7D32;padding-top:10px;margin-top:6px;color:#2E7D32;}
-        .pago{background:#f4f8f4;border:1px solid #cde3cd;border-radius:8px;padding:14px;margin-top:18px;}
-        .pago b{display:block;margin-bottom:4px;color:#2E7D32;}
+        /* Blanco y negro: la factura se imprime y se fotocopia, y ahí el
+           color no sobrevive. La jerarquía la dan el tamaño, el peso y las
+           reglas horizontales. */
+        *{box-sizing:border-box;}
+        body{
+          font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;
+          color:#000;background:#fff;
+          margin:0 auto;padding:40px 32px;max-width:520px;
+          -webkit-print-color-adjust:exact;print-color-adjust:exact;
+        }
+        .marca{
+          display:flex;align-items:baseline;justify-content:space-between;
+          border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:4px;
+        }
+        .marca__nombre{font-size:19px;font-weight:800;letter-spacing:-0.3px;}
+        .marca__tipo{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
+        .marca__sub{font-size:10px;color:#555;letter-spacing:0.4px;margin-bottom:22px;}
+        .datos{
+          display:grid;grid-template-columns:1fr 1fr;gap:11px 18px;
+          padding:14px 0 16px;border-bottom:1px solid #000;margin-bottom:22px;
+        }
+        .dato__k{
+          font-size:8.5px;font-weight:700;letter-spacing:1.1px;
+          text-transform:uppercase;color:#666;margin-bottom:2px;
+        }
+        .dato__v{font-size:12.5px;font-weight:600;line-height:1.35;}
+        .seccion{
+          font-size:9px;font-weight:800;letter-spacing:1.6px;
+          text-transform:uppercase;padding-bottom:6px;border-bottom:1px solid #000;
+        }
+        table{width:100%;border-collapse:collapse;margin-bottom:4px;}
+        td{padding:8px 0;vertical-align:top;}
+        .linea-base td{font-size:13px;font-weight:600;border-bottom:1px solid #e0e0e0;}
+        .linea-extra td{font-size:11px;color:#444;padding:1px 0 7px;border-bottom:1px solid #e0e0e0;}
+        .linea-base + .linea-extra td{border-top:none;padding-top:0;}
+        .col-cant{width:34px;font-variant-numeric:tabular-nums;color:#666;font-size:11px;}
+        .col-desc{padding-right:10px;}
+        .col-val{width:95px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+        .vineta{display:inline-block;width:14px;color:#888;}
+        .totales{margin-top:14px;}
+        .fila-total{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;color:#333;}
+        .fila-total--final{
+          font-size:17px;font-weight:800;color:#000;
+          border-top:2px solid #000;margin-top:8px;padding-top:11px;
+        }
+        .pie{
+          margin-top:30px;padding-top:12px;border-top:1px solid #ccc;
+          font-size:9.5px;line-height:1.6;color:#666;
+        }
+        .pie b{color:#000;}
+        @media print{ body{padding:0;} @page{margin:16mm;} }
       </style></head>
       <body>
-        <h1>☕ Café Don Berna</h1>
-        <div class="muted">Factura N° ${numeroPedido} · Cliente: ${cliente?.nombre||''} · ${new Date().toLocaleDateString('es-CO')}</div>
-        <div class="subtitulo">Detalle del pedido</div>
+        <div class="marca">
+          <div class="marca__nombre">Café Don Berna</div>
+          <div class="marca__tipo">Factura</div>
+        </div>
+        <div class="marca__sub">Comprobante de compra · Medellín, Antioquia</div>
+
+        <div class="datos">${datosHtml}</div>
+
+        <div class="seccion">Detalle</div>
         <table>${filasHtml}</table>
-        <div class="total-row"><span>Total a pagar</span><span>${fmt(total)}</span></div>
-        <div class="pago">
-          <b>Método de pago: ${metodoSel?.label}</b>
-          ${metodoSel?.num}
+
+        <div class="totales">
+          ${subtotalExtras > 0 ? `
+            <div class="fila-total"><span>Productos</span><span>${fmt(subtotalProductos)}</span></div>
+            <div class="fila-total"><span>Adiciones</span><span>${fmt(subtotalExtras)}</span></div>
+          ` : ''}
+          <div class="fila-total fila-total--final"><span>Total a pagar</span><span>${fmt(total)}</span></div>
+        </div>
+
+        <div class="pie">
+          <b>Gracias por tu compra.</b><br>
+          Documento informativo generado por SICABER. No constituye factura
+          electrónica ni comprobante fiscal ante la DIAN.
         </div>
       </body></html>
     `);
@@ -379,10 +627,18 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
       setStep(2);
       return;
     }
-    if (metodo !== 'efectivo' && modoComprobante === 'archivo' && !archivo) return;
-    if (metodo !== 'efectivo' && modoComprobante === 'archivo' && !ocrOk) return;
-    if (metodo !== 'efectivo' && modoComprobante === 'whatsapp' && !waSent) return;
-    if (metodo !== 'efectivo' && !modoComprobante) return;
+    // REGLA 2 / respuesta a la pregunta 2 del análisis: "Efectivo
+    // contraentrega" (domicilio) y "Pagar al llegar al local" (recogida)
+    // son los únicos 2 métodos que NO piden comprobante — los pasos 4/5 se
+    // saltan para ambos (antes solo se exceptuaba 'efectivo'). El backend
+    // sigue exigiendo Nequi/Transferencia+comprobante para cualquier otro
+    // método, así que estas 4 validaciones no pueden desaparecer, solo
+    // exceptuar también a PAGAR_LOCAL_ID.
+    const requiereComprobante = !sinVerificacion;
+    if (requiereComprobante && modoComprobante === 'archivo' && !archivo) return;
+    if (requiereComprobante && modoComprobante === 'archivo' && !ocrOk) return;
+    if (requiereComprobante && modoComprobante === 'whatsapp' && !waSent) return;
+    if (requiereComprobante && !modoComprobante) return;
 
     const sinDisponibilidad = validarDisponibilidad();
     if (sinDisponibilidad.length > 0) {
@@ -401,7 +657,13 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
       adiciones: i.adiciones || [],
       precioFinal: i.precioFinal,
     }));
-    const estadoInicial = metodo === 'efectivo' ? 'pendiente' : 'pendiente_verificacion';
+    // Mismo bug que pagoBackend (ver arriba): faltaba el caso PAGAR_LOCAL_ID.
+    // Sin esto, aunque pagoBackend ya mande 'efectivo', este componente le
+    // seguía pidiendo al backend el estado explícito 'pendiente_verificacion'
+    // — y el backend SÍ respeta el "estado" que pide el body cuando el pago
+    // no exige comprobante (ver POST /pedidos), así que un pedido de "pagar
+    // al llegar al local" habría vuelto a quedar trabado ahí igual.
+    const estadoInicial = sinVerificacion ? 'pendiente' : 'pendiente_verificacion';
     const comprobanteInfo = modoComprobante === 'whatsapp'
       ? 'Enviado por WhatsApp'
       : (archivo ? archivo.name : null);
@@ -411,7 +673,7 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
       // pero el cliente igual veía la pantalla de "¡Pedido recibido!".
       await pedidosService.create({
         numero: numeroPedido, cliente: cliente.nombre, clienteId: cliente.id,
-        tipo: tipoEntrega, pago: metodo, productos, total,
+        tipo: tipoEntrega, pago: pagoBackend, productos, total,
         hora: new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}),
         estado: estadoInicial, comprobante: comprobanteInfo,
         comprobanteImg: modoComprobante === 'archivo' ? comprobanteB64 : null,
@@ -423,6 +685,19 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
         // resto de datos del pedido.
         localId: tipoEntrega === 'local' ? localId : null,
         localNombre: tipoEntrega === 'local' ? (localSel?.nombre || null) : null,
+        // Nota de "cómo pagará al recoger" — solo tiene sentido para
+        // tipo='local' (el backend la rechaza si viaja con un domicilio).
+        // BUG encontrado en este análisis (pregunta 3): esta línea
+        // referenciaba `metodoPagoLocalModo`/`metodoPagoLocalSel`, dos
+        // variables que no existen en ningún lado del componente (no hay
+        // ningún `useState` ni UI que las llene) — un pedido de recogida en
+        // el local habría reventado con "ReferenceError" justo al
+        // confirmar. El único campo real que existe es el texto libre de
+        // la línea de abajo (`metodoPagoLocalTexto`, ver el <input> del
+        // Paso 3), así que se deja solo esa referencia.
+        metodoPagoLocal: tipoEntrega === 'local'
+          ? (metodoPagoLocalTexto.trim() || null)
+          : null,
       });
 
       // Envío automático de la información del pedido por WhatsApp al
@@ -430,11 +705,18 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
       // total, método de entrega y dirección si aplica). El navegador no
       // puede enviar el mensaje sin interacción del usuario (WhatsApp no
       // ofrece un envío 100% silencioso desde la web), así que lo máximo
-      // automatizable es abrir el chat ya con todo el pedido redactado,
-      // para cualquier pedido, no solo cuando se sube comprobante.
-      try {
-        window.open(`https://wa.me/${WA_NUMERO}?text=${generarTextoWA()}`, '_blank');
-      } catch (e) { /* si el navegador bloquea el popup, el pedido igual queda guardado */ }
+      // automatizable es abrir el chat ya con todo el pedido redactado.
+      // Para "efectivo" ya no se abre solo: se muestra un botón
+      // "Contáctate con nosotros" en la pantalla de éxito y el usuario
+      // decide si lo abre. "Pagar al llegar al local" recibe el mismo
+      // trato — no hubo comprobante que confirmar por WhatsApp, así que
+      // forzar el popup no aporta nada y solo distrae del mensaje de
+      // "pedido registrado" (ver el botón agregado en el paso 6).
+      if (!sinVerificacion) {
+        try {
+          window.open(`https://wa.me/${WA_NUMERO}?text=${generarTextoWA()}`, '_blank');
+        } catch (e) { /* si el navegador bloquea el popup, el pedido igual queda guardado */ }
+      }
 
       setTotalConfirmado(total); setLoading(false); setStep(6); onSuccess(false);
     } catch (err) {
@@ -504,8 +786,6 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     }
   };
 
-  const filasFactura = generarFilasFactura();
-
   return (
     <div className="lx-modal-mask" onClick={onClose}>
       <div className="pay-modal" onClick={e => e.stopPropagation()}>
@@ -515,32 +795,64 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
 
         {step === 6 ? (
           <div className="pay-success">
-            {metodo === 'efectivo' ? (
+            {/* BUG corregido: esta pantalla comparaba `metodo === 'efectivo'`
+                directamente, así que "Pagar al llegar al local" (metodo
+                'pagar_local', nunca literalmente 'efectivo') caía siempre
+                en la rama de "pago pendiente de verificar" — aunque el
+                pedido ya se crea con pago='efectivo'/estado='pendiente'
+                (ver `sinVerificacion` más arriba), sin ningún comprobante
+                que verificar. Ahora todo este bloque usa `sinVerificacion`
+                como única fuente de verdad, para que la pantalla coincida
+                con lo que de verdad quedó guardado. */}
+            {sinVerificacion ? (
               <div className="pay-success__icon">✓</div>
             ) : (
               <div className="pay-success__icon pay-success__icon--pending">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               </div>
             )}
-            <h2>{metodo === 'efectivo' ? '¡Pedido recibido!' : 'Tu pago está en verificación'}</h2>
+            <h2>{sinVerificacion ? (metodo === PAGAR_LOCAL_ID ? '¡Pedido registrado!' : '¡Pedido recibido!') : 'Tu pago está en verificación'}</h2>
             <p>{metodo === 'efectivo'
               ? (tipoEntrega === 'domicilio'
                   ? 'Tu pedido fue registrado. Nos pondremos en contacto pronto para coordinar tu domicilio.'
                   : `Tu pedido fue registrado. Pasa por ${localSel ? localSel.nombre : 'el local'} a recogerlo cuando esté listo.`)
+              : metodo === PAGAR_LOCAL_ID
+              ? `Tu pedido fue registrado. Pasa por ${localSel ? localSel.nombre : 'el local'} a recogerlo y pagar ahí — el local confirmará tu pedido antes de prepararlo.`
               : 'Recibimos tu comprobante. Por favor espera un momento mientras confirmamos que el pago fue exitoso — esto puede tardar unos minutos. En cuanto se verifique, comenzaremos a preparar tu pedido.'
             }</p>
-            {metodo !== 'efectivo' && (
+            {!sinVerificacion && (
               <div className="pay-success__pending-badge">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 Pendiente de verificación
               </div>
             )}
             <div className="pay-success__total">Total: {fmt(totalConfirmado)}</div>
+            {sinVerificacion && (
+              <button
+                type="button"
+                className="pay-contact-wa"
+                onClick={() => { try { window.open(`https://wa.me/${WA_NUMERO}?text=${generarTextoWA()}`, '_blank'); } catch (e) {} }}
+                style={{
+                  width:'100%', marginTop:16, display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+                  background:'#25D366', color:'#fff', border:'none', borderRadius:12,
+                  padding:'12px 16px', fontSize:14.5, fontWeight:700, cursor:'pointer',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.32A8.86 8.86 0 0 0 12.05 4c-4.9 0-8.89 3.99-8.89 8.89 0 1.57.41 3.1 1.19 4.44L3 21l3.79-1.24a8.88 8.88 0 0 0 4.26 1.09h.01c4.9 0 8.89-3.99 8.89-8.89a8.85 8.85 0 0 0-2.35-6.32Zm-5.55 13.67a7.37 7.37 0 0 1-3.76-1.03l-.27-.16-2.8.92.94-2.73-.18-.28a7.38 7.38 0 0 1-1.13-3.95c0-4.08 3.32-7.4 7.41-7.4a7.35 7.35 0 0 1 5.24 2.17 7.35 7.35 0 0 1 2.17 5.24c0 4.08-3.33 7.4-7.42 7.4Zm4.06-5.54c-.22-.11-1.31-.65-1.51-.72-.2-.07-.35-.11-.5.11-.15.22-.57.72-.7.87-.13.15-.26.16-.48.05-.22-.11-.93-.34-1.78-1.1-.66-.58-1.1-1.31-1.23-1.53-.13-.22-.01-.34.1-.45.1-.1.22-.26.33-.39.11-.13.15-.22.22-.37.07-.15.04-.27-.02-.39-.06-.11-.5-1.2-.68-1.65-.18-.43-.36-.37-.5-.38-.13-.01-.28-.01-.43-.01-.15 0-.39.06-.6.27-.2.22-.79.77-.79 1.87 0 1.1.81 2.16.92 2.31.11.15 1.6 2.44 3.87 3.42.54.23.96.37 1.29.48.54.17 1.03.15 1.42.09.43-.06 1.31-.53 1.5-1.05.18-.51.18-.95.13-1.05-.05-.1-.2-.16-.42-.27Z"/></svg>
+                Contáctate con nosotros
+              </button>
+            )}
             <div style={{width:'100%',marginTop:22,textAlign:'left',background:'var(--lx-surface-2,#F7F7F7)',borderRadius:12,padding:'16px 18px'}}>
               <div style={{fontSize:11,fontWeight:800,textTransform:'uppercase',letterSpacing:1,color:'var(--lx-muted)',marginBottom:10}}>Estado de tu pedido</div>
+              {/* `pago` se manda como pagoBackend (no `metodo`): PedidoProgreso
+                  decide si muestra el paso "Pago en verificación" comparando
+                  contra 'efectivo' literal, y solo pagoBackend garantiza ese
+                  valor real para cualquier método "sin verificación" (hoy
+                  'efectivo' y 'pagar_local', ambos ya traducidos a
+                  'efectivo' — ver `sinVerificacion`). */}
               <PedidoProgreso
-                estado={metodo === 'efectivo' ? 'pendiente' : 'pendiente_verificacion'}
-                pago={metodo}
+                estado={sinVerificacion ? 'pendiente' : 'pendiente_verificacion'}
+                pago={pagoBackend}
                 tipo={tipoEntrega}
                 orientacion="vertical"
               />
@@ -559,17 +871,39 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
               <div className="pay-total-badge">{fmt(total)}</div>
             </div>
 
-            <div className="pay-steps">
-              {[1,2,3,4,5].map((n,idx) => (
-                <React.Fragment key={n}>
-                  {idx > 0 && <div className="pay-step-line"/>}
-                  <div className={`pay-step ${step>=n?"pay-step--on":""}`}>{n}</div>
-                </React.Fragment>
-              ))}
-            </div>
-            <div className="pay-steps-labels">
-              <span>Entrega</span><span>Dirección</span><span>Pago</span><span>Factura</span><span>Comprobante</span>
-            </div>
+            {/* "Cuidado con" del usuario: el indicador debe reflejar los
+                pasos que en verdad se van a recorrer. "Efectivo
+                contraentrega" y "Pagar al llegar al local" saltan
+                directo del paso 3 al 6 (sin factura ni comprobante) —
+                además, con recogida en el local (tipoEntrega==='local')
+                YA se sabe desde el paso 1 que la ÚNICA opción de pago va a
+                ser esa (REGLA 1), así que ahí ni falta elegir el método
+                para saber que el recorrido va a ser corto. Con domicilio
+                no se sabe hasta elegir el método (podría ser uno dinámico
+                que sí pide comprobante), así que se queda en 5 hasta ese
+                momento. */}
+            {(() => {
+              const pasoCorto = sinVerificacion || tipoEntrega === 'local';
+              const numeros = pasoCorto ? [1,2,3] : [1,2,3,4,5];
+              const etiquetas = pasoCorto
+                ? ['Entrega','Dirección','Pago']
+                : ['Entrega','Dirección','Pago','Factura','Comprobante'];
+              return (
+                <>
+                  <div className="pay-steps">
+                    {numeros.map((n,idx) => (
+                      <React.Fragment key={n}>
+                        {idx > 0 && <div className="pay-step-line"/>}
+                        <div className={`pay-step ${step>=n?"pay-step--on":""}`}>{n}</div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  <div className="pay-steps-labels">
+                    {etiquetas.map(l => <span key={l}>{l}</span>)}
+                  </div>
+                </>
+              );
+            })()}
 
             {step === 1 && (
               <div className="pay-body">
@@ -611,7 +945,7 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                   <input
                     type="text"
                     className="pay-alt-address__input"
-                    style={direccionTocada && !direccionValida ? {borderColor:'#EF5350'} : undefined}
+                    style={(direccionTocada && !direccionValida) || cobertura.estado === 'fuera' ? {borderColor:'#EF5350'} : undefined}
                     placeholder="Ej: Calle 45 #23-10, apto 301, Villa Hermosa"
                     value={direccionAlternativa}
                     onChange={e => setDireccionAlternativa(e.target.value)}
@@ -622,13 +956,33 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                       La dirección es obligatoria y debe tener al menos 8 caracteres.
                     </p>
                   )}
+                  {direccionValida && cobertura.estado === 'checking' && (
+                    <p style={{fontSize:12,color:'var(--lx-muted)',marginTop:6,marginBottom:0}}>
+                      Verificando cobertura...
+                    </p>
+                  )}
+                  {cobertura.estado === 'fuera' && (
+                    <div style={{background:'rgba(229,57,53,0.12)',color:'#E53935',padding:'10px 14px',borderRadius:8,marginTop:8,fontSize:13,fontWeight:600}}>
+                      ⚠ Esa dirección está fuera de nuestra zona de cobertura (comuna 8 y 9 de Medellín). No podemos entregar domicilios ahí — elige "Recoger en el local" o escribe otra dirección.
+                    </div>
+                  )}
+                  {cobertura.estado === 'error' && (
+                    <p style={{fontSize:12,color:'var(--lx-muted)',marginTop:6,marginBottom:0}}>
+                      No se pudo verificar la dirección en este momento. Podés continuar; se validará de nuevo al confirmar el pedido.
+                    </p>
+                  )}
                 </div>
                 <div style={{display:"flex",gap:12,marginTop:8}}>
                   <button className="btn-cancel" onClick={() => setStep(1)}>← Atrás</button>
                   <button className="lx-btn" style={{flex:1,justifyContent:"center"}}
-                    disabled={!direccionValida}
-                    title={!direccionValida ? 'Escribe la dirección de entrega para continuar' : undefined}
-                    onClick={() => { setDireccionTocada(true); if (direccionValida) setStep(3); }}>Continuar →</button>
+                    disabled={!direccionValida || cobertura.estado === 'checking' || cobertura.estado === 'fuera'}
+                    title={
+                      !direccionValida ? 'Escribe la dirección de entrega para continuar'
+                      : cobertura.estado === 'checking' ? 'Verificando cobertura...'
+                      : cobertura.estado === 'fuera' ? 'Esa dirección está fuera de la zona de cobertura'
+                      : undefined
+                    }
+                    onClick={() => { setDireccionTocada(true); if (direccionValida && cobertura.estado !== 'fuera') setStep(3); }}>Continuar →</button>
                 </div>
               </div>
             )}
@@ -664,6 +1018,11 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                     ))}
                   </div>
                 )}
+
+                {/* Punto 3 — este paso solo elige el LOCAL. La nota de "cómo
+                    vas a pagar al recoger" vive ahora en el Paso 3, como
+                    una opción más de "Elige tu método de pago" (junto con
+                    el free-text que la acompaña) — no aquí. */}
                 <div style={{display:"flex",gap:12,marginTop:8}}>
                   <button className="btn-cancel" onClick={() => setStep(1)}>← Atrás</button>
                   {/* Obligatorio: sin local elegido no se puede continuar. */}
@@ -679,33 +1038,51 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                   {METODOS.map(m => (
                     <button key={m.id} className={`pay-method ${metodo===m.id?"pay-method--sel":""}`} onClick={() => setMetodo(m.id)}>
                       <span className="pay-method__icon" style={{background:"rgba(76,175,80,0.15)",color:"#4CAF50",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:800}}>{m.icon}</span>
-                      <div><div className="pay-method__label">{m.label}</div><div className="pay-method__num">{m.num}</div></div>
+                      <div><div className="pay-method__label">{m.label}</div><div className="pay-method__num">{m.id === PAGAR_LOCAL_ID ? 'Indica cómo prefieres pagar' : m.num}</div></div>
                       {metodo===m.id && <span className="pay-method__check">✓</span>}
                     </button>
                   ))}
                 </div>
+                {/* Punto 3 — al elegir "Pagar al llegar al local" se pide
+                    el texto libre acá mismo (dentro del Paso 3, no en el
+                    Paso 2 de selección de local). El pedido sigue
+                    requiriendo comprobante en el paso siguiente igual que
+                    con cualquier otro método — ver PAGAR_LOCAL_ID. */}
+                {metodo === PAGAR_LOCAL_ID && (
+                  <div className="lx-field" style={{marginBottom:12}}>
+                    <label>¿Cómo prefieres pagar al recoger? <span style={{fontWeight:400,color:'var(--lx-muted)',fontSize:12}}>(opcional)</span></label>
+                    <input type="text" value={metodoPagoLocalTexto} maxLength={100}
+                      onChange={e => setMetodoPagoLocalTexto(e.target.value)}
+                      placeholder="Ej: Pago en efectivo al recoger"/>
+                    <span style={{fontSize:11.5,color:'var(--lx-muted)',display:'block',marginTop:4}}>
+                      Es una referencia para el local — igual necesitas completar el pago con comprobante en el siguiente paso.
+                    </span>
+                  </div>
+                )}
+                {/* B5 — paso 3 simplificado: solo lo esencial (entrega,
+                    dirección/local, método, total). NO se repite la factura
+                    completa acá — el detalle línea por línea está en el
+                    carrito y, si el cliente lo quiere, en "Descargar factura"
+                    del paso siguiente. */}
                 <div className="pay-cart-summary">
-                  <div className="pay-cart-title">Resumen del pedido</div>
-                  {filasFactura.map((f,idx) => (
-                    <div key={idx} className="pay-cart-row" style={f.esBase ? {} : {paddingLeft:14,opacity:0.8}}>
-                      <span style={{fontSize: f.esBase ? 13 : 12}}>{f.desc}</span>
-                      <span style={{fontSize: f.esBase ? 13 : 12, color: f.precio===0 ? '#4CAF50' : 'inherit'}}>
-                        {f.precio > 0 ? fmt(f.precio) : f.desc.includes('gratis') ? 'Gratis' : ''}
-                      </span>
-                    </div>
-                  ))}
+                  <div className="pay-cart-row" style={{opacity:0.9}}>
+                    <span style={{fontSize:12.5}}>{tipoEntrega === 'domicilio' ? '🛵 Entrega a domicilio' : '🏠 Recoger en el local'}</span>
+                    <span style={{fontSize:12.5,fontWeight:700}}>
+                      {tipoEntrega === 'domicilio'
+                        ? (direccionAlternativa.trim() || 'Dirección pendiente')
+                        : (localSel?.nombre || 'Local pendiente')}
+                    </span>
+                  </div>
                   {tipoEntrega === 'domicilio' && (
                     <div className="pay-cart-row" style={{opacity:0.85}}>
-                      <span style={{fontSize:12}}>🛵 Valor del domicilio</span>
+                      <span style={{fontSize:12}}>Valor del domicilio</span>
                       <span style={{fontSize:12,color:'#4CAF50',fontWeight:700}}>Gratis</span>
                     </div>
                   )}
-                  {/* 4 — local elegido, visible en el resumen antes de
-                      confirmar el pedido. */}
-                  {tipoEntrega === 'local' && localSel && (
-                    <div className="pay-cart-row" style={{opacity:0.85}}>
-                      <span style={{fontSize:12}}>🏠 Recoger en</span>
-                      <span style={{fontSize:12,fontWeight:700}}>{localSel.nombre}</span>
+                  {metodo && (
+                    <div className="pay-cart-row" style={{opacity:0.9}}>
+                      <span style={{fontSize:12.5}}>Método de pago</span>
+                      <span style={{fontSize:12.5,fontWeight:700}}>{metodoSel?.label}</span>
                     </div>
                   )}
                   <div className="pay-cart-total"><span>Total</span><strong>{fmt(total)}</strong></div>
@@ -719,9 +1096,14 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                   {/* Ahora "local" también pasa por el paso 2 (elegir
                       local), así que Atrás siempre vuelve ahí. */}
                   <button className="btn-cancel" onClick={() => setStep(2)}>← Atrás</button>
+                  {/* Respuesta a la pregunta 2 del análisis: "Pagar al
+                      llegar al local" se suma a "Efectivo contraentrega"
+                      como método que confirma DIRECTO desde acá, sin pasar
+                      por el paso 4 (factura) ni el 5 (comprobante) — ninguno
+                      de los dos tiene nada que subir o verificar todavía. */}
                   <button className="lx-btn" style={{flex:1,justifyContent:"center"}} disabled={!metodo||loading}
-                    onClick={() => metodo==="efectivo" ? confirmar() : setStep(4)}>
-                    {loading ? <span className="pay-spinner"/> : metodo==="efectivo" ? "Confirmar pedido →" : "Continuar →"}
+                    onClick={() => sinVerificacion ? confirmar() : setStep(4)}>
+                    {loading ? <span className="pay-spinner"/> : sinVerificacion ? "Confirmar pedido →" : "Continuar →"}
                   </button>
                 </div>
               </div>
@@ -729,31 +1111,39 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
 
             {step === 4 && (
               <div className="pay-body">
-                <h3>Factura — paga antes de continuar</h3>
+                <h3>Paga tu pedido</h3>
                 <p style={{fontSize:13,color:"var(--lx-muted)",marginBottom:16}}>
-                  Realiza el pago por <strong>{metodoSel?.label}</strong> usando los datos de abajo. Cuando ya hayas pagado, envía tu comprobante en el siguiente paso.
+                  {metodo === PAGAR_LOCAL_ID
+                    ? 'Elegiste pagar al llegar al local — no necesitas adjuntar un comprobante de pago. En el siguiente paso, confírmalo por WhatsApp con el local.'
+                    : <>Realiza el pago por <strong>{metodoSel?.label}</strong> usando los datos de abajo. Cuando ya hayas pagado, envía tu comprobante en el siguiente paso.</>}
                 </p>
+                {/* B5 — sin repetir la factura completa: solo el total a
+                    pagar. El detalle línea por línea sigue disponible en
+                    "Descargar / imprimir factura" (abajo). */}
                 <div className="pay-cart-summary">
-                  <div className="pay-cart-title">Pedido {numeroPedido}</div>
-                  {filasFactura.map((f,idx) => (
-                    <div key={idx} className="pay-cart-row" style={f.esBase ? {} : {paddingLeft:14,opacity:0.75}}>
-                      <span style={{fontSize: f.esBase ? 13 : 12}}>{f.desc}</span>
-                      <span style={{fontSize: f.esBase ? 13 : 12, color: f.precio===0 ? '#4CAF50' : 'inherit'}}>
-                        {f.precio > 0 ? fmt(f.precio) : f.desc.includes('gratis') ? 'Gratis' : ''}
-                      </span>
-                    </div>
-                  ))}
+                  <div className="pay-cart-row" style={{opacity:0.85}}>
+                    <span style={{fontSize:12.5}}>Pedido {numeroPedido}</span>
+                    <span style={{fontSize:12.5,fontWeight:700}}>{metodoSel?.label}</span>
+                  </div>
                   <div className="pay-cart-total"><span>Total a pagar</span><strong>{fmt(total)}</strong></div>
                 </div>
                 <div style={{background:"var(--lx-green-bg)",border:"1.5px solid rgba(76,175,80,0.3)",borderRadius:12,padding:"14px 16px",marginBottom:8}}>
-                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",color:"var(--lx-green-dd)",marginBottom:6}}>Paga con {metodoSel?.label}</div>
+                  <div style={{fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",color:"var(--lx-green-dd)",marginBottom:6}}>
+                    {metodo === PAGAR_LOCAL_ID ? 'Pagarás al llegar al local' : `Paga con ${metodoSel?.label}`}
+                  </div>
+                  {metodo === PAGAR_LOCAL_ID && (
+                    <p style={{margin:0,fontSize:13,color:"var(--lx-text)"}}>
+                      {metodoPagoLocalTexto.trim() || 'No indicaste ninguna referencia — el local te preguntará al recoger tu pedido.'}
+                    </p>
+                  )}
                   {metodoSel?.titular && (
                     <div style={{fontSize:12.5,color:"var(--lx-muted)",marginBottom:6}}>
                       Titular: <strong style={{color:"var(--lx-text)"}}>{metodoSel.titular}</strong>
                     </div>
                   )}
+                  {metodoSel?.num && (
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-                    <div style={{fontSize:15,fontWeight:700,color:"var(--lx-text)"}}>{metodoSel?.num}</div>
+                    <div style={{fontSize:15,fontWeight:700,color:"var(--lx-text)"}}>{metodoSel.num}</div>
                     {metodo!=='efectivo' && (
                       <button type="button" onClick={copiarNumero}
                         style={{display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:700,color:numeroCopiado?"#4CAF50":"var(--lx-green-dd)",background:"rgba(76,175,80,0.12)",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",whiteSpace:"nowrap"}}>
@@ -765,18 +1155,26 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                       </button>
                     )}
                   </div>
+                  )}
                   {metodoSel?.tipoCuenta && (
                     <div style={{fontSize:12,color:"var(--lx-muted)",marginTop:6}}>Tipo de cuenta: {metodoSel.tipoCuenta}</div>
+                  )}
+                  {metodoSel?.urlQr && (
+                    <div style={{marginTop:10,display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                      <img src={metodoSel.urlQr} alt={`Código QR para pagar con ${metodoSel.label}`}
+                        style={{width:180,height:180,objectFit:"contain",borderRadius:10,background:"#fff",padding:8,border:"1.5px solid rgba(76,175,80,0.3)"}}/>
+                      <span style={{fontSize:11.5,color:"var(--lx-muted)"}}>Escanea el código para pagar</span>
+                    </div>
                   )}
                 </div>
                 <button type="button" onClick={imprimirFactura} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,color:"var(--lx-green-dd)",background:"none",border:"none",cursor:"pointer",padding:"8px 0",marginBottom:8}}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>
-                  Descargar / imprimir factura en PDF
+                  Descargar / imprimir factura
                 </button>
                 <div style={{display:"flex",gap:12,marginTop:8}}>
                   <button className="btn-cancel" onClick={() => setStep(3)}>← Atrás</button>
                   <button className="lx-btn" style={{flex:1,justifyContent:"center"}} onClick={() => setStep(5)}>
-                    {metodo==='efectivo' ? 'Continuar →' : 'Ya realicé la transferencia →'}
+                    {metodo==='efectivo' || metodo===PAGAR_LOCAL_ID ? 'Continuar →' : 'Ya realicé el pago →'}
                   </button>
                 </div>
               </div>
@@ -784,9 +1182,11 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
 
             {step === 5 && (
               <div className="pay-body">
-                <h3>Envía tu comprobante de pago</h3>
+                <h3>{metodo === PAGAR_LOCAL_ID ? 'Confirma tu pedido' : 'Envía tu comprobante de pago'}</h3>
                 <p style={{fontSize:13,color:"#888",marginBottom:16}}>
-                  Mándanos el pantallazo de la transacción de {metodoSel?.label}. Puedes hacerlo por WhatsApp o subiendo el archivo aquí.
+                  {metodo === PAGAR_LOCAL_ID
+                    ? 'No hay ningún pantallazo que enviar — confirma por WhatsApp que pagarás al llegar al local. Si prefieres, igual puedes adjuntar un comprobante si ya hiciste algún abono.'
+                    : <>Mándanos el pantallazo de la transacción de {metodoSel?.label}. Puedes hacerlo por WhatsApp o subiendo el archivo aquí.</>}
                 </p>
 
                 {advertencias.length > 0 && (
@@ -972,6 +1372,10 @@ export default function Landing() {
   const [perfilTab, setPerfilTab] = useState("info");
   // batch 8 item 2 — pedido expandido dentro de la pestaña Historial del modal
   const [histExpandido, setHistExpandido] = useState(null);
+  // Historial paginado: 5 pedidos por página en vez de una lista larga con
+  // scroll interno (que además se solapaba visualmente con muchos pedidos).
+  const [histPage, setHistPage] = useState(1);
+  const HIST_PAGE_SIZE = 5;
   const [editData, setEditData] = useState({});
   const [editDataOrig, setEditDataOrig] = useState({});
   const [editError, setEditError] = useState("");
@@ -1122,6 +1526,17 @@ export default function Landing() {
     ).catch(() => setPedidosCliente([]));
     clientesService.getById(clienteSession.id).then(c => setClienteData(c)).catch(() => {});
   }, [clienteSession]);
+
+  // Vuelve a la página 1 del historial cada vez que se abre la pestaña
+  // "Historial" del modal de perfil, para no quedar en una página vacía
+  // si la lista de pedidos cambió desde la última vez que se vio.
+  useEffect(() => {
+    if (modal === 'perfil' && perfilTab === 'historial') {
+      setHistPage(1);
+      setHistExpandido(null);
+    }
+    // eslint-disable-next-line
+  }, [modal, perfilTab]);
 
   // Recoge las intenciones dejadas por la página de historial de pedidos
   // (/mis-pedidos) para "Volver a comprar" o "Solicitar devolución": esas
@@ -1323,59 +1738,198 @@ export default function Landing() {
   // "Ver factura": abre una ventana imprimible con el detalle completo de
   // un pedido pasado (productos, toppings/adiciones, total y método de pago),
   // para que el cliente pueda confirmar exactamente qué y cuánto pagó.
-  const METODOS_PAGO_LABEL = { nequi:'Nequi', transferencia:'Transferencia', efectivo:'Efectivo en caja' };
+  // B1 — etiqueta visible por método (el valor 'transferencia' no cambia).
+  const METODOS_PAGO_LABEL = { nequi:'Nequi', transferencia:'Llave Bancolombia', efectivo:'Efectivo' };
   const verFacturaPedido = (pedido) => {
     const w = window.open('', '_blank');
     if (!w) { showToast('Habilita las ventanas emergentes para ver la factura'); return; }
     const cliente = clienteData;
+
+    const esc = v => String(v ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // ── Líneas del detalle ────────────────────────────────────────────
+    // Cada producto trae su subtotal; toppings y adiciones cuelgan de él
+    // indentados, para que se lea a qué pertenece cada extra.
     const filas = [];
+    let subtotalProductos = 0;
+    let subtotalExtras = 0;
+
     (pedido.productos || []).forEach(i => {
       const cant = i.cantidad || 1;
       const precioBase = (i.precio || 0) * cant;
-      filas.push({ desc: `${i.nombre} x${cant}`, precio: precioBase, esBase: true });
+      subtotalProductos += precioBase;
+      filas.push({ cant, desc: i.nombre, precio: precioBase, tipo: 'base' });
+
       (i.toppings || []).forEach(t => {
-        if ((t.precio || 0) > 0) filas.push({ desc: `  + ${t.nombre} x${cant}`, precio: t.precio * cant, esBase: false });
-        else filas.push({ desc: `  + ${t.nombre} (gratis)`, precio: 0, esBase: false });
+        const valor = (t.precio || 0) * cant;
+        subtotalExtras += valor;
+        filas.push({ cant: '', desc: t.nombre, precio: valor, tipo: valor > 0 ? 'extra' : 'gratis' });
       });
       (i.adiciones || []).forEach(a => {
-        filas.push({ desc: `  + ${a.nombre} x${cant}`, precio: (a.precio || 0) * cant, esBase: false });
+        const valor = (a.precio || 0) * cant;
+        subtotalExtras += valor;
+        filas.push({ cant: '', desc: a.nombre, precio: valor, tipo: valor > 0 ? 'extra' : 'gratis' });
       });
     });
-    const filasHtml = filas.map(f =>
-      `<tr>
-        <td style="${f.esBase ? '' : 'color:#666;padding-left:18px;font-size:12px;'}">${f.desc}</td>
-        <td style="text-align:right;${f.esBase ? '' : 'color:#666;font-size:12px;'}">${f.precio > 0 ? fmt(f.precio) : (f.desc.includes('gratis') ? 'Gratis' : '')}</td>
-      </tr>`
-    ).join('');
-    const fechaPedido = pedido.fechaCreacion ? new Date(pedido.fechaCreacion).toLocaleDateString('es-CO',{day:'2-digit',month:'long',year:'numeric'}) : '';
-    const estadoLabelMap = { pendiente_verificacion:'Verificando pago', pendiente:'Pendiente', en_proceso:'En proceso', listo:'Listo', entregado:'Entregado', cancelado:'Cancelado' };
+
+    const filasHtml = filas.map(f => {
+      if (f.tipo === 'base') {
+        return `<tr class="linea-base">
+          <td class="col-cant">${esc(f.cant)}</td>
+          <td class="col-desc">${esc(f.desc)}</td>
+          <td class="col-val">${fmt(f.precio)}</td>
+        </tr>`;
+      }
+      const valor = f.tipo === 'gratis' ? 'incluido' : fmt(f.precio);
+      return `<tr class="linea-extra">
+        <td class="col-cant"></td>
+        <td class="col-desc"><span class="vineta">+</span>${esc(f.desc)}</td>
+        <td class="col-val">${valor}</td>
+      </tr>`;
+    }).join('');
+
+    const fechaPedido = pedido.fechaCreacion
+      ? new Date(pedido.fechaCreacion).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
+      : '';
+    const horaPedido = pedido.fechaCreacion
+      ? new Date(pedido.fechaCreacion).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+      : (pedido.hora || '');
+
+    const estadoPedidoTxt = etiquetaEstadoPedido(pedido.estado, pedido.tipo);
+    const estadoPagoTxt = (ESTADO_PAGO_CFG[estadoPagoDe(pedido)] || {}).label || '';
+    const totalPedido = Number(pedido.total) || (subtotalProductos + subtotalExtras);
+
+    // Ficha de datos del encabezado: dos columnas, etiqueta arriba y valor
+    // debajo. Antes iba todo en líneas sueltas de texto gris y costaba
+    // distinguir el número de pedido de la fecha.
+    const datos = [
+      ['Pedido',  `N.º ${pedido.id}${pedido.numero ? ` · ${pedido.numero}` : ''}`],
+      ['Fecha',   `${fechaPedido}${horaPedido ? ` · ${horaPedido}` : ''}`],
+      ['Cliente', cliente?.nombre || pedido.cliente || 'Consumidor final'],
+      ['Contacto', cliente?.correo || cliente?.telefono || '—'],
+      ['Entrega', pedido.tipo === 'domicilio' ? 'A domicilio' : 'Recogida en local'],
+      ['Método de pago', METODOS_PAGO_LABEL[pedido.pago] || pedido.pago || '—'],
+    ];
+    if (pedido.direccionAlternativa) datos.push(['Dirección', pedido.direccionAlternativa]);
+
+    const datosHtml = datos.map(([k, v]) => `
+      <div class="dato">
+        <div class="dato__k">${esc(k)}</div>
+        <div class="dato__v">${esc(v)}</div>
+      </div>`).join('');
+
     w.document.write(`
-      <html><head><title>Factura — Pedido #${pedido.id}</title>
+      <html><head><meta charset="utf-8"><title>Factura — Pedido ${pedido.id}</title>
       <style>
-        body{font-family:Arial,sans-serif;color:#222;padding:32px;max-width:480px;margin:0 auto;}
-        h1{font-size:20px;margin-bottom:4px;color:#2E7D32;}
-        .muted{color:#777;font-size:12px;margin-bottom:4px;}
-        table{width:100%;border-collapse:collapse;margin:14px 0 18px;}
-        td{padding:5px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
-        tr:last-child td{border-bottom:none;}
-        .subtitulo{font-size:11px;font-weight:700;text-transform:uppercase;color:#999;letter-spacing:1px;padding:10px 0 4px;}
-        .total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:bold;border-top:2px solid #2E7D32;padding-top:10px;margin-top:6px;color:#2E7D32;}
-        .pago{background:#f4f8f4;border:1px solid #cde3cd;border-radius:8px;padding:14px;margin-top:18px;font-size:13px;line-height:1.6;}
-        .pago b{display:block;margin-bottom:4px;color:#2E7D32;}
-        .estado{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:100px;background:#eee;margin-top:6px;}
+        /* Diseño en blanco y negro: la factura se imprime, se fotocopia y
+           se archiva, y ahí el color no sobrevive. La jerarquía la dan el
+           tamaño, el peso y las reglas horizontales. */
+        *{box-sizing:border-box;}
+        body{
+          font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;
+          color:#000;background:#fff;
+          margin:0;padding:40px 32px;
+          max-width:520px;margin:0 auto;
+          -webkit-print-color-adjust:exact;print-color-adjust:exact;
+        }
+        .marca{
+          display:flex;align-items:baseline;justify-content:space-between;
+          border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:4px;
+        }
+        .marca__nombre{font-size:19px;font-weight:800;letter-spacing:-0.3px;}
+        .marca__tipo{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;}
+        .marca__sub{font-size:10px;color:#555;letter-spacing:0.4px;margin-bottom:22px;}
+
+        .datos{
+          display:grid;grid-template-columns:1fr 1fr;gap:11px 18px;
+          padding:14px 0 16px;border-bottom:1px solid #000;margin-bottom:4px;
+        }
+        .dato__k{
+          font-size:8.5px;font-weight:700;letter-spacing:1.1px;
+          text-transform:uppercase;color:#666;margin-bottom:2px;
+        }
+        .dato__v{font-size:12.5px;font-weight:600;line-height:1.35;}
+
+        .estados{display:flex;gap:6px;margin:14px 0 22px;flex-wrap:wrap;}
+        .chip{
+          font-size:9.5px;font-weight:700;letter-spacing:0.6px;
+          text-transform:uppercase;padding:4px 10px;
+          border:1px solid #000;border-radius:2px;
+        }
+        .chip--fill{background:#000;color:#fff;}
+
+        .seccion{
+          font-size:9px;font-weight:800;letter-spacing:1.6px;
+          text-transform:uppercase;color:#000;
+          padding-bottom:6px;margin-bottom:0;border-bottom:1px solid #000;
+        }
+        table{width:100%;border-collapse:collapse;margin-bottom:4px;}
+        td{padding:8px 0;vertical-align:top;}
+        .linea-base td{
+          font-size:13px;font-weight:600;
+          border-bottom:1px solid #e0e0e0;
+        }
+        .linea-extra td{
+          font-size:11px;color:#444;padding:1px 0 7px;
+          border-bottom:1px solid #e0e0e0;
+        }
+        .linea-base + .linea-extra td{border-top:none;padding-top:0;}
+        .col-cant{width:34px;font-variant-numeric:tabular-nums;color:#666;font-size:11px;}
+        .col-desc{padding-right:10px;}
+        .col-val{width:95px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+        .vineta{display:inline-block;width:14px;color:#888;}
+
+        .totales{margin-top:14px;}
+        .fila-total{
+          display:flex;justify-content:space-between;
+          font-size:12px;padding:4px 0;color:#333;
+        }
+        .fila-total--final{
+          font-size:17px;font-weight:800;color:#000;
+          border-top:2px solid #000;margin-top:8px;padding-top:11px;
+        }
+
+        .pie{
+          margin-top:30px;padding-top:12px;border-top:1px solid #ccc;
+          font-size:9.5px;line-height:1.6;color:#666;
+        }
+        .pie b{color:#000;}
+
+        @media print{
+          body{padding:0;}
+          @page{margin:16mm;}
+        }
       </style></head>
       <body>
-        <h1>☕ Café Don Berna</h1>
-        <div class="muted">Factura · Pedido #${pedido.id}${pedido.numero ? ` (${pedido.numero})` : ''} · ${fechaPedido}</div>
-        <div class="muted">Cliente: ${cliente?.nombre || pedido.cliente || ''}${cliente?.correo ? ` · ${cliente.correo}` : ''}</div>
-        <span class="estado">${estadoLabelMap[pedido.estado] || pedido.estado || ''}</span>
-        <div class="subtitulo">Detalle del pedido</div>
+        <div class="marca">
+          <div class="marca__nombre">Café Don Berna</div>
+          <div class="marca__tipo">Factura</div>
+        </div>
+        <div class="marca__sub">Comprobante de compra · Medellín, Antioquia</div>
+
+        <div class="datos">${datosHtml}</div>
+
+        <div class="estados">
+          <span class="chip chip--fill">${esc(estadoPedidoTxt)}</span>
+          ${estadoPagoTxt ? `<span class="chip">Pago: ${esc(estadoPagoTxt)}</span>` : ''}
+        </div>
+
+        <div class="seccion">Detalle</div>
         <table>${filasHtml}</table>
-        <div class="total-row"><span>Total</span><span>${fmt(pedido.total)}</span></div>
-        <div class="pago">
-          <b>Método de pago: ${METODOS_PAGO_LABEL[pedido.pago] || pedido.pago || '—'}</b>
-          Entrega: ${pedido.tipo === 'domicilio' ? 'A domicilio' : 'Recogida en local'}
-          ${pedido.direccionAlternativa ? `<br>Dirección: ${pedido.direccionAlternativa}` : ''}
+
+        <div class="totales">
+          ${subtotalExtras > 0 ? `
+            <div class="fila-total"><span>Productos</span><span>${fmt(subtotalProductos)}</span></div>
+            <div class="fila-total"><span>Adiciones</span><span>${fmt(subtotalExtras)}</span></div>
+          ` : ''}
+          <div class="fila-total fila-total--final"><span>Total</span><span>${fmt(totalPedido)}</span></div>
+        </div>
+
+        <div class="pie">
+          <b>Gracias por tu compra.</b><br>
+          Documento informativo generado por SICABER. No constituye factura
+          electrónica ni comprobante fiscal ante la DIAN.
         </div>
       </body></html>
     `);
@@ -1451,7 +2005,7 @@ export default function Landing() {
       if (c) {
         setClienteData(c);
         // batch 8 item 1 — el cliente ya no tiene dirección/comuna/ubicación.
-        const ed = { nombre: c.nombre, telefono: c.telefono || "" };
+        const ed = { nombre: c.nombre, correo: c.correo || "", telefono: c.telefono || "" };
         setEditData(ed);
         setEditDataOrig(ed);
       }
@@ -1469,10 +2023,12 @@ export default function Landing() {
   const handleEditPerfil = async e => {
     e.preventDefault(); setEditError(""); setEditSuccess("");
     if (!editData.nombre?.trim()) { setEditError("El nombre es obligatorio."); return; }
+    if (!editData.correo?.trim()) { setEditError("El correo es obligatorio."); return; }
+    if (!/\S+@\S+\.\S+/.test(editData.correo)) { setEditError("Ingresa un correo electrónico válido."); return; }
     setEditLoading(true);
     try {
       const r = await clientesApi.actualizarPerfil(editData);
-      const updated = { ...clienteSession, nombre: r.nombre || editData.nombre };
+      const updated = { ...clienteSession, nombre: r.nombre || editData.nombre, correo: r.correo || editData.correo };
       setClienteSession(updated);
       localStorage.setItem("sicaber_cliente_session", JSON.stringify(updated));
       setEditDataOrig(editData);
@@ -2259,9 +2815,15 @@ const handleLogin = async e => {
                   </div>
                 </div>
                 <div className="lx-form__2">
-                  <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Contraseña segura" value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div><PasswordRequisitos password={regData.password} mostrarSiempre compacto /></div>
+                  <div className="lx-field"><label>Contraseña *</label><div className="lx-pass-wrap"><input type={showRegPass?'text':'password'} placeholder="Contraseña segura" value={regData.password} onChange={e=>setRegData({...regData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegPass(v=>!v)}>{showRegPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                   <div className="lx-field"><label>Confirmar *</label><div className="lx-pass-wrap"><input type={showRegConf?'text':'password'} placeholder="••••••••" value={regData.confirm} onChange={e=>setRegData({...regData,confirm:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowRegConf(v=>!v)}>{showRegConf?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                 </div>
+                {/* Antes vivía dentro del campo Contraseña (mitad del ancho del
+                    modal), lo que apilaba sus 5 líneas una debajo de otra y
+                    era la principal razón por la que el registro necesitaba
+                    scroll interno. A ancho completo y en 2 columnas
+                    (mostrarSiempre, sin `compacto`) ocupa 3 filas en vez de 5. */}
+                <PasswordRequisitos password={regData.password} mostrarSiempre />
                 <button type="submit" className="lx-btn lx-btn--full" disabled={authLoading}>{authLoading?"Creando...":"Crear cuenta"}</button>
               </form>
             )}
@@ -2285,8 +2847,7 @@ const handleLogin = async e => {
 
       {modal === "perfil" && clienteSession && (() => {
         const fmt2 = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
-        const cliente = clienteData;        const estadoColor = { pendiente_verificacion:'#F57F17', pendiente:'#f59e0b', en_proceso:'#3b82f6', listo:'#10b981', entregado:'#6b7280', cancelado:'#ef4444' };
-        const estadoLabel = { pendiente_verificacion:'Verificando pago', pendiente:'Pendiente', en_proceso:'En proceso', listo:'Listo', entregado:'Entregado', cancelado:'Cancelado' };
+        const cliente = clienteData;
         const perfilTabs = [
           { key:'info',      label:'Mi perfil' },
           { key:'historial', label:'Historial' },
@@ -2319,14 +2880,25 @@ const handleLogin = async e => {
                   </button>
                 ))}
               </div>
-              {perfilTab === "historial" && (
-                <div style={{display:'flex',flexDirection:'column',gap:10,maxHeight:'52vh',overflowY:'auto',paddingRight:2}}>
-                  {(pedidosCliente || []).length === 0 ? (
+              {perfilTab === "historial" && (() => {
+                const totalPedidos = (pedidosCliente || []).length;
+                const totalHistPaginas = Math.max(1, Math.ceil(totalPedidos / HIST_PAGE_SIZE));
+                // Por si la página guardada quedó fuera de rango (p. ej. el
+                // historial se acortó), la acotamos sin disparar un render
+                // extra innecesario.
+                const paginaActual = Math.min(histPage, totalHistPaginas);
+                const pedidosPagina = (pedidosCliente || []).slice(
+                  (paginaActual - 1) * HIST_PAGE_SIZE,
+                  paginaActual * HIST_PAGE_SIZE
+                );
+                return (
+                <div style={{display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
+                  {totalPedidos === 0 ? (
                     <div style={{textAlign:'center',padding:'24px 0',color:'var(--lx-muted)',fontSize:13}}>Todavía no tienes pedidos.</div>
                   ) : (
                     <>
-                      <div style={{fontSize:12,color:'var(--lx-muted)'}}>{pedidosCliente.length} pedido{pedidosCliente.length!==1?'s':''} en total</div>
-                      {pedidosCliente.map(p => {
+                      <div style={{fontSize:12,color:'var(--lx-muted)'}}>{totalPedidos} pedido{totalPedidos!==1?'s':''} en total</div>
+                      {pedidosPagina.map(p => {
                         const abierto = histExpandido === p.id;
                         const prods = Array.isArray(p.productos) ? p.productos : [];
                         const fechaTxt = (p.fechaCreacion || p.created_at)
@@ -2340,8 +2912,11 @@ const handleLogin = async e => {
                                 <div style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>Pedido #{p.id}</div>
                                 <div style={{fontSize:11.5,color:'var(--lx-muted)'}}>{fechaTxt}{p.hora ? ` · ${p.hora}` : ''}</div>
                               </div>
-                              <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
-                                <span style={{fontSize:11,fontWeight:700,color: estadoColor[p.estado] || '#6b7280'}}>{estadoLabel[p.estado] || p.estado}</span>
+                              <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
+                                <EstadoPedidoBadge estado={p.estado} tipo={p.tipo} />
+                                {/* Ronda 23 item 3 — si el pedido tuvo una devolución aprobada
+                                    (parcial o total), se ve de una vez en la fila del historial. */}
+                                <EstadoDevolucionBadge pedido={p} />
                                 <span style={{fontSize:13,fontWeight:700,color:'var(--lx-text)'}}>{fmt2(p.total)}</span>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{transform:abierto?'rotate(180deg)':'none',transition:'transform .18s',color:'var(--lx-muted)'}}><polyline points="6 9 12 15 18 9"/></svg>
                               </div>
@@ -2373,11 +2948,22 @@ const handleLogin = async e => {
                                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:13,fontWeight:700,color:'var(--lx-text)',marginTop:10,paddingTop:8,borderTop:'1px dashed var(--lx-border)'}}>
                                   <span>Total</span><span style={{color:'#4CAF50'}}>{fmt2(p.total)}</span>
                                 </div>
-                                <button onClick={() => verFacturaPedido(p)}
-                                  style={{marginTop:10,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid var(--lx-border)',background:'transparent',color:'var(--lx-text)',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                                  Ver factura
-                                </button>
+                                {/* B6 — con el pago RECHAZADO (estado_pago === 'rechazado') no hay
+                                    factura que ver: se ofrece contactar al negocio por WhatsApp,
+                                    con el pedido identificado por su id real. */}
+                                {pagoFueRechazado(p) ? (
+                                  <button onClick={() => window.open(`https://wa.me/${WA_NUMERO}?text=${encodeURIComponent(mensajeContactoPagoRechazado(p))}`, '_blank')}
+                                    style={{marginTop:10,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid #C62828',background:'transparent',color:'#C62828',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                                    Contactar con nosotros
+                                  </button>
+                                ) : (
+                                  <button onClick={() => verFacturaPedido(p)}
+                                    style={{marginTop:10,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid var(--lx-border)',background:'transparent',color:'var(--lx-text)',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                    Ver factura
+                                  </button>
+                                )}
                                 <button onClick={() => { setModal(null); volverAComprar(p); }}
                                   style={{marginTop:8,width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'8px 0',borderRadius:8,border:'1.5px solid var(--lx-green)',background:'transparent',color:'var(--lx-green)',fontWeight:700,fontSize:12.5,cursor:'pointer'}}>
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
@@ -2395,10 +2981,26 @@ const handleLogin = async e => {
                           </div>
                         );
                       })}
+                      {totalHistPaginas > 1 && (
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:14,marginTop:4,paddingTop:10,borderTop:'1px solid var(--lx-border)'}}>
+                          <button type="button" onClick={() => setHistPage(p => Math.max(1, p - 1))} disabled={paginaActual <= 1}
+                            style={{display:'flex',alignItems:'center',gap:4,padding:'6px 10px',borderRadius:8,border:'1.5px solid var(--lx-border)',background:'transparent',color: paginaActual <= 1 ? 'var(--lx-muted)' : 'var(--lx-text)',fontWeight:700,fontSize:12.5,cursor: paginaActual <= 1 ? 'default' : 'pointer',opacity: paginaActual <= 1 ? .5 : 1}}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                            Anterior
+                          </button>
+                          <span style={{fontSize:12.5,color:'var(--lx-muted)',fontWeight:600}}>Página {paginaActual} de {totalHistPaginas}</span>
+                          <button type="button" onClick={() => setHistPage(p => Math.min(totalHistPaginas, p + 1))} disabled={paginaActual >= totalHistPaginas}
+                            style={{display:'flex',alignItems:'center',gap:4,padding:'6px 10px',borderRadius:8,border:'1.5px solid var(--lx-border)',background:'transparent',color: paginaActual >= totalHistPaginas ? 'var(--lx-muted)' : 'var(--lx-text)',fontWeight:700,fontSize:12.5,cursor: paginaActual >= totalHistPaginas ? 'default' : 'pointer',opacity: paginaActual >= totalHistPaginas ? .5 : 1}}>
+                            Siguiente
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                          </button>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
-              )}
+                );
+              })()}
               {perfilTab === "info" && (
                 <div style={{display:'flex',flexDirection:'column',gap:14}}>
                   {[
@@ -2422,6 +3024,7 @@ const handleLogin = async e => {
                   {editError && <div className="lx-modal__err">{editError}</div>}
                   {editSuccess && <div className="lx-modal__ok">{editSuccess}</div>}
                   <div className="lx-field"><label>Nombre completo *</label><input type="text" value={editData.nombre||""} onChange={e=>setEditData({...editData,nombre:e.target.value})}/></div>
+                  <div className="lx-field"><label>Correo *</label><input type="email" value={editData.correo||""} onChange={e=>setEditData({...editData,correo:e.target.value})}/></div>
                   <div className="lx-field"><label>Teléfono</label><input type="tel" value={editData.telefono||""} onChange={e=>setEditData({...editData,telefono:e.target.value})}/></div>
                   <button type="submit" className="lx-btn lx-btn--full" disabled={editLoading} style={{marginTop:4}}>{editLoading?"Guardando...":"Guardar cambios"}</button>
                 </form>

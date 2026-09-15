@@ -44,6 +44,23 @@ export const normalizarEstadoPedido = (estado) => {
 export const esEstadoPedidoTerminal = (estado) =>
   ESTADOS_PEDIDO_TERMINALES.includes(normalizarEstadoPedido(estado));
 
+// Punto 3 del pedido del usuario (editar pedido): "Editar pedido" (agregar
+// o quitar productos) solo debe ofrecerse MIENTRAS el pedido no ha llegado
+// a "Listo para recoger" (en_camino) — una vez ahí, el bartender ya lo dio
+// por terminado y cambiar el carrito no tendría ningún efecto en la
+// preparación real. Se compara por ÍNDICE en la secuencia oficial (no con
+// una lista de estados "permitidos" a mano) para que, si la secuencia
+// cambia algún día, esta regla se actualice sola. 'cancelado'/'anulado' no
+// viven en la secuencia (índice -1) — un pedido cancelado tampoco se debe
+// poder "editar", así que se excluye aparte.
+export const puedeEditarProductosPedido = (estado) => {
+  const e = normalizarEstadoPedido(estado);
+  if (e === 'cancelado' || e === 'anulado') return false;
+  const idx = SECUENCIA_ESTADOS_PEDIDO.indexOf(e);
+  const idxListo = SECUENCIA_ESTADOS_PEDIDO.indexOf('en_camino');
+  return idx !== -1 && idx < idxListo;
+};
+
 // Etiqueta visible de un estado. Para 'en_camino' depende del tipo de
 // entrega ('domicilio' → "En camino"; cualquier otra cosa → "Listo para
 // recoger"). El resto de estados no dependen del tipo.
@@ -149,4 +166,113 @@ export const configEstadoPedido = (estado, tipo) => {
   const e = normalizarEstadoPedido(estado);
   const base = ESTADO_PEDIDO_CFG[e] || ESTADO_PEDIDO_CFG.anulado;
   return { ...base, label: etiquetaEstadoPedido(estado, tipo) };
+};
+
+// ─────────────────────────────────────────────────────────────
+//  ESTADO DEL PAGO — campo `estado_pago`, SEPARADO de `estado`
+//
+//  Contrato del backend (CAMBIOS.md, Ronda 22 / secciones B4 y C4): toda
+//  respuesta que devuelve un pedido trae `estado_pago` como campo propio,
+//  independiente de `estado`. Valores:
+//    'rechazado'              → comprobante rechazado (el pedido queda
+//                                'cancelado' Y con comprobante_motivo_rechazo).
+//    'pendiente_verificacion' → comprobante subido/por subir, sin revisar.
+//    'aprobado'               → pago_confirmado = true.
+//    'pendiente'              → el resto (efectivo/local sin cobrar aún, o
+//                                cancelado por CUALQUIER otra razón).
+//
+//  El frontend decide "Contactar con nosotros" vs "Ver factura" leyendo
+//  SOLO `estado_pago === 'rechazado'` — nunca combinando estado +
+//  comprobante_motivo_rechazo a mano.
+// ─────────────────────────────────────────────────────────────
+export const ESTADOS_PAGO_VALIDOS = ['pendiente', 'pendiente_verificacion', 'aprobado', 'rechazado'];
+
+// ── Método de pago — etiqueta visible (B1) ───────────────────
+// El valor interno que viaja al backend NO cambia: 'efectivo' | 'nequi' |
+// 'transferencia' (constante METODOS_PAGO_VALIDOS del backend). Solo se
+// traduce el texto que ve el usuario: 'transferencia' → "Llave Bancolombia".
+export const METODOS_PAGO_VALIDOS = ['efectivo', 'nequi', 'transferencia'];
+const METODO_PAGO_LABEL = {
+  efectivo: 'Efectivo',
+  nequi: 'Nequi',
+  transferencia: 'Llave Bancolombia',
+};
+export const etiquetaMetodoPago = (pago) => METODO_PAGO_LABEL[pago] || pago || '—';
+
+// Lee el estado del pago de un pedido. Prioriza el campo `estado_pago` del
+// backend; si un pedido viejo (o una respuesta parcial) no lo trae, lo
+// deriva con la MISMA lógica del backend a partir de campos que sí existen.
+export const estadoPagoDe = (pedido) => {
+  if (!pedido) return 'pendiente';
+  const raw = pedido.estado_pago ?? pedido.estadoPago ?? null;
+  if (raw && ESTADOS_PAGO_VALIDOS.includes(raw)) return raw;
+  // Derivación de respaldo (mismo criterio que calcularEstadoPago del backend):
+  const motivo = pedido.comprobante_motivo_rechazo ?? pedido.comprobanteMotivoRechazo ?? pedido.motivo_rechazo;
+  const est = normalizarEstadoPedido(pedido.estado);
+  if (est === 'cancelado' && motivo) return 'rechazado';
+  if (est === 'pendiente_verificacion') return 'pendiente_verificacion';
+  if (pedido.pago_confirmado === true || pedido.pagoConfirmado === true || pedido.pago_confirmado === 1) return 'aprobado';
+  return 'pendiente';
+};
+
+export const ESTADO_PAGO_CFG = {
+  pendiente:               { label: 'Pago pendiente',   color: '#F57F17', bg: '#FFF8E1' },
+  pendiente_verificacion:  { label: 'Verificando pago', color: '#AD1457', bg: '#FCE4EC' },
+  aprobado:                { label: 'Pago aprobado',    color: '#2E7D32', bg: '#E8F5E9' },
+  rechazado:               { label: 'Pago rechazado',   color: '#C62828', bg: '#FFEBEE' },
+};
+
+export const configEstadoPago = (pedido) => {
+  const ep = estadoPagoDe(pedido);
+  return { ...(ESTADO_PAGO_CFG[ep] || ESTADO_PAGO_CFG.pendiente), estadoPago: ep };
+};
+
+// ¿Mostrar "Contactar con nosotros" en vez de "Ver factura"?  SOLO si el
+// pago fue rechazado (contrato B6).
+export const pagoFueRechazado = (pedido) => estadoPagoDe(pedido) === 'rechazado';
+
+// ─────────────────────────────────────────────────────────────
+//  ESTADO DE LA DEVOLUCIÓN — campo `estado_devolucion`, SEPARADO de
+//  `estado` y de `estado_pago` (mismo criterio de no mezclar conceptos).
+//
+//  Contrato del backend (CAMBIOS.md, Ronda 23 sección 3): TODA respuesta
+//  que devuelve un pedido (GET /pedidos, GET /pedidos/mis-pedidos,
+//  GET /pedidos/:id, y el pedido adjunto en PATCH /devoluciones/:id/estado)
+//  trae `estado_devolucion`, calculado sumando TODAS las devoluciones
+//  APROBADAS de ese pedido contra lo comprado:
+//    'ninguna' → sin devoluciones aprobadas.
+//    'parcial' → se devolvió parte del pedido (no todas las líneas/cantidades).
+//    'total'   → se devolvió el pedido completo.
+//  Cada línea de `productos[]` trae además `cantidadDevuelta` y `devuelto`
+//  (booleano) — para marcar solo la línea que de verdad se devolvió.
+// ─────────────────────────────────────────────────────────────
+export const ESTADOS_DEVOLUCION_VALIDOS = ['ninguna', 'parcial', 'total'];
+
+export const estadoDevolucionDe = (pedido) => {
+  const raw = pedido?.estado_devolucion ?? pedido?.estadoDevolucion ?? 'ninguna';
+  return ESTADOS_DEVOLUCION_VALIDOS.includes(raw) ? raw : 'ninguna';
+};
+
+export const ESTADO_DEVOLUCION_CFG = {
+  parcial: { label: 'Devolución parcial', color: '#EF6C00', bg: '#FFF3E0' },
+  total:   { label: 'Devuelto',           color: '#C62828', bg: '#FFEBEE' },
+};
+
+// null cuando no hay devolución que mostrar ('ninguna') — el badge
+// correspondiente se omite en vez de pintar un chip vacío.
+export const configEstadoDevolucion = (pedido) => {
+  const ed = estadoDevolucionDe(pedido);
+  return ed === 'ninguna' ? null : { ...ESTADO_DEVOLUCION_CFG[ed], estadoDevolucion: ed };
+};
+
+// Mensaje de contacto para el cliente cuando su pago fue rechazado —
+// identifica el pedido por su id real. Se usa con WA_NUMERO (el número de
+// WhatsApp que ya vive en el frontend).
+export const mensajeContactoPagoRechazado = (pedido) => {
+  const id = pedido?.id ?? pedido?.numero ?? '';
+  const motivo = pedido?.comprobante_motivo_rechazo ?? pedido?.comprobanteMotivoRechazo ?? '';
+  return (
+    `Hola, escribo por mi pedido #${id}. ` +
+    `El pago aparece como rechazado${motivo ? ` (motivo: ${motivo})` : ''} y necesito ayuda para resolverlo.`
+  );
 };

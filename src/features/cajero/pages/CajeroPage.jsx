@@ -17,6 +17,11 @@ import NuevoPedidoPanel from '../../pedidos/components/NuevoPedidoPanel';
 // handleAccion (aviso al cliente al resolver una devolución).
 import { LIMITES, contador } from '../../../shared/utils/limitesTexto';
 import notificacionesService from '../../notificaciones/services/notificacionesService';
+// Ronda 23 — se quitó el badge de EstadoPagoBadge ("Pago aprobado" /
+// "Pago pendiente") de la tarjeta del cajero: duplicaba información con el
+// estado del pedido y confundía (ej. "Pendiente" + "Pago aprobado" a la
+// vez). El estado del pago sigue disponible en el detalle del pedido.
+import { ESTADO_PEDIDO_CFG, configEstadoPedido, normalizarEstadoPedido, esEstadoPedidoTerminal, estadoDevolucionDe } from '../../../shared/utils/pedidoEstados';
 import './CajeroPage.css';
 
 const fmt = n =>
@@ -24,16 +29,13 @@ const fmt = n =>
 const fmtFecha = iso => iso ? new Intl.DateTimeFormat('es-CO',{dateStyle:'medium'}).format(new Date(iso)) : '—';
 const fmtHora  = iso => iso ? new Intl.DateTimeFormat('es-CO',{timeStyle:'short'}).format(new Date(iso)) : '—';
 
+// Ronda 22 / C1 — mismos nombres/colores por estado que Admin y Cliente
+// (fuente única: pedidoEstados.js). 'en_preparacion'/'listo' son valores
+// LEGADOS que el backend ya no acepta — se mapean a 'en_proceso'/'en_camino'.
 const STATUS_CFG = {
-  pendiente_verificacion: { label: 'Verificar pago',  color: '#AD1457', bg: '#FCE4EC' },
-  pendiente:      { label: 'Pendiente',      color: '#FFB300', bg: '#FFF8E1' },
-  en_preparacion: { label: 'En preparación', color: '#42A5F5', bg: '#E3F2FD' },
-  en_proceso:     { label: 'En proceso',     color: '#42A5F5', bg: '#E3F2FD' },
-  listo:          { label: 'Listo ✓',        color: '#4CAF50', bg: '#E8F5E9' },
-  entregado:      { label: 'Entregado',      color: '#7E57C2', bg: '#EDE7F6' },
-  pagado:         { label: 'Pagado',         color: '#7E57C2', bg: '#EDE7F6' },
-  devuelto:       { label: 'Devuelto',       color: '#FF7043', bg: '#FBE9E7' },
-  cancelado:      { label: 'Cancelado',      color: '#EF5350', bg: '#FFEBEE' },
+  ...ESTADO_PEDIDO_CFG,
+  en_preparacion: ESTADO_PEDIDO_CFG.en_proceso,
+  listo:          ESTADO_PEDIDO_CFG.en_camino,
 };
 
 const DEV_EST_CFG = {
@@ -42,26 +44,41 @@ const DEV_EST_CFG = {
   rechazada: { bg:'#FFEBEE', color:'#C62828', label:'Rechazada', ico:'❌' },
 };
 
-const FILTERS   = ['all', 'pendiente_verificacion', 'pendiente', 'en_preparacion', 'listo', 'pagado'];
+const FILTERS   = ['all', 'pendiente_verificacion', 'pendiente', 'en_proceso', 'en_camino', 'pagado'];
 // 1 — unificado con los métodos de pago de la Landing pública (ver
 // src/landing/Landing.jsx, const METODOS de PedidoWizard) para que el
 // cajero registre el cobro con el mismo vocabulario que ve el cliente.
 // Exactamente 3: Efectivo, Nequi, Transferencia — sin Tarjeta ni ningún
 // otro valor suelto.
-const METODOS   = ['Efectivo', 'Nequi', 'Transferencia'];
+// B1 — "Llave Bancolombia" es la etiqueta visible de 'transferencia'.
+const METODOS   = ['Efectivo', 'Nequi', 'Llave Bancolombia'];
 const PAGE_SIZE = 6;
 
 // 7 — secuencia oficial de estados del pedido: un cajero puede avanzar pero
 // nunca retroceder dentro de ella ('devuelto'/'cancelado' son salidas
 // aparte, no forman parte de esta progresión y siguen disponibles siempre).
-const SECUENCIA_ESTADOS = ['pendiente_verificacion', 'pendiente', 'en_preparacion', 'listo', 'entregado'];
+const SECUENCIA_ESTADOS = ['pendiente_verificacion', 'pendiente', 'en_proceso', 'en_camino', 'entregado'];
 
 // 1 — un pedido en 'pendiente' necesita UNA de estas dos confirmaciones
 // antes de poder pasar a "En preparación", según su método de pago — nunca
 // las dos, y nunca ninguna otra cosa relacionada con comprobantes si es
 // efectivo (ver también el aviso 2 más abajo, punto 1 de la tarea).
-const cobroYaConfirmado = order => !!(order.cobroConfirmado ?? order.cobro_confirmado);
-const comprobanteYaAprobado = order => !!(order.comprobanteAprobado ?? order.comprobante_aprobado);
+// Fix — el backend guarda esto en la columna `pago_confirmado` (ver PATCH
+// /pedidos/:id/confirmar-pago: "UPDATE pedidos SET pago_confirmado = TRUE
+// ..."), y lo devuelve tal cual (snake_case, sin ningún mapeo a camelCase
+// en el frontend). Antes esta función miraba `cobroConfirmado` /
+// `cobro_confirmado` — campos que nunca existieron en la respuesta — así
+// que SIEMPRE daba false. El cobro sí quedaba confirmado en el backend
+// (por eso el toast de éxito), pero la tarjeta nunca se enteraba y
+// "Confirmar cobro" seguía pidiéndose una y otra vez.
+const cobroYaConfirmado = order => !!(order.pagoConfirmado ?? order.pago_confirmado);
+// Fix — mismo error de nombre que cobroYaConfirmado (ver arriba): el
+// backend no tiene ninguna columna `comprobante_aprobado`. Aprobar el
+// comprobante (PATCH /:id/comprobante/aprobar) hace exactamente lo mismo
+// que confirmar el cobro en efectivo — "UPDATE pedidos SET estado =
+// 'pendiente', pago_confirmado = TRUE" — así que ambos casos (efectivo y
+// transferencia) se rastrean con la MISMA columna `pago_confirmado`.
+const comprobanteYaAprobado = order => !!(order.pagoConfirmado ?? order.pago_confirmado);
 const esPagoTransferencia = order => order.pago === 'nequi' || order.pago === 'transferencia';
 // Efectivo (o sin método registrado, ej. mostrador) — el cajero confirma
 // que ya recibió el dinero en mano. Aplica sin importar quién creó el
@@ -77,14 +94,44 @@ const necesitaConfirmarCobro = order => order.estado === 'pendiente' && !esPagoT
 const necesitaAprobarComprobantePendiente = order =>
   order.estado === 'pendiente' && esPagoTransferencia(order) && order.origen !== 'landing' && !comprobanteYaAprobado(order);
 
-function OrderCard({ order, onStatus, onPay, onDevolucion, onVerificar, onConfirmarCobro, onDetail, onReclamar }) {
-  const cfg    = STATUS_CFG[order.estado] || STATUS_CFG.pendiente;
-  const isPaid = order.estado === 'pagado';
-  const isVerificando = order.estado === 'pendiente_verificacion';
-  const faltaCobro = necesitaConfirmarCobro(order);
+// Fix — "pagado" NUNCA es un valor válido de `pedidos.estado` en el
+// backend (su enum real es: pendiente_verificacion, pendiente, en_proceso,
+// en_camino, entregado, cancelado). Lo "pagado" vive en la tabla `ventas`
+// (estado='vendido'), asociada al pedido por `pedido_id`. Por eso
+// `order.estado === 'pagado'` nunca era true — venía siempre `isPaid =
+// false`, el botón "Cobrar" no desaparecía nunca y el intento de forzarlo
+// vía cambiarEstado(id,'pagado') moría con "Estado no reconocido: pagado".
+// Ahora `isPaid` llega como prop, calculado en el padre a partir de si ya
+// existe una venta (no devuelta) para este pedido.
+function OrderCard({ order, isPaid, onStatus, onPay, onDevolucion, onVerificar, onConfirmarCobro, onDetail, onReclamar }) {
+  const estadoNorm = normalizarEstadoPedido(order.estado);
+  const cfg    = configEstadoPedido(order.estado, order.tipo);
+  const isVerificando = estadoNorm === 'pendiente_verificacion';
   const faltaAprobarComprobante = necesitaAprobarComprobantePendiente(order);
-  const canPay = order.estado === 'listo' || order.estado === 'entregado';
-  const canDev = order.estado === 'listo' || order.estado === 'entregado' || order.estado === 'pagado';
+  // Fix — "Cobrar" se habilita en cualquier estado ACTIVO del pedido
+  // (Pendiente, En proceso, En camino, Entregado), siempre que no esté ya
+  // pagado NI cancelado. Antes solo permitía en_camino/entregado; luego,
+  // al quitar esa restricción, se me quedó afuera excluir 'cancelado' —
+  // por eso un pedido "Cancelado" (ej. #117) también mostraba "Cobrar",
+  // cuando nunca debería poder cobrarse algo que se canceló.
+  // Reglas de cobro y devolución (revisión 2026-09-11):
+  //   · Cobrar   → en CUALQUIER momento mientras no esté ya pagado, sin
+  //     importar el estado; lo único que nunca se cobra es un pedido
+  //     'cancelado'. Se deja habilitado incluso en 'entregado': si por lo
+  //     que sea un pedido llegó ahí sin cobrarse (datos viejos, un ajuste
+  //     manual), tiene que poder cobrarse igual — bloquearlo dejaría plata
+  //     imposible de registrar.
+  //   · Entregar → esa ES la restricción real: no se marca como entregado
+  //     un pedido sin cobrar. El bloqueo vive en StatusModal, y la opción
+  //     se muestra apagada con el motivo, no escondida.
+  //   · Devolver → solo un pedido PAGADO y ya ENTREGADO. Antes bastaba con
+  //     estar pagado (o ir 'en_camino'), así que se podía devolver algo que
+  //     el cliente todavía no había recibido.
+  const canPay = !isPaid && estadoNorm !== 'cancelado';
+  const canDev = isPaid && estadoNorm === 'entregado';
+  // El pedido pagado pero aún NO entregado conserva el botón "Estado": es
+  // justamente el caso que hay que poder cerrar (cobrado → entregado).
+  const canStatus = estadoNorm !== 'cancelado' && estadoNorm !== 'entregado';
   const prods  = order.productos || order.items || [];
   // Un pedido sin "sede" es uno de cliente (o creado por el Admin) que
   // todavía no ha sido tomado por ningún local — mismo criterio que ya usa
@@ -109,11 +156,17 @@ function OrderCard({ order, onStatus, onPay, onDevolucion, onVerificar, onConfir
             style={{width:26,height:26,borderRadius:'50%',border:'1.5px solid rgba(255,255,255,.15)',background:'transparent',color:'var(--text-muted)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </button>
-          {sinAsignar ? (
-            <span className="cj-badge" style={{ background: '#E3F2FD', color: '#1565C0' }}>🔓 Sin local</span>
-          ) : (
-            <span className="cj-badge" style={{ background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
-          )}
+          {/* C5 — antes acá también iba EstadoPagoBadge ("Pago aprobado" /
+              "Pago pendiente") debajo del estado del pedido; se quitó por
+              redundante/confuso (ej. mostraba "Pendiente" + "Pago
+              aprobado" a la vez en la misma tarjeta). */}
+          <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end'}}>
+            {sinAsignar ? (
+              <span className="cj-badge" style={{ background: '#E3F2FD', color: '#1565C0' }}>🔓 Sin local</span>
+            ) : (
+              <span className="cj-badge" style={{ background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
+            )}
+          </div>
         </div>
       </div>
       <div className="cj-card__items">
@@ -192,40 +245,56 @@ function OrderCard({ order, onStatus, onPay, onDevolucion, onVerificar, onConfir
             Verificar pago
           </button>
         ) : isPaid ? (
+          // Pagado. Antes esta rama solo ofrecía "Devolución" y escondía
+          // "Estado", así que un pedido cobrado quedaba congelado y NUNCA
+          // podía marcarse como entregado — el caso más común del turno.
+          // Ahora: mientras no esté entregado se sigue viendo "Estado"
+          // (para cerrarlo), y la devolución aparece solo una vez entregado.
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flex:1,gap:8}}>
             <span style={{fontSize:11,color:'#9575CD',fontWeight:700,letterSpacing:0.3}}>🔒 Ya pagado</span>
-            <button className="cj-btn cj-btn--ghost" style={{fontSize:11,padding:'5px 10px'}} onClick={() => onDevolucion(order)}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.04"/></svg>
-              Devolución
-            </button>
+            <div style={{display:'flex',gap:6}}>
+              {canStatus && (
+                <button className="cj-btn cj-btn--ghost" style={{fontSize:11,padding:'5px 10px'}} onClick={() => onStatus(order)}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  Estado
+                </button>
+              )}
+              {canDev && (
+                <button className="cj-btn cj-btn--ghost" style={{fontSize:11,padding:'5px 10px'}} onClick={() => onDevolucion(order)}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.04"/></svg>
+                  Devolución
+                </button>
+              )}
+            </div>
           </div>
-        ) : faltaCobro ? (
-          // 6 — paso obligatorio antes de que el pedido pueda avanzar a
-          // preparación: confirmar que el cliente ya pagó (efectivo/local).
-          <button className="cj-btn cj-btn--primary" style={{flex:1}} onClick={() => onConfirmarCobro(order)}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg>
-            Confirmar cobro
-          </button>
         ) : (
+          // Fix — antes acá iba una rama aparte para "Confirmar cobro"
+          // (pedidos en efectivo recién creados, 'pendiente'), un paso que
+          // se pedía SIEMPRE al principio, antes de poder hacer nada más
+          // con el pedido — y que además duplicaba con "Cobrar" (dos
+          // "estados de cobro" distintos para la misma plata). El backend
+          // nunca exigió ese paso para efectivo (solo bloquea avanzar a
+          // 'en_proceso' sin pago confirmado cuando el método es
+          // transferencia/Nequi — ver pagoRequiereComprobante en el
+          // backend). Ahora el cobro real (registrar la venta) se hace con
+          // el único botón "Cobrar", disponible en cualquier momento del
+          // proceso del pedido, no solo al principio.
           <>
-            <button className="cj-btn cj-btn--ghost" onClick={() => onStatus(order)}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              Estado
-            </button>
+            {canStatus && (
+              <button className="cj-btn cj-btn--ghost" onClick={() => onStatus(order)}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                Estado
+              </button>
+            )}
             {canPay && (
               <button className="cj-btn cj-btn--primary" onClick={() => onPay(order)}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg>
                 Cobrar
               </button>
             )}
-            {canDev && !canPay && (
-              <button className="cj-btn cj-btn--ghost" style={{fontSize:12,padding:'6px 10px'}} onClick={() => onDevolucion(order)}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.04"/></svg>
-                Devolución
-              </button>
-            )}
-            {!canPay && !canDev && (
-              <button className="cj-btn cj-btn--disabled" disabled>
+            {!canPay && (
+              <button className="cj-btn cj-btn--disabled" disabled
+                title="Un pedido cancelado no se puede cobrar">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg>
                 Pago
               </button>
@@ -237,21 +306,45 @@ function OrderCard({ order, onStatus, onPay, onDevolucion, onVerificar, onConfir
   );
 }
 
-function StatusModal({ order, onClose, onSave }) {
+function StatusModal({ order, isPaid, error, saving, onClose, onSave }) {
   const [sel, setSel]           = useState(order?.estado || 'pendiente');
   const [razonCancel, setRazon] = useState('');
   useEffect(() => { if (order) { setSel(order.estado); setRazon(''); } }, [order]);
-  if (!order || order.estado === 'pagado') return null;
+  // Fix — antes solo bloqueaba 'pagado'; 'cancelado'/'entregado' también
+  // son terminales (ver esEstadoPedidoTerminal / handleStatusOpen, que ya
+  // no deja llegar hasta acá en el flujo normal — esto es solo blindaje).
+  // [DIAG] Este guard devuelve null EN SILENCIO: si se cumple, el usuario
+  // pulsa "Estado" y no pasa absolutamente nada. Se deja trazado para
+  // poder verlo en consola. Quitar cuando el caso esté cerrado.
+  if (!order || order.estado === 'pagado' || esEstadoPedidoTerminal(order.estado)) {
+    console.warn('[DIAG StatusModal] no se renderiza:', {
+      hayOrder: !!order, estado: order?.estado,
+      esTerminal: order ? esEstadoPedidoTerminal(order.estado) : null,
+    });
+    return null;
+  }
   // 7 — no se puede retroceder dentro de la secuencia principal de estados;
   // 'devuelto' y 'cancelado' quedan siempre disponibles como salidas aparte.
-  const idxActual = SECUENCIA_ESTADOS.indexOf(order.estado);
-  const opts = ['pendiente','en_preparacion','listo','entregado','devuelto','cancelado'].filter(s => {
+  // C1/C3 — solo valores de estado que el backend acepta
+  // (ESTADOS_PEDIDO_VALIDOS): pendiente / en_proceso / en_camino / entregado
+  // / cancelado. 'devuelto' es un estado de la VENTA (flujo aparte, botón
+  // "Registrar devolución"), no una transición de este selector.
+  // Fix — 'cancelado' no vive en SECUENCIA_ESTADOS a propósito (índice
+  // -1), pero antes ese -1 se interpretaba igual que "estado actual
+  // desconocido" y dejaba pasar TODAS las opciones sin filtrar. Con el
+  // guard de arriba esta rama ya no debería alcanzar a order.estado ===
+  // 'cancelado', pero se deja explícito por si acaso.
+  const idxActual = order.estado === 'cancelado' ? Infinity : SECUENCIA_ESTADOS.indexOf(normalizarEstadoPedido(order.estado));
+  const opts = ['pendiente','en_proceso','en_camino','entregado','cancelado'].filter(s => {
     const idx = SECUENCIA_ESTADOS.indexOf(s);
     return idx === -1 || idxActual === -1 || idx >= idxActual;
   });
-  // 6 — mientras no se confirme el cobro (pedidos de mostrador/efectivo en
-  // 'pendiente'), la opción de pasar a "En preparación" queda deshabilitada.
-  const faltaCobro = necesitaConfirmarCobro(order);
+  // Regla nueva: a 'entregado' solo se llega con el pedido YA COBRADO.
+  // No se esconde la opción (escondida, el cajero no entiende por qué le
+  // faltan estados): se muestra deshabilitada y con el motivo a la vista.
+  const entregaBloqueada = s => s === 'entregado' && !isPaid;
+  // [DIAG] Qué opciones quedaron disponibles y por qué.
+  console.log('[DIAG StatusModal] abierto', { id: order.id, estado: order.estado, idxActual, opts, isPaid });
   return (
     <div className="cj-modal-mask" onClick={onClose}>
       <div className="cj-modal" onClick={e => e.stopPropagation()}>
@@ -260,25 +353,23 @@ function StatusModal({ order, onClose, onSave }) {
           <button className="cj-modal__x" onClick={onClose}>✕</button>
         </div>
         <div className="cj-modal__body">
-          {faltaCobro && (
-            <div style={{background:'rgba(255,179,0,0.12)',border:'1px solid rgba(255,179,0,0.35)',color:'#F57F17',padding:'9px 12px',borderRadius:8,fontSize:12,marginBottom:10}}>
-              ⚠ Confirma el cobro de este pedido antes de pasarlo a "En preparación".
-            </div>
-          )}
           <div className="cj-status-options">
             {opts.map(s => {
-              const cfg = STATUS_CFG[s];
-              const disabled = faltaCobro && s === 'en_preparacion';
+              const cfg = configEstadoPedido(s, order.tipo);
+              // etiqueta dependiente del tipo de entrega ('en_camino' →
+              // "En camino" / "Listo para recoger")
+              const label = cfg.label;
+              const bloqueada = entregaBloqueada(s);
               return (
-                <div key={s} className={`cj-status-opt ${sel===s?'selected':''}`} onClick={() => !disabled && setSel(s)}
-                  title={disabled ? 'Confirma el cobro primero' : undefined}
-                  style={{
-                    ...(sel===s ? {borderColor:cfg.color,background:cfg.bg} : {}),
-                    ...(disabled ? {opacity:0.4,cursor:'not-allowed'} : {}),
-                  }}>
+                <div key={s}
+                  className={`cj-status-opt ${sel===s?'selected':''} ${bloqueada?'cj-status-opt--locked':''}`}
+                  onClick={() => { if (!bloqueada) setSel(s); }}
+                  title={bloqueada ? 'Cobra el pedido antes de marcarlo como entregado' : ''}
+                  style={sel===s && !bloqueada ? {borderColor:cfg.color,background:cfg.bg} : {}}>
                   <span className="cj-status-dot" style={{background:cfg.color}}/>
-                  {cfg.label}
-                  {sel===s && <span className="cj-status-check">✓</span>}
+                  {label}
+                  {bloqueada && <span className="cj-status-lock">🔒 Cobra primero</span>}
+                  {sel===s && !bloqueada && <span className="cj-status-check">✓</span>}
                 </div>
               );
             })}
@@ -293,12 +384,29 @@ function StatusModal({ order, onClose, onSave }) {
                 style={{width:'100%',background:'var(--bg-surface-3)',border:'1.5px solid var(--border-input)',borderRadius:8,color:'var(--text-primary)',fontSize:13,padding:'10px 12px',resize:'vertical',fontFamily:'inherit',outline:'none',boxSizing:'border-box'}}/>
             </div>
           )}
+          {/* El backend rechaza ciertas transiciones con un motivo concreto
+              (409: comprobante sin aprobar, retroceso de estado, pedido de
+              otro local...). Ese texto se perdía en un toast de 2,8 s
+              porque el modal se cerraba antes: quedaba la sensación de que
+              "no deja seguir con los estados" sin decir por qué. */}
+          {error && (
+            <div style={{marginTop:12,padding:'10px 12px',borderRadius:8,background:'rgba(229,57,53,0.10)',border:'1px solid rgba(229,57,53,0.35)'}}>
+              <div style={{display:'flex',gap:7,alignItems:'flex-start'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E53935" strokeWidth="2" style={{flexShrink:0,marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:'#E53935',marginBottom:3}}>No se pudo cambiar el estado</div>
+                  <div style={{fontSize:12,lineHeight:1.45,color:'var(--text-primary,#333)'}}>{error}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         <div className="cj-modal__foot">
           <button className="cj-btn cj-btn--ghost" onClick={onClose}>Cancelar</button>
-          <button className="cj-btn cj-btn--primary" disabled={faltaCobro && sel === 'en_preparacion'}
-            title={faltaCobro && sel === 'en_preparacion' ? 'Confirma el cobro antes de pasar a preparación' : undefined}
-            onClick={() => { onSave(sel, razonCancel.trim()); onClose(); }}>Guardar</button>
+          <button className="cj-btn cj-btn--primary" disabled={entregaBloqueada(sel) || saving}
+            onClick={() => { if (entregaBloqueada(sel) || saving) return; onSave(sel, razonCancel.trim()); }}>
+            {saving ? 'Guardando...' : 'Guardar'}
+          </button>
         </div>
       </div>
     </div>
@@ -456,7 +564,7 @@ function PedidoDetalleModal({ order, onClose, onAceptarDomicilio, onRechazarDomi
   );
 }
 
-function PayModal({ order, onClose, onConfirm }) {
+function PayModal({ order, onClose, onConfirm, error, saving }) {
   const [method, setMethod] = useState(null);
   useEffect(() => { setMethod(null); }, [order]);
   if (!order) return null;
@@ -477,10 +585,28 @@ function PayModal({ order, onClose, onConfirm }) {
               </div>
             ))}
           </div>
+          {/* El backend rechaza el cobro con un motivo concreto (ej. "el
+              pedido no tiene un local válido resuelto"). Antes ese texto
+              solo pasaba por un toast de 2,8 s y se perdía: quedaba la
+              sensación de que el botón "no hacía nada". Ahora el error se
+              queda fijo en el modal, con el modal abierto. */}
+          {error && (
+            <div style={{marginTop:12,padding:'10px 12px',borderRadius:8,background:'rgba(229,57,53,0.10)',border:'1px solid rgba(229,57,53,0.35)'}}>
+              <div style={{display:'flex',gap:7,alignItems:'flex-start'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E53935" strokeWidth="2" style={{flexShrink:0,marginTop:1}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:'#E53935',marginBottom:3}}>No se pudo registrar el cobro</div>
+                  <div style={{fontSize:12,lineHeight:1.45,color:'var(--text-primary,#333)'}}>{error}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         <div className="cj-modal__foot">
           <button className="cj-btn cj-btn--ghost" onClick={onClose}>Cancelar</button>
-          <button className="cj-btn cj-btn--primary" disabled={!method} onClick={() => method && onConfirm(method)}>Confirmar pago</button>
+          <button className="cj-btn cj-btn--primary" disabled={!method || saving} onClick={() => method && !saving && onConfirm(method)}>
+            {saving ? 'Registrando...' : 'Confirmar pago'}
+          </button>
         </div>
       </div>
     </div>
@@ -864,8 +990,13 @@ export default function CajeroPage() {
   const [orders, setOrders]       = useState([]);
   const [filter, setFilter]       = useState('all');
   const [page, setPage]           = useState(1);
+  const [ventasCajero, setVentasCajero] = useState([]);
   const [statusOrder, setStatus]  = useState(null);
+  const [statusError, setStatusError] = useState('');
+  const [statusSaving, setStatusSaving] = useState(false);
   const [payOrder, setPay]        = useState(null);
+  const [payError, setPayError]   = useState('');
+  const [paySaving, setPaySaving] = useState(false);
   const [verifyOrder, setVerify]  = useState(null);
   const [cobroOrder, setCobroOrder] = useState(null);
   const [detailOrder, setDetailOrder] = useState(null);
@@ -876,62 +1007,150 @@ export default function CajeroPage() {
   // El Administrador (sede='Ambos') ve todos los pedidos; un cajero de
   // Local 1/Local 2 solo debe ver y cobrar los pedidos de su propio local.
   const sedeFiltro = user?.sede && user.sede !== 'Ambos' ? user.sede : undefined;
-  const refresh   = () => { pedidosService.getAll(sedeFiltro).then(d => setOrders(Array.isArray(d) ? d : [])).catch(()=>{}); };
-  useEffect(() => { refresh(); }, []);
-  useEffect(() => { const t = setInterval(refresh, 8000); return () => clearInterval(t); }, []);
+  // Fix (2026-09-11) — "Cobrar" no surtía efecto en la tarjeta.
+  // `refresh()` solo recargaba PEDIDOS, y la lista de ventas (de donde sale
+  // `pedidosPagadosIds`, es decir quién está pagado) se recargaba en un
+  // useEffect cuya dependencia era `orders.length`. Cobrar no cambia la
+  // CANTIDAD de pedidos — el pedido sigue existiendo, solo que ahora tiene
+  // una venta asociada — así que ese efecto no volvía a dispararse nunca:
+  // el backend registraba la venta y mostraba "✓ Pago confirmado", pero la
+  // tarjeta seguía ofreciendo "Cobrar" hasta que por casualidad entrara un
+  // pedido nuevo y cambiara el length. Ahora `refresh()` recarga ambas
+  // cosas juntas, que es lo que significa "refrescar la pantalla".
+  const recargarVentas = useCallback(() =>
+    ventasService.getAll(sedeFiltro).then(d => setVentasCajero(Array.isArray(d) ? d : [])).catch(() => {}),
+  [sedeFiltro]);
+  const refresh = useCallback(() => Promise.all([
+    pedidosService.getAll(sedeFiltro).then(d => setOrders(Array.isArray(d) ? d : [])).catch(()=>{}),
+    recargarVentas(),
+  ]), [sedeFiltro, recargarVentas]);
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { const t = setInterval(refresh, 8000); return () => clearInterval(t); }, [refresh]);
 
   // 6 — estadísticas visibles del cajero: "Pedidos atendidos" (los que él
   // mismo atendió, por nombre — campo `barista` del pedido) y "Ventas
   // realizadas" (de su local; ventas no guarda "atendido por" individual,
   // así que a nivel de local es lo más preciso que expone el backend hoy —
   // ver GET /ventas/stats, que no filtra por cajero ni por sede).
-  const [ventasCajero, setVentasCajero] = useState([]);
-  useEffect(() => {
-    ventasService.getAll(sedeFiltro).then(d => setVentasCajero(Array.isArray(d) ? d : [])).catch(() => {});
-  }, [sedeFiltro, orders.length]);
+  // (la carga de ventasCajero vive ahora en refresh/recargarVentas, arriba:
+  // dependía de orders.length, que no cambia al cobrar — ver el comentario)
   const pedidosAtendidos = orders.filter(o => o.barista && (o.barista === user?.nombre || o.barista === user?.username)).length;
   const ventasRealizadas = ventasCajero.filter(v => v.estado !== 'devuelto').length;
   const totalVentasCajero = ventasCajero.filter(v => v.estado !== 'devuelto').reduce((s, v) => s + (Number(v.total) || 0), 0);
-  const filtered   = filter === 'all' ? orders : orders.filter(o => o.estado === filter || (filter === 'en_preparacion' && o.estado === 'en_proceso'));
+  // Fix — "pagado" no es un estado del pedido, es la existencia de una
+  // venta (no devuelta) asociada a él. `ventasCajero` ya se carga arriba
+  // para las estadísticas del cajero; se reutiliza acá para saber qué
+  // pedidos ya están cobrados (pedido_id / id_pedido según venga del
+  // backend) y así ocultarles el botón "Cobrar" de una vez por todas.
+  const pedidosPagadosIds = new Set(
+    ventasCajero.filter(v => v.estado !== 'devuelto').map(v => String(v.pedido_id ?? v.id_pedido))
+  );
+  const esPagado = order => pedidosPagadosIds.has(String(order.id));
+  // Se normalizan los valores legados ('en_preparacion'→'en_proceso',
+  // 'listo'→'en_camino') para comparar contra el conjunto real del backend.
+  const estN = o => normalizarEstadoPedido(o.estado);
+  // Un pedido con devolución aprobada (parcial o total) deja de ser un
+  // pedido "activo" para el cajero — ya no se lista acá (con badge
+  // "Devuelto" o sin él); a partir de ahora solo se consulta desde el
+  // módulo de Devoluciones.
+  const sinDevolucion = o => estadoDevolucionDe(o) === 'ninguna';
+  const filtered   = (filter === 'all' ? orders : filter === 'pagado' ? orders.filter(esPagado) : orders.filter(o => estN(o) === filter)).filter(sinDevolucion);
   const sorted     = [...filtered].sort((a,b) => Number(b.id) - Number(a.id));
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pageItems  = sorted.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
   const counts = {
-    pendiente_verificacion: orders.filter(o=>o.estado==='pendiente_verificacion').length,
-    pendiente:      orders.filter(o=>o.estado==='pendiente').length,
-    domicilio:      orders.filter(o=>o.tipo==='domicilio'&&(o.estado==='pendiente'||o.estado==='en_preparacion')).length,
-    en_preparacion: orders.filter(o=>o.estado==='en_preparacion'||o.estado==='en_proceso').length,
-    listo:          orders.filter(o=>o.estado==='listo').length,
-    pagado:         orders.filter(o=>o.estado==='pagado').length,
+    pendiente_verificacion: orders.filter(o=>estN(o)==='pendiente_verificacion').length,
+    pendiente:      orders.filter(o=>estN(o)==='pendiente').length,
+    domicilio:      orders.filter(o=>o.tipo==='domicilio'&&(estN(o)==='pendiente'||estN(o)==='en_proceso')).length,
+    en_proceso:     orders.filter(o=>estN(o)==='en_proceso').length,
+    en_camino:      orders.filter(o=>estN(o)==='en_camino').length,
+    pagado:         orders.filter(esPagado).length,
   };
   const handleStatusOpen = order => {
-    if (order.estado === 'pagado') { showToast('🔒 Este pedido ya fue pagado'); return; }
+    // [DIAG] Traza del click en "Estado". Quitar cuando el caso esté cerrado.
+    console.log('[DIAG handleStatusOpen] click', {
+      id: order?.id, estado: order?.estado,
+      normalizado: normalizarEstadoPedido(order?.estado),
+      esTerminal: esEstadoPedidoTerminal(order?.estado),
+      pagado: esPagado(order),
+    });
+    setStatusError('');
+    // Antes acá se rechazaba cualquier pedido ya pagado ("🔒 Este pedido ya
+    // fue pagado"), lo que dejaba el pedido cobrado congelado en su estado:
+    // no había forma de marcarlo como entregado y, por lo tanto, tampoco de
+    // llegar a la devolución (que ahora exige pagado + entregado). Cobrar y
+    // avanzar el estado son dos ejes independientes; el único bloqueo real
+    // es el inverso — no entregar sin cobrar, que se aplica en StatusModal.
+    // Fix — 'cancelado' y 'entregado' son estados TERMINALES: el backend
+    // (PATCH /pedidos/:id/estado) los rechaza con 409 sin importar qué se
+    // intente mandar ("...ya está 'cancelado' y no admite más cambios de
+    // estado."). Antes el modal igual se abría mostrando las 5 opciones
+    // como si nada (el cálculo de opciones interpretaba mal el "no
+    // encontrado" de 'cancelado' en SECUENCIA_ESTADOS como "mostrar
+    // todas"), así que el cajero elegía un estado, le daba Guardar, y
+    // siempre fallaba — daba la sensación de que "no le salían" los demás
+    // estados. Ahora se avisa de una vez, sin dejar abrir el modal.
+    if (esEstadoPedidoTerminal(order.estado)) {
+      showToast(`🔒 Este pedido ya está "${STATUS_CFG[normalizarEstadoPedido(order.estado)]?.label || order.estado}" y no admite más cambios de estado.`);
+      return;
+    }
     setStatus(order);
   };
   const handleStatusSave = useCallback(async (newStatus, razon) => {
-    if (!statusOrder || statusOrder.estado === 'pagado') return;
+    if (!statusOrder) return;
     try {
+      setStatusError(''); setStatusSaving(true);
       await pedidosService.cambiarEstado(statusOrder.id, newStatus);
       if (razon) await pedidosService.actualizarCampo?.(statusOrder.id, 'razonCancelacion', razon);
-      refresh();
+      await refresh();
       showToast(`Estado → "${STATUS_CFG[newStatus]?.label}"${razon ? ` · ${razon.substring(0,30)}` : ''}`);
+      setStatus(null);
     } catch (e) {
-      showToast('✕ Error al cambiar estado: ' + e.message);
-    }
-  }, [statusOrder]);
+      // El modal NO se cierra: antes se cerraba pasara lo que pasara (el
+      // onClose iba en el mismo onClick que el guardado), así que el error
+      // llegaba a una pantalla donde ya no había contexto.
+      console.error('[estado] PATCH /pedidos/:id/estado falló:', e);
+      setStatusError(e.message || 'Error desconocido al cambiar el estado.');
+    } finally { setStatusSaving(false); }
+  }, [statusOrder, refresh]);
   const handlePayConfirm = useCallback(async method => {
     if (!payOrder) return;
     try {
-      // El estado correcto tras cobrar es "pagado" (no "entregado").
-      // STATUS_CFG, los filtros y el bloqueo del botón "Cobrar" dependen
-      // de que el pedido quede exactamente en estado 'pagado'.
-      await pedidosService.cambiarEstado(payOrder.id, 'pagado');
+      // Fix — "pagado" no existe como valor de `pedidos.estado` en el
+      // backend (su enum real es pendiente_verificacion, pendiente,
+      // en_proceso, en_camino, entregado, cancelado); intentar forzarlo con
+      // cambiarEstado(id,'pagado') siempre respondía 400 "Estado no
+      // reconocido: pagado" y el cobro nunca quedaba registrado. Lo único
+      // que hace falta es crear la venta — POST /ventas/desde-pedido ya
+      // descuenta el inventario y deja la venta en estado='vendido'; con
+      // eso el pedido pasa a considerarse pagado (ver pedidosPagadosIds).
+      setPayError(''); setPaySaving(true);
       await ventasService.crearDesde(payOrder.id);
-      refresh();
+      // Hueco detectado: "Cobrar" creaba la VENTA pero dejaba el pedido con
+      // pago_confirmado = false. El backend usa ese flag en
+      // PATCH /pedidos/:id/estado para bloquear con 409 cualquier estado a
+      // partir de 'en_proceso' cuando el método exige comprobante, así que
+      // un pedido ya cobrado se quedaba sin poder avanzar. Se marca también
+      // a nivel de pedido, best-effort: la ruta responde 400 para
+      // Nequi/Transferencia (esos se confirman aprobando el comprobante),
+      // y eso NO es un fallo del cobro — la venta ya quedó registrada.
+      try { await pedidosService.confirmarPago(payOrder.id); }
+      catch (err) { console.info('[cobro] pago_confirmado no aplicable a este pedido:', err.message); }
+      // await: sin esperar la recarga, el toast aparecía antes de que la
+      // tarjeta supiera del cobro y quedaba un parpadeo con "Cobrar" aún
+      // visible.
+      await refresh();
       showToast(`✓ Pago confirmado — ${method}`);
       setPay(null);
-    } catch(e) { showToast('Error al confirmar pago: ' + e.message); }
-  }, [payOrder]);
+    } catch(e) {
+      // El modal se queda ABIERTO con el motivo a la vista. Antes se
+      // mostraba solo en un toast efímero y el cajero volvía a intentar
+      // sin saber qué estaba fallando (de ahí los 4 POST seguidos con 400
+      // en la consola).
+      console.error('[cobro] POST /ventas/desde-pedido falló:', e);
+      setPayError(e.message || 'Error desconocido al registrar la venta.');
+    } finally { setPaySaving(false); }
+  }, [payOrder, refresh]);
   // 5 — endpoints dedicados de verificación de comprobante (no el genérico
   // cambiarEstado): al aprobar, el backend deja el pedido en 'pendiente'
   // (pago confirmado, puede empezar a prepararse — antes esto saltaba
@@ -1037,15 +1256,13 @@ export default function CajeroPage() {
             Devoluciones
             {devCount > 0 && <span className="cj-sidebar__badge">{devCount}</span>}
           </button>
-          {/* 5 — Compras: mismo módulo que usa el Admin (aprobar/rechazar
-              comprobantes de compras a proveedores), el backend ya permite
-              esta ruta para cualquier rol autenticado, así que solo hacía
-              falta el enlace. Navega a la página completa (no es un tab
-              embebido como Devoluciones, es un módulo grande aparte). */}
-          <button className="cj-sidebar__item" onClick={() => navigate('/compras')}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-            Compras
-          </button>
+          {/* El enlace a Compras que vivía acá se quitó: el rol Cajero no
+              tiene (ni debe tener) el permiso "ver_compras" — el comentario
+              anterior decía que "el backend ya permite esta ruta para
+              cualquier rol autenticado", pero eso ignoraba el permiso real
+              del rol. Con el enlace visible pero sin el permiso, un cajero
+              caía en /acceso-no-autorizado al hacer clic — peor que no
+              mostrarlo. Compras es un módulo de Admin, no de Cajero. */}
           <div className="cj-sidebar__section">Mi desempeño</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,padding:'0 4px 10px'}}>
             <div style={{background:'rgba(76,175,80,0.1)',border:'1px solid rgba(76,175,80,0.25)',borderRadius:10,padding:'10px 8px',textAlign:'center'}}>
@@ -1063,8 +1280,8 @@ export default function CajeroPage() {
             {[
               { dot:'#AD1457', label:'Por verificar', val: counts.pendiente_verificacion },
               { dot:'#FFB300', label:'Pendientes',    val: counts.pendiente },
-              { dot:'#42A5F5', label:'En prep.',      val: counts.en_preparacion },
-              { dot:'#4CAF50', label:'Listos',        val: counts.listo },
+              { dot:'#1565C0', label:'En proceso',    val: counts.en_proceso },
+              { dot:'#00838F', label:'En camino/listos', val: counts.en_camino },
               { dot:'#7E57C2', label:'Pagados',       val: counts.pagado },
             ].map(s => (
               <div key={s.label} className="cj-sidebar__stat">
@@ -1130,7 +1347,7 @@ export default function CajeroPage() {
                 </div>
               ) : (
                 <div className="cj-grid">
-                  {pageItems.map(order => <OrderCard key={order.id} order={order} onStatus={handleStatusOpen} onPay={setPay} onDevolucion={setDevPedido} onVerificar={setVerify} onConfirmarCobro={setCobroOrder} onDetail={setDetailOrder} onReclamar={handleReclamar}/>)}
+                  {pageItems.map(order => <OrderCard key={order.id} order={order} isPaid={esPagado(order)} onStatus={handleStatusOpen} onPay={setPay} onDevolucion={setDevPedido} onVerificar={setVerify} onConfirmarCobro={setCobroOrder} onDetail={setDetailOrder} onReclamar={handleReclamar}/>)}
                 </div>
               )}
               {totalPages > 1 && (
@@ -1144,8 +1361,8 @@ export default function CajeroPage() {
           )}
         </div>
       </main>
-      {statusOrder && <StatusModal order={statusOrder} onClose={() => setStatus(null)} onSave={handleStatusSave}/>}
-      {payOrder && <PayModal order={payOrder} onClose={() => setPay(null)} onConfirm={handlePayConfirm}/>}
+      {statusOrder && <StatusModal order={statusOrder} isPaid={esPagado(statusOrder)} error={statusError} saving={statusSaving} onClose={() => { setStatus(null); setStatusError(''); }} onSave={handleStatusSave}/>}
+      {payOrder && <PayModal order={payOrder} error={payError} saving={paySaving} onClose={() => { setPay(null); setPayError(''); }} onConfirm={handlePayConfirm}/>}
       {verifyOrder && <VerifyPayModal order={verifyOrder} onClose={() => setVerify(null)} onAprobar={handleVerifyAprobar} onRechazar={handleVerifyRechazar}/>}
       {detailOrder && <PedidoDetalleModal order={detailOrder} onClose={() => setDetailOrder(null)} onAceptarDomicilio={handleAceptarDomicilio} onRechazarDomicilio={handleRechazarDomicilio}/>}
       {cobroOrder && <ConfirmCobroModal order={cobroOrder} onClose={() => setCobroOrder(null)} onConfirm={handleConfirmarCobro}/>}

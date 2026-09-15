@@ -12,6 +12,10 @@ const pedidosService = {
   confirmarPago:       (id)   => pedidosApi.confirmarPago(id),
   aceptarDomicilio:    (id)   => pedidosApi.aceptarDomicilio(id),
   rechazarDomicilio:   (id)   => pedidosApi.rechazarDomicilio(id),
+  // Verificación de cobertura EN VIVO (paso 2 del checkout, antes de crear
+  // el pedido) — ver pedidosApi.verificarCobertura / POST
+  // /pedidos/verificar-cobertura en el backend.
+  verificarCobertura:  (direccion) => pedidosApi.verificarCobertura(direccion),
 
   // Mapea la estructura del frontend al schema del backend
   create: (data) => pedidosApi.create({
@@ -31,10 +35,23 @@ const pedidosService = {
     // `locales`, GET /locales) — distinto de `sede` arriba. Solo aplica a
     // pedidos tipo:'local' (recoger en tienda), no a domicilio.
     local_id:     data.localId || null,
+    // Punto 2 — usuario_id real del cajero elegido (el admin lo trae del
+    // selector "Atendido por" ya filtrado por local). El backend lo lee
+    // top-level (igual que local_id/sede) y lo resuelve a "atendidoPorNombre"
+    // vía JOIN con `usuarios` (ver PEDIDO_SELECT) — a diferencia de
+    // `barista` (texto libre, se sigue mandando también, sin romper nada
+    // de lo que ya lo use), esto sí vincula el pedido a la cuenta real.
+    atendido_por: data.atendidoPorId || null,
     // Campos extra que el backend guarda en items o ignora
     _meta: {
       numero:              data.numero,
       cliente:             data.cliente,
+      // Obligatorio en el backend cuando el pedido no tiene cliente_id
+      // (mostrador/mesa sin cuenta registrada) — distingue a dos clientes
+      // con el mismo nombre que tienen un pedido activo al mismo tiempo
+      // (ej. "Juan - mesa 3"). Único entre los pedidos activos ahora mismo;
+      // ver aliasEnUso() en el backend.
+      alias:               data.alias,
       tipo:                data.tipo,
       pago:                data.pago,
       hora:                data.hora,
@@ -51,6 +68,12 @@ const pedidosService = {
       // dependa de otro join — mismo patrón que `cliente` (nombre) al lado
       // de `clienteId` arriba.
       localNombre:         data.localNombre,
+      // Nota de "cómo va a pagar al recoger" (texto libre o el nombre de un
+      // método configurado) — solo tiene sentido con tipo:'local'; el
+      // backend la rechaza si viaja junto con un pedido a domicilio. Campo
+      // aparte de "pago" (que sigue exigiendo Nequi/Transferencia con
+      // comprobante para 'local', sin cambios — ver metodo_pago_local).
+      metodoPagoLocal:     data.metodoPagoLocal,
     },
   }),
 
@@ -58,8 +81,10 @@ const pedidosService = {
   // personal asignado, dirección alternativa). No crea un pedido nuevo.
   update: (id, data) => pedidosApi.update(id, {
     cliente:      data.cliente,
+    alias:        data.alias,
     tipo:         data.tipo,
     pago:         data.pago,
+    metodo_pago_local: data.metodoPagoLocal,
     total:        data.total,
     items:        data.productos,
     barista:      data.barista || null,

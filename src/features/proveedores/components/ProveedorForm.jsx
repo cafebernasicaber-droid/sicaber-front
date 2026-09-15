@@ -98,24 +98,15 @@ const validarRazonSocial = (valor) => {
   return '';
 };
 
-// Dígito de verificación del NIT (algoritmo DIAN, módulo 11).
-const PESOS_NIT = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
-const calcularDigitoVerificacionNIT = (numero) => {
-  const digitos = String(numero).split('').reverse();
-  const suma = digitos.reduce((s, d, i) => s + Number(d) * (PESOS_NIT[i] || 0), 0);
-  const resto = suma % 11;
-  return resto < 2 ? resto : 11 - resto;
-};
-
-// NIT de Persona Jurídica — misma regla de formato de siempre (6-10
-// dígitos + DV), con mensaje que indica cuál es el dígito correcto.
-const validarNitJuridica = (valor) => {
-  if (!/^[0-9]{6,10}-[0-9]$/.test(valor)) return 'Formato inválido. Ejemplo: 900123456-1';
-  const [numero, digito] = valor.split('-');
-  const dvEsperado = calcularDigitoVerificacionNIT(numero);
-  if (dvEsperado !== Number(digito)) return `El dígito de verificación no es correcto (debería ser ${dvEsperado}).`;
-  return '';
-};
+// Ronda 23 item 5 — NIT: solo se valida el FORMATO (9 dígitos, guion, 1
+// dígito), sin ningún cálculo de dígito de verificación (Módulo 11). El
+// backend hizo el mismo cambio con el mismo regex — nunca tuvo ese
+// algoritmo (ver sicaber-back/CAMBIOS.md, Ronda 23 sección 5); el cálculo
+// vivía únicamente acá, y por eso rechazaba NITs reales cuyo DV real no
+// coincidía con la fórmula. Se quita del todo.
+const NIT_REGEX = /^\d{9}-\d{1}$/;
+const validarNitJuridica = (valor) =>
+  NIT_REGEX.test(valor) ? '' : 'Formato inválido. Debe ser 9 dígitos, guion, 1 dígito (ej: 900123456-1).';
 
 // Validación del número de documento según el tipo elegido (Persona
 // Natural). Ahora solo existen CC y CE — ambas 6 a 11/12 según el tipo.
@@ -392,7 +383,7 @@ const ProveedorForm = ({ initialData, onSubmit, onCancel, isEditing, duplicateFi
               <label>NIT <span className="req">*</span></label>
               <input type="text" name="nit" value={form.nit}
                 onChange={handleChange} onBlur={handleBlur} placeholder="Ej: 900123456-1" maxLength={11} />
-              <span style={{ fontSize:12,color:'var(--text-muted)',marginTop:4,display:'block' }}>Formato: 9 dígitos, guion, dígito de verificación (ej: 900123456-1).</span>
+              <span style={{ fontSize:12,color:'var(--text-muted)',marginTop:4,display:'block' }}>Formato: 9 dígitos, guion, 1 dígito (ej: 900123456-1).</span>
               {errors.nit
                 ? <span className="err-msg">{errors.nit}</span>
                 : touched.nit && form.nit.trim() && <span className="ok-msg">✓ Válido</span>}

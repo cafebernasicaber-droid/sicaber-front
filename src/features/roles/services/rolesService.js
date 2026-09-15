@@ -56,6 +56,7 @@ const rolesService = {
   create:   (data)    => rolesApi.create(data),
   update:   (id, d)   => rolesApi.update(id, d),
   remove:   (id)      => rolesApi.remove(id),
+  toggleEstado: (id)  => rolesApi.toggleEstado(id),
 
   getTodosLosPermisos: () => TODOS_LOS_PERMISOS,
   getModulosPermisos:  () => MODULOS_PERMISOS,
