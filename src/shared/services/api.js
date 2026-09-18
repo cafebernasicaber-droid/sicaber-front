@@ -378,6 +378,7 @@ export const pedidosApi = {
   getAll:        (sede)       => get (sede ? `/pedidos?sede=${encodeURIComponent(sede)}` : '/pedidos'),
   getStats:      ()           => get ('/pedidos/stats'),
   getById:       (id)         => get (`/pedidos/${id}`),
+  misPedidos:    ()           => get ('/pedidos/mis-pedidos'),
   create:        (data)       => post('/pedidos', data, true),
   update:        (id, data)   => put (`/pedidos/${id}`, data),
   cambiarEstado: (id, estado) => patch(`/pedidos/${id}/estado`, { estado }),

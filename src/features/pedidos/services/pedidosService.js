@@ -4,6 +4,7 @@ const pedidosService = {
   getAll:        (sede)       => pedidosApi.getAll(sede),
   getStats:      ()           => pedidosApi.getStats(),
   getById:       (id)         => pedidosApi.getById(id),
+  misPedidos:    ()           => pedidosApi.misPedidos(),
   cambiarEstado: (id, estado) => pedidosApi.cambiarEstado(id, estado),
   tomar:         (id)         => pedidosApi.tomar(id),
   remove:        (id)         => pedidosApi.remove(id),

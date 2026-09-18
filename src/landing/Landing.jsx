@@ -28,6 +28,7 @@ import '../shared/components/ImageLightbox.css';
 import './Landing.css';
 import { errorPassword } from '../shared/utils/passwordPolicy';
 import PasswordRequisitos from '../shared/components/PasswordRequisitos';
+import { GoogleLogin } from '@react-oauth/google';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 
@@ -207,18 +208,7 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
     coberturaTimeoutRef.current = setTimeout(async () => {
       try {
         const r = await pedidosService.verificarCobertura(direccionAlternativa.trim());
-        if (r.cubierto) {
-          setCobertura({ estado: 'ok', sede: r.sede });
-        } else if (r.requiereSeleccionManual) {
-          // El geocodificador no pudo ubicar la dirección (o el servicio no
-          // respondió) — no es lo mismo que "está fuera de cobertura": acá
-          // no sabemos dónde cae, así que no se bloquea el pedido, se avisa
-          // y se deja seguir (el backend vuelve a intentar igual al crear
-          // el pedido).
-          setCobertura({ estado: 'manual', mensaje: r.mensaje });
-        } else {
-          setCobertura({ estado: 'fuera', detalle: r.detalle });
-        }
+        setCobertura(r.cubierto ? { estado: 'ok', sede: r.sede } : { estado: 'fuera', detalle: r.detalle });
       } catch (e) {
         setCobertura({ estado: 'error', mensaje: e.message });
       }
@@ -982,11 +972,6 @@ function PasarelaPago({ cart, total, cliente, onClose, onSuccess, onCerrarFinal 
                       No se pudo verificar la dirección en este momento. Podés continuar; se validará de nuevo al confirmar el pedido.
                     </p>
                   )}
-                  {cobertura.estado === 'manual' && (
-                    <p style={{fontSize:12,color:'var(--lx-muted)',marginTop:6,marginBottom:0}}>
-                      {cobertura.mensaje || 'No pudimos ubicar esa dirección en el mapa. Podés continuar; lo confirmamos al validar el pedido.'}
-                    </p>
-                  )}
                 </div>
                 <div style={{display:"flex",gap:12,marginTop:8}}>
                   <button className="btn-cancel" onClick={() => setStep(1)}>← Atrás</button>
@@ -1502,21 +1487,18 @@ export default function Landing() {
   // cada pocos segundos (por si lo aprueban mientras el cliente tiene la
   // página abierta) y cuando otra pestaña del mismo navegador modifica el
   // localStorage (evento "storage").
-  useEffect(() => {
-    if (!clienteSession) return;
-    const checkNotifs = () => {
-      const pendientes = notificacionesService.getNoLeidas(clienteSession.id);
-      if (pendientes.length > 0) {
-        const ultima = pendientes[0];
-        setPagoNotif(ultima);
-        notificacionesService.marcarLeida(ultima.id);
-      }
-    };
-    checkNotifs();
-    const interval = setInterval(checkNotifs, 5000);
-    window.addEventListener('storage', checkNotifs);
-    return () => { clearInterval(interval); window.removeEventListener('storage', checkNotifs); };
-  }, [clienteSession]);
+  const cargarPedidosCliente = React.useCallback(() => {
+  if (!clienteSession) { setPedidosCliente([]); return; }
+  pedidosService.misPedidos()
+    .then(items => setPedidosCliente(Array.isArray(items) ? items : []))
+    .catch(err => { console.error('Historial de pedidos:', err); setPedidosCliente([]); });
+}, [clienteSession]);
+
+useEffect(() => {
+  cargarPedidosCliente();
+  if (!clienteSession) { setClienteData(null); return; }
+  clientesService.getById(clienteSession.id).then(c => setClienteData(c)).catch(() => {});
+}, [clienteSession, cargarPedidosCliente]);
 
   useEffect(() => {
     if (!pagoNotif) return;
@@ -1528,12 +1510,13 @@ export default function Landing() {
   // fondo ya existen). Si hay cambios sin guardar en "Editar datos", pide
   // confirmación (misma lógica que cerrarPerfil).
   useEffect(() => {
-    if (modal !== "perfil") return;
-    const onKey = (e) => { if (e.key === "Escape") cerrarPerfil(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line
-  }, [modal, perfilTab, editData, editDataOrig]);
+  if (modal === 'perfil' && perfilTab === 'historial') {
+    setHistPage(1);
+    setHistExpandido(null);
+    cargarPedidosCliente();
+  }
+  // eslint-disable-next-line
+}, [modal, perfilTab]);
 
   useEffect(() => {
     if (!clienteSession) { setPedidosCliente([]); setClienteData(null); return; }
@@ -2075,6 +2058,24 @@ const handleLogin = async e => {
   playTransition(() => setModal(null), { message: `¡Bienvenido/a, ${r.data.nombre}!` });
 };
 
+ const handleGoogleLogin = async (credentialResponse) => {
+  setAuthError(""); setAuthLoading(true);
+  try {
+    const r = await clientesService.loginConGoogle(credentialResponse.credential);
+    if (r.error) { setAuthError(r.error); return; }
+    const session = { id:r.data.id, nombre:r.data.nombre, correo:r.data.correo };
+    setClienteSession(session);
+    setClienteData(r.data);
+    localStorage.setItem("sicaber_cliente_session", JSON.stringify(session));
+    setAuthSuccess("¡Bienvenido/a, " + r.data.nombre + "!");
+    playTransition(() => setModal(null), { message: `¡Bienvenido/a, ${r.data.nombre}!` });
+  } catch (e) {
+    setAuthError(e.message || "No se pudo iniciar sesión con Google.");
+  } finally {
+    setAuthLoading(false);
+  }
+};
+
   const handleRegister = async e => {
     e.preventDefault(); setAuthError("");
     const soloLetras = /^[A-Za-zÁÉÍÓÚÑÜáéíóúñü ]+$/;
@@ -2127,8 +2128,7 @@ const handleLogin = async e => {
     }, { message: '¡Muchas gracias! Te esperamos pronto ☕' });
   };
   const finalizarPedido = () => { if (!clienteSession) { setCartOpen(false); setModal("auth"); setAuthTab("login"); showToast("Inicia sesión para continuar"); return; } setCartOpen(false); playTransition(() => setShowPasarela(true)); };
-  const onPedidoSuccess = (cerrar = true) => { if (cerrar) setShowPasarela(false); setCart([]); showToast("¡Pedido creado! Pronto nos comunicamos."); };
-
+const onPedidoSuccess = (cerrar = true) => { if (cerrar) setShowPasarela(false); setCart([]); cargarPedidosCliente(); showToast("¡Pedido creado! Pronto nos comunicamos."); };
   return (
     <div className="lx">
       {toast && <div className="lx-toast">{toast}</div>}
@@ -2795,6 +2795,10 @@ const handleLogin = async e => {
                 <div className="lx-field"><label>Correo / Usuario</label><input type="text" placeholder="tu@correo.com o usuario admin" value={loginData.correo} onChange={e=>setLoginData({...loginData,correo:e.target.value})}/></div>
                 <div className="lx-field"><label>Contraseña</label><div className="lx-pass-wrap"><input type={showLoginPass?'text':'password'} placeholder="••••••••" value={loginData.password} onChange={e=>setLoginData({...loginData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowLoginPass(v=>!v)}>{showLoginPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                 <button type="submit" className="lx-btn lx-btn--full" disabled={authLoading}>{authLoading?"Ingresando...":"Ingresar"}</button>
+                <div style={{textAlign:'center', margin:'14px 0', color:'var(--lx-muted)', fontSize:12}}>o</div>
+                <div style={{display:'flex', justifyContent:'center'}}>
+                  <GoogleLogin onSuccess={handleGoogleLogin} onError={()=>setAuthError("No se pudo iniciar sesión con Google.")} width="100%" />
+                </div>
                 <p style={{textAlign:'center',marginTop:12,fontSize:13}}>
                   <span style={{color:'var(--lx-accent)',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setModal(null);navigate('/recuperar-password');}}>¿Olvidaste tu contraseña?</span>
                 </p>
