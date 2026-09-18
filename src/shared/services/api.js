@@ -129,6 +129,7 @@ export const authApi = {
   // cualquier sesión ya guardada en el navegador (ej. un cajero logueado).
   loginAdmin:      (u, p)    => post('/auth/login',            { username: u, password: p }, true),
   loginCliente:    (c, p)    => post('/auth/cliente/login',    { correo: c,   password: p }, true),
+ loginGoogle:     (token)   => post('/auth/cliente/google',   { token }, true),
   registroCliente: (datos)   => post('/auth/cliente/registro', datos, true),
   me:              ()        => get ('/auth/me'),
 };

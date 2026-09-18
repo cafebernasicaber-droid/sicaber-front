@@ -16,7 +16,7 @@ const clientesService = {
     }
   },
 
-  loginCliente: async (correo, password) => {
+   loginCliente: async (correo, password) => {
     try {
       const data = await authApi.loginCliente(correo, password);
       setToken(data.token);
@@ -25,6 +25,15 @@ const clientesService = {
       return { error: e.message || 'Correo o contraseña incorrectos.' };
     }
   },
-};
 
+  loginConGoogle: async (token) => {
+    try {
+      const data = await authApi.loginGoogle(token);
+      setToken(data.token);
+      return { data: data.cliente };
+    } catch (e) {
+      return { error: e.message || 'No se pudo iniciar sesión con Google.' };
+    }
+  },
+};
 export default clientesService;

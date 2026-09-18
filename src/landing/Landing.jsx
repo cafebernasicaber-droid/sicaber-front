@@ -28,6 +28,7 @@ import '../shared/components/ImageLightbox.css';
 import './Landing.css';
 import { errorPassword } from '../shared/utils/passwordPolicy';
 import PasswordRequisitos from '../shared/components/PasswordRequisitos';
+import { GoogleLogin } from '@react-oauth/google';
 
 const fmt = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0);
 
@@ -2059,6 +2060,23 @@ const handleLogin = async e => {
   playTransition(() => setModal(null), { message: `¡Bienvenido/a, ${r.data.nombre}!` });
 };
 
+  const handleGoogleLogin = async (credentialResponse) => {
+    setAuthError("");
+    setAuthLoading(true);
+    // clientesService.loginConGoogle debe existir en shared/services — manda
+    // el credential (JWT) al backend, que lo valida con google-auth-library
+    // y busca/crea el cliente en Neon. Debe devolver la misma forma de dato
+    // que loginCliente para poder reusar el resto de este flujo tal cual.
+    const r = await clientesService.loginConGoogle(credentialResponse.credential);
+    if (r.error) { setAuthError(r.error); setAuthLoading(false); return; }
+    const session = { id:r.data.id, nombre:r.data.nombre, correo:r.data.correo };
+    setClienteSession(session);
+    setClienteData(r.data);
+    localStorage.setItem("sicaber_cliente_session", JSON.stringify(session));
+    setAuthSuccess("¡Bienvenido/a, " + r.data.nombre + "!"); setAuthLoading(false);
+    playTransition(() => setModal(null), { message: `¡Bienvenido/a, ${r.data.nombre}!` });
+  };
+
   const handleRegister = async e => {
     e.preventDefault(); setAuthError("");
     const soloLetras = /^[A-Za-zÁÉÍÓÚÑÜáéíóúñü ]+$/;
@@ -2779,6 +2797,10 @@ const handleLogin = async e => {
                 <div className="lx-field"><label>Correo / Usuario</label><input type="text" placeholder="tu@correo.com o usuario admin" value={loginData.correo} onChange={e=>setLoginData({...loginData,correo:e.target.value})}/></div>
                 <div className="lx-field"><label>Contraseña</label><div className="lx-pass-wrap"><input type={showLoginPass?'text':'password'} placeholder="••••••••" value={loginData.password} onChange={e=>setLoginData({...loginData,password:e.target.value})}/><button type="button" className="lx-eye" onClick={()=>setShowLoginPass(v=>!v)}>{showLoginPass?<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>}</button></div></div>
                 <button type="submit" className="lx-btn lx-btn--full" disabled={authLoading}>{authLoading?"Ingresando...":"Ingresar"}</button>
+                <div style={{textAlign:'center', margin:'14px 0', color:'var(--lx-muted)', fontSize:12}}>o</div>
+                <div style={{display:'flex', justifyContent:'center'}}>
+                  <GoogleLogin onSuccess={handleGoogleLogin} onError={()=>setAuthError("No se pudo iniciar sesión con Google.")} width="100%" />
+                </div>
                 <p style={{textAlign:'center',marginTop:12,fontSize:13}}>
                   <span style={{color:'var(--lx-accent)',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setModal(null);navigate('/recuperar-password');}}>¿Olvidaste tu contraseña?</span>
                 </p>

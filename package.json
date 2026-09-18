@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@react-oauth/google": "^0.13.5",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
     "pg": "^8.22.0",
